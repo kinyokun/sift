@@ -59,7 +59,7 @@ jobs:
           node-version: 22
           # On Windows pnpm keeps its store on the Dev Drive, where this action does
           # not look: saving the cache would fail the job, so there is none.
-          cache: ${{ inputs.platform == 'windows' && '' || 'pnpm' }}
+          cache: ${{ inputs.platform != 'windows' && 'pnpm' || '' }}
           package-manager-cache: ${{ inputs.platform != 'windows' }}
       - uses: dtolnay/rust-toolchain@stable
         with:
