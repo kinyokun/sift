@@ -60,6 +60,7 @@ jobs:
           # On Windows pnpm keeps its store on the Dev Drive, where this action does
           # not look: saving the cache would fail the job, so there is none.
           cache: ${{ inputs.platform == 'windows' && '' || 'pnpm' }}
+          package-manager-cache: ${{ inputs.platform != 'windows' }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ inputs.platform == 'macos' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
