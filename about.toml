@@ -1,0 +1,30 @@
+# cargo-about: licences allowed in a Sift build. A new crate under a licence
+# not listed here fails the release build until someone checks it.
+accepted = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "MIT-0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "BSL-1.0",
+    "CC0-1.0",
+    "Unlicense",
+    "0BSD",
+    "MPL-2.0",
+    "LGPL-2.1",
+    "GPL-3.0-or-later",
+]
+# Only what ships in the desktop and mobile apps.
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+    "aarch64-apple-ios",
+    "aarch64-linux-android",
+]
+ignore-build-dependencies = true
+ignore-dev-dependencies = true

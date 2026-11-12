@@ -1,0 +1,91 @@
+Sift
+Copyright (C) 2026 kinyokun and the Sift contributors
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along with
+this program (see LICENSE). If not, see <https://www.gnu.org/licenses/>.
+
+-------------------------------------------------------------------------------
+Additional permission under GNU GPL version 3 section 7: Nikon Image SDK
+-------------------------------------------------------------------------------
+
+If you modify this program, or any covered work, by linking or combining it
+with Nikon Corporation's NEF/NRW Image SDK or with the "sift-nikon" helper
+program that drives that SDK (or a modified version of either), containing
+parts covered by the terms of Nikon's licence for that SDK, the licensors of
+this program grant you additional permission to convey the resulting work.
+Corresponding Source for a non-source form of such a combination shall not
+include the source code for the Nikon Image SDK or for the helper program,
+but shall include the source code for the parts of this program used.
+
+Neither the Nikon Image SDK nor the helper program is part of this program
+or of this repository. The helper is a separate executable that this program
+starts and talks to over a local socket, in the protocol documented in
+crates/sift-core/src/nikon.rs; its source cannot be published because Nikon's
+licence keeps the SDK's interface confidential. Official macOS and Windows
+builds of Sift include both, under licence from Nikon Corporation and under
+the terms in NIKON_SDK_TERMS.md. Builds from this repository alone contain
+neither, and work without them.
+
+-------------------------------------------------------------------------------
+Origin: Anicrop Studio
+-------------------------------------------------------------------------------
+
+Sift started from Anicrop Studio (https://github.com/R4ksh4/AnicropStudio),
+Copyright 2026 R4ksh4 and its contributors, licensed under the Apache License,
+Version 2.0 (http://www.apache.org/licenses/LICENSE-2.0). Sift is a rewrite of
+that project in Rust and TypeScript: its features and approach to culling (eye
+close-ups, camera AF areas for Canon, Sony and Nikon, in-file XMP ratings,
+finding the RAW files that belong to a selection, side-by-side comparison,
+composition guides, parameter frames) come from Anicrop Studio. Work derived
+from it is distributed here under GPL-3.0-or-later, which the Apache License
+2.0 permits.
+
+-------------------------------------------------------------------------------
+Bundled assets (crates/sift-core/assets)
+-------------------------------------------------------------------------------
+
+YuNet face detection model (yunet.onnx)
+  From OpenCV Zoo, https://github.com/opencv/opencv_zoo
+  MIT License, Copyright (c) 2020 Shiqi Yu
+
+YOLOX-Tiny object detection model (yolox-tiny.onnx)
+  From https://github.com/Megvii-BaseDetection/YOLOX
+  Apache License 2.0, Copyright (c) 2021-2022 Megvii Inc.
+
+RTMPose-m AP-10K animal pose model (rtmpose-ap10k.onnx)
+  From OpenMMLab MMPose, https://github.com/open-mmlab/mmpose
+  Apache License 2.0, Copyright OpenMMLab
+  Trained on the AP-10K dataset (https://github.com/AlexTheBad/AP-10K),
+  licensed under CC BY 4.0.
+
+Inter typeface (Inter.ttf)
+  Copyright 2020 The Inter Project Authors (https://github.com/rsms/inter)
+  SIL Open Font License 1.1 (see crates/sift-core/assets/Inter-OFL.txt)
+
+-------------------------------------------------------------------------------
+Libraries
+-------------------------------------------------------------------------------
+
+Sift links many open-source Rust crates and npm packages; their licences are
+listed in THIRD_PARTY_NOTICES.md, and every release ships the full texts as
+THIRD-PARTY-LICENSES.html. All of them are compatible with GPL-3.0.
+
+rawler (https://github.com/dnglab/dnglab), used to develop RAW files, is
+licensed under the GNU Lesser General Public License v2.1.
+
+-------------------------------------------------------------------------------
+Trademarks
+-------------------------------------------------------------------------------
+
+Nikon, NEF, NRW and Picture Control are trademarks of Nikon Corporation;
+Canon, Sony, Fujifilm and other camera names are trademarks of their
+respective owners. Sift is not affiliated with or endorsed by any of them.

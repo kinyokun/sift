@@ -1,0 +1,2 @@
+# Only resolve package versions that have been public for at least a week.
+minimumReleaseAge: 10080

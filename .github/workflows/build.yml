@@ -1,0 +1,149 @@
+# Builds one desktop installer. Called by ci.yml (quick builds) and release.yml (full builds).
+name: build
+
+on:
+  workflow_call:
+    inputs:
+      platform:
+        description: windows or macos
+        type: string
+        required: true
+      quick:
+        description: Faster, slightly less optimised build (no LTO, 16 codegen units)
+        type: boolean
+        default: true
+      artifact:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  build:
+    runs-on: ${{ inputs.platform == 'windows' && 'windows-latest' || 'macos-latest' }}
+    env:
+      HAS_APPLE_CERT: ${{ secrets.APPLE_CERTIFICATE != '' }}
+      HAS_APPLE_NOTARY: ${{ secrets.APPLE_ID != '' }}
+      HAS_NIKON: ${{ secrets.NIKON_DEPLOY_KEY != '' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # Windows builds spend much of their time on file I/O (and Defender scanning
+      # it); a ReFS Dev Drive is markedly faster than C:.
+      - if: inputs.platform == 'windows'
+        uses: samypr100/setup-dev-drive@v4
+        with:
+          drive-size: 12GB
+          workspace-copy: true
+      - name: Pick the working directory
+        shell: bash
+        run: echo "WS=${DEV_DRIVE_WORKSPACE:-$GITHUB_WORKSPACE}" >> "$GITHUB_ENV"
+
+      - if: inputs.quick
+        name: Use the quick release profile
+        shell: bash
+        run: |
+          echo "CARGO_PROFILE_RELEASE_LTO=false" >> "$GITHUB_ENV"
+          echo "CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16" >> "$GITHUB_ENV"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ inputs.platform == 'macos' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ env.WS }} -> target
+          key: ${{ inputs.quick && 'quick' || 'full' }}
+          # Pull requests reuse main's cache but do not spend minutes uploading their own.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install JS dependencies
+        working-directory: ${{ env.WS }}
+        run: pnpm install --frozen-lockfile
+
+      # macOS: sign with a Developer ID (and notarise) when the repository has the
+      # secrets for it, otherwise sign ad hoc. See CONTRIBUTING.md.
+      - if: inputs.platform == 'macos' && env.HAS_APPLE_CERT == 'true'
+        name: Use the Developer ID certificate
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          {
+            echo "APPLE_CERTIFICATE<<__CERT__"; echo "$APPLE_CERTIFICATE"; echo "__CERT__"
+            echo "APPLE_CERTIFICATE_PASSWORD=$APPLE_CERTIFICATE_PASSWORD"
+            echo "APPLE_SIGNING_IDENTITY=$APPLE_SIGNING_IDENTITY"
+          } >> "$GITHUB_ENV"
+      - if: inputs.platform == 'macos' && env.HAS_APPLE_CERT == 'true' && env.HAS_APPLE_NOTARY == 'true'
+        name: Notarise with Apple
+        shell: bash
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          {
+            echo "APPLE_ID=$APPLE_ID"
+            echo "APPLE_PASSWORD=$APPLE_PASSWORD"
+            echo "APPLE_TEAM_ID=$APPLE_TEAM_ID"
+          } >> "$GITHUB_ENV"
+      - if: inputs.platform == 'macos' && env.HAS_APPLE_CERT != 'true'
+        name: Sign ad hoc
+        shell: bash
+        run: echo "APPLE_SIGNING_IDENTITY=-" >> "$GITHUB_ENV"
+
+      # Nikon's renderer is not open source and lives in a private repository
+      # (see NOTICE). Official builds bundle it; without the deploy key, forks
+      # included, the app is built without it.
+      - if: env.HAS_NIKON == 'true'
+        name: Fetch Nikon's renderer
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ github.repository_owner }}/sift-nikon
+          ssh-key: ${{ secrets.NIKON_DEPLOY_KEY }}
+          path: .sift-nikon
+      - if: env.HAS_NIKON == 'true'
+        name: Assemble Nikon's renderer
+        shell: bash
+        run: |
+          bash .sift-nikon/assemble.sh "$WS"
+          echo "TAURI_EXTRA=--config vendor/nikon-runtime/tauri.conf.json" >> "$GITHUB_ENV"
+      - if: env.HAS_NIKON != 'true'
+        shell: bash
+        run: echo "::notice::Built without Nikon's renderer (no NIKON_DEPLOY_KEY secret)."
+
+      - name: Build the Windows installer
+        if: inputs.platform == 'windows'
+        working-directory: ${{ env.WS }}
+        shell: bash
+        run: |
+          # $TAURI_EXTRA is empty or two words.
+          # shellcheck disable=SC2086
+          pnpm tauri build --bundles nsis $TAURI_EXTRA
+      - name: Build the macOS app
+        if: inputs.platform == 'macos'
+        working-directory: ${{ env.WS }}
+        run: |
+          # shellcheck disable=SC2086
+          pnpm tauri build --target universal-apple-darwin --bundles dmg $TAURI_EXTRA
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ inputs.artifact }}
+          path: |
+            ${{ env.WS }}/target/release/bundle/nsis/*.exe
+            ${{ env.WS }}/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          if-no-files-found: error

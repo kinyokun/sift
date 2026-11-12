@@ -1,0 +1,74 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      macos:
+        description: Also build the macOS app
+        type: boolean
+        default: false
+
+# A newer push to the same branch or pull request replaces the running build.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  core:
+    name: core tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: cargo test -p sift-core --locked
+      - run: cargo clippy -p sift-core --all-targets --locked
+
+  web:
+    name: type check and web build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+
+  # Runs alongside the tests rather than after them, so the installer is ready sooner.
+  windows:
+    name: windows installer
+    uses: ./.github/workflows/build.yml
+    with:
+      platform: windows
+      quick: true
+      artifact: sift-windows-${{ github.sha }}
+    secrets: inherit
+
+  macos:
+    name: macos app
+    if: github.event_name == 'workflow_dispatch' && inputs.macos
+    uses: ./.github/workflows/build.yml
+    with:
+      platform: macos
+      quick: true
+      artifact: sift-macos-${{ github.sha }}
+    secrets: inherit

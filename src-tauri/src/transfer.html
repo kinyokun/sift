@@ -1,0 +1,113 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sift</title>
+<style>
+  :root { color-scheme: light dark; --bg:#f2f2f7; --card:#fff; --text:#1c1c1e; --dim:#8e8e93; --line:rgba(60,60,67,.14); --tint:#007aff; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#000; --card:#1c1c1e; --text:#f2f2f7; --dim:#8e8e93; --line:rgba(84,84,88,.5); --tint:#0a84ff; } }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin:0; font: 16px/1.35 -apple-system, "SF Pro Text", "PingFang SC", "Segoe UI", system-ui, sans-serif; background:var(--bg); color:var(--text);
+         padding: max(20px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 40px max(16px, env(safe-area-inset-left)); }
+  main { max-width: 760px; margin: 0 auto; }
+  h1 { font-size: 30px; font-weight: 700; letter-spacing: -.02em; margin: 12px 4px 2px; }
+  .sub { color: var(--dim); margin: 0 4px 18px; font-size: 15px; }
+  .card { background: var(--card); border-radius: 16px; padding: 16px; margin-bottom: 16px; }
+  button, .btn { appearance:none; border:0; border-radius: 12px; background: var(--tint); color:#fff; font: inherit; font-weight: 600; padding: 13px 18px; width:100%; display:block; text-align:center; text-decoration:none; cursor:pointer; }
+  button.plain { background: rgba(120,120,128,.16); color: var(--tint); }
+  button:disabled { opacity:.5; }
+  .row { display:flex; gap:10px; }
+  .grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 6px; }
+  .tile { position:relative; aspect-ratio:1; border-radius:10px; overflow:hidden; background: rgba(120,120,128,.16); display:block; }
+  .tile img { width:100%; height:100%; object-fit:cover; display:block; }
+  .tile span { position:absolute; left:0; right:0; bottom:0; padding: 14px 6px 4px; font-size: 10px; color:#fff; background: linear-gradient(transparent, rgba(0,0,0,.6)); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  input[type=tel] { width:100%; font: 600 30px/1 ui-monospace, "SF Mono", Menlo, monospace; letter-spacing:.3em; text-align:center; padding: 14px; border-radius: 12px; border: 1px solid var(--line); background: transparent; color: inherit; margin-bottom: 12px; }
+  .note { color: var(--dim); font-size: 13px; margin: 10px 4px 0; }
+  .err { color: #ff453a; }
+  progress { width:100%; height: 6px; margin-top: 12px; }
+  [hidden] { display:none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1 id="title">__TITLE__</h1>
+  <p class="sub" id="sub"></p>
+
+  <section id="pin" class="card" hidden>
+    <form method="post" action="/pin">
+      <input type="tel" name="pin" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" autofocus>
+      <button id="enter"></button>
+    </form>
+    <p class="note err" id="wrong" hidden></p>
+  </section>
+
+  <section id="locked" class="card" hidden><p id="lockedText" style="margin:0"></p></section>
+
+  <section id="files" hidden>
+    <div class="card">
+      <div class="row">
+        <a class="btn" id="zip" href="/zip"></a>
+        <button class="plain" id="send" type="button"></button>
+      </div>
+      <input id="picker" type="file" multiple hidden accept="image/*,.cr3,.cr2,.nef,.arw,.dng,.raf,.orf,.rw2">
+      <progress id="bar" max="1" value="0" hidden></progress>
+      <p class="note" id="status"></p>
+    </div>
+    <div class="grid" id="grid"></div>
+  </section>
+</main>
+<script>
+const mode = "__MODE__", files = __FILES__;
+const zh = (navigator.language || "").toLowerCase().startsWith("zh");
+const T = zh ? {
+  pinSub: "输入电脑上显示的 6 位配对码", enter: "继续", wrong: "配对码不正确", locked: "尝试次数过多。请在 Sift 中重新开启传输。",
+  count: n => `${n} 张照片 · 点按即可保存原片`, zip: "全部下载", send: "发送到电脑", sending: (i, n, name) => `正在发送 ${i}/${n}：${name}`,
+  sent: n => `已发送 ${n} 个文件`, failed: name => `发送失败：${name}`
+} : {
+  pinSub: "Enter the 6-digit code shown on your computer", enter: "Continue", wrong: "That code is not right", locked: "Too many attempts. Restart sharing in Sift.",
+  count: n => `${n} photos · tap one to save the original`, zip: "Download all", send: "Send to computer", sending: (i, n, name) => `Sending ${i}/${n}: ${name}`,
+  sent: n => `Sent ${n} file${n === 1 ? "" : "s"}`, failed: name => `Could not send ${name}`
+};
+const $ = id => document.getElementById(id);
+$(mode).hidden = false;
+if (mode === "pin") {
+  $("sub").textContent = T.pinSub; $("enter").textContent = T.enter;
+  if (location.search.includes("wrong")) { $("wrong").textContent = T.wrong; $("wrong").hidden = false; }
+} else if (mode === "locked") {
+  $("lockedText").textContent = T.locked;
+} else {
+  $("sub").textContent = T.count(files.length);
+  $("zip").textContent = T.zip; $("send").textContent = T.send;
+  if (!files.length) $("zip").hidden = true;
+  const grid = $("grid");
+  files.forEach((f, i) => {
+    const a = document.createElement("a"); a.className = "tile"; a.href = `/f/${i}`; a.download = f.name;
+    const img = document.createElement("img"); img.loading = "lazy"; img.src = `/t/${i}`; img.alt = "";
+    const s = document.createElement("span"); s.textContent = f.name;
+    a.append(img, s); grid.append(a);
+  });
+  $("send").onclick = () => $("picker").click();
+  $("picker").onchange = async e => {
+    const list = [...e.target.files]; if (!list.length) return;
+    const bar = $("bar"), status = $("status"); bar.hidden = false; $("send").disabled = true;
+    let ok = 0;
+    for (let i = 0; i < list.length; i++) {
+      const f = list[i]; status.textContent = T.sending(i + 1, list.length, f.name); status.className = "note";
+      const done = await new Promise(resolve => {
+        const x = new XMLHttpRequest();
+        x.open("POST", `/up?name=${encodeURIComponent(f.name)}`);
+        x.upload.onprogress = p => { if (p.lengthComputable) bar.value = (i + p.loaded / p.total) / list.length; };
+        x.onload = () => resolve(x.status === 200); x.onerror = () => resolve(false);
+        x.send(f);
+      });
+      if (!done) { status.textContent = T.failed(f.name); status.className = "note err"; break; }
+      ok++;
+    }
+    if (ok === list.length) status.textContent = T.sent(ok);
+    bar.value = ok / list.length; $("send").disabled = false; e.target.value = "";
+  };
+}
+</script>
+</body>
+</html>

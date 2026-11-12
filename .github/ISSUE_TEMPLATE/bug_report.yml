@@ -1,0 +1,45 @@
+name: 问题反馈 / Bug report
+description: 某个功能不对、闪退，或某种文件读不出来
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: 发生了什么 / What happened
+      description: 做了什么、期望什么、实际看到了什么
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Sift 版本 / Version
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 平台 / Platform
+      options: [macOS, Windows, iOS, Android]
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: 系统版本 / OS version
+      placeholder: "macOS 26.1 / Windows 11 24H2"
+  - type: input
+    id: camera
+    attributes:
+      label: 相机与文件格式 / Camera and file format
+      description: 与特定文件有关时填写，例如 “Nikon Z f，NEF 高效率★”
+  - type: dropdown
+    id: sdk
+    attributes:
+      label: 设置里尼康官方引擎显示“已内置”吗 / Does Settings show Nikon's engine as included
+      options: ["否 / No", "是 / Yes"]
+  - type: textarea
+    id: extra
+    attributes:
+      label: 其他 / Anything else
+      description: 截图、日志，或样张的下载链接。上传前请留意照片里的 GPS 等隐私信息。

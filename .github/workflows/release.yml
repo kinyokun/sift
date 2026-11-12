@@ -1,0 +1,92 @@
+# Push a tag such as v0.2.0 (see CONTRIBUTING.md): this builds the macOS and
+# Windows installers with the full release profile and opens a draft release.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+concurrency:
+  group: release-${{ github.ref }}
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: check version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: node scripts/version.mjs --check "$GITHUB_REF_NAME"
+
+  licenses:
+    name: third-party licences
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about
+      - run: cargo fetch --locked
+      - run: cargo about generate --locked about.hbs -o THIRD-PARTY-LICENSES.html
+      - uses: actions/upload-artifact@v7
+        with:
+          name: licenses
+          path: THIRD-PARTY-LICENSES.html
+          if-no-files-found: error
+
+  build:
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [windows, macos]
+    uses: ./.github/workflows/build.yml
+    with:
+      platform: ${{ matrix.platform }}
+      quick: false
+      artifact: release-${{ matrix.platform }}
+    secrets: inherit
+
+  publish:
+    name: draft release
+    needs: [build, licenses]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          path: out
+          merge-multiple: true
+      # Artifacts keep their folders (release/bundle/nsis/…); release files go flat.
+      - name: Collect files and checksums
+        run: |
+          mkdir dist
+          find out -type f -exec mv -t dist {} +
+          cd dist && sha256sum -- * > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - name: Release notes from CHANGELOG.md
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v v="$version" '
+            /^## / { if (found) exit; if (index($0, "[" v "]") || $2 == v) { found = 1; next } }
+            found { print }
+          ' CHANGELOG.md > notes.md
+          [ -s notes.md ] || echo "See CHANGELOG.md." > notes.md
+          cat notes.md
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=""
+          case "$GITHUB_REF_NAME" in *-*) prerelease="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --draft $prerelease \
+            --title "Sift ${GITHUB_REF_NAME#v}" \
+            --notes-file notes.md

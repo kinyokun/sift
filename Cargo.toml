@@ -1,0 +1,21 @@
+[workspace]
+resolver = "2"
+members = ["crates/sift-core", "src-tauri"]
+
+[workspace.package]
+version = "0.2.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.dev.package.sift-core]
+opt-level = 2
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+opt-level = 3
+strip = true
+panic = "unwind"
