@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-13
+
 ### 新增
 
 - 照片列表和滤镜对比里按住 Ctrl（macOS 上 ⌘ 也行）滚动滚轮，或在触控板上双指捏合，可以放大缩小缩略图；滤镜对比的标题栏多了一个大小滑块，大小会记住
@@ -35,5 +37,6 @@
 - 导出（复制 / 重命名 / 找回 RAW / 参数相框）、局域网传输、自定义快捷键
 - 中文 / 英文界面
 
-[Unreleased]: https://github.com/kinyokun/sift/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/kinyokun/sift/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/kinyokun/sift/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/kinyokun/sift/releases/tag/v0.2.0
