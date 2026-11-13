@@ -271,19 +271,24 @@ export function Viewer() {
     show(i);
   };
 
-  // Making a Live Photo from the burst on screen. Indices are into `stackFrames`.
-  const liveFrames = live ? stackFrames.slice(live.start, live.end + 1) : [];
+  // Making a Live Photo from the burst on screen. A file that is a second copy
+  // of an exposure is not a frame of it. Indices are into `liveSource`.
+  const copies = stack?.copies;
+  const liveSource = useMemo(() => stackFrames.filter((f) => !copies?.[f.id]), [stackFrames, copies]);
+  const liveFrames = live ? liveSource.slice(live.start, live.end + 1) : [];
   const startLive = () => {
     if (!current) return;
-    const at = Math.max(0, stackFrames.findIndex((f) => f.id === current.id));
+    const origin = copies?.[current.id] ?? current.id;
+    const at = Math.max(0, liveSource.findIndex((f) => f.id === origin));
+    if (origin !== current.id) show(viewer.ids.indexOf(origin));
     // A very long burst starts as the stretch around the frame on screen.
-    const start = Math.max(0, Math.min(at - MAX_LIVE_FRAMES / 2, stackFrames.length - MAX_LIVE_FRAMES));
-    setLive({ start, end: Math.min(stackFrames.length, start + MAX_LIVE_FRAMES) - 1, cover: at });
+    const start = Math.max(0, Math.min(at - MAX_LIVE_FRAMES / 2, liveSource.length - MAX_LIVE_FRAMES));
+    setLive({ start, end: Math.min(liveSource.length, start + MAX_LIVE_FRAMES) - 1, cover: at });
     setLiveReady(0);
     setPlaying(false);
     setCompare(false);
     api
-      .livePhotoPace(stackFrames.map((f) => f.id))
+      .livePhotoPace(liveSource.map((f) => f.id))
       .then(setLiveStep)
       .catch(() => {});
   };
@@ -295,12 +300,12 @@ export function Viewer() {
     if (next.end - next.start >= MAX_LIVE_FRAMES) return;
     liveRef.current = next;
     setLive(next);
-    if (!peeking.current && next.cover !== live?.cover) show(viewer.ids.indexOf(stackFrames[next.cover].id));
+    if (!peeking.current && next.cover !== live?.cover) show(viewer.ids.indexOf(liveSource[next.cover].id));
   };
   /** While an end of the range is dragged the photo shows that end; afterwards the still again. */
   const peek = (index: number | null) => {
     peeking.current = index !== null;
-    const frame = stackFrames[index ?? liveRef.current?.cover ?? 0];
+    const frame = liveSource[index ?? liveRef.current?.cover ?? 0];
     if (frame) show(viewer.ids.indexOf(frame.id));
   };
   const saveLive = async () => {
@@ -323,10 +328,10 @@ export function Viewer() {
   useEffect(() => {
     const draft = liveRef.current;
     if (!draft || peeking.current || !currentId) return;
-    const at = stackFrames.findIndex((f) => f.id === currentId);
+    const at = liveSource.findIndex((f) => f.id === (copies?.[currentId] ?? currentId));
     if (at < 0) return endLive();
     if (at !== draft.cover) setLive({ start: Math.min(draft.start, at), end: Math.max(draft.end, at), cover: at });
-  }, [currentId, stackFrames]);
+  }, [currentId, liveSource, copies]);
 
   const toggleCompare = () => {
     if (!compare) setRightIndex(Math.min(viewer.ids.length - 1, viewer.index + 1));
@@ -661,7 +666,7 @@ export function Viewer() {
             <div className="stack-strip-holder" ref={strip}>
               {live ? (
                 <LiveEditor
-                  frames={stackFrames}
+                  frames={liveSource}
                   draft={live}
                   step={liveStep}
                   playing={playing}
@@ -679,7 +684,7 @@ export function Viewer() {
                   frames={stackFrames}
                   current={current.id}
                   onChoose={(id) => show(viewer.ids.indexOf(id))}
-                  onLivePhoto={stack.kind === "burst" && stackFrames.length >= MIN_LIVE_FRAMES && info?.live_photo && !mobile ? startLive : undefined}
+                  onLivePhoto={stack.kind === "burst" && liveSource.length >= MIN_LIVE_FRAMES && info?.live_photo && !mobile ? startLive : undefined}
                 />
               )}
             </div>

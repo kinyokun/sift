@@ -14,7 +14,8 @@ export type Item = {
 
 /** Shots that belong together: one burst, or a pixel-shift series with its merged file first. */
 export type StackKind = "burst" | "pixelshift";
-export type Stack = { kind: StackKind; ids: string[] };
+/** `copies` maps a member that is a second copy of an exposure to the member it repeats. */
+export type Stack = { kind: StackKind; ids: string[]; copies?: Record<string, string> };
 
 export type AfBox = { x: number; y: number; w: number; h: number; focused: boolean };
 

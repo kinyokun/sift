@@ -9,7 +9,8 @@
 
 static NSString *const kContentIdentifier = @"com.apple.quicktime.content.identifier";
 static NSString *const kStillImageTime = @"com.apple.quicktime.still-image-time";
-static const int32_t kTimescale = 600;
+// Divides evenly by every frame rate cameras shoot bursts at (up to 120).
+static const int32_t kTimescale = 90000;
 
 @interface SiftLive : NSObject
 @property(nonatomic, strong) AVAssetWriter *writer;

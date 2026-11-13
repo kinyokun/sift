@@ -193,6 +193,41 @@ pub struct Stack {
     pub kind: stack::Kind,
     /// In shooting order; a merged pixel-shift file comes first.
     pub ids: Vec<String>,
+    /// Members that are another copy of an earlier exposure (the same file
+    /// saved twice), each with the member it repeats.
+    pub copies: HashMap<String, String>,
+}
+
+/// The copies among the members of a stack: files of the same exposure.
+/// They were taken at the same instant (and have the same number in the
+/// series, where the camera gives one) and are either the same size or named
+/// after the original ("DSC_0080-1.JPG" beside "DSC_0080.JPG"; a rating
+/// written into one of them changes its size). Frames of a very fast burst
+/// share the instant, but neither the size nor the name.
+fn copies_of(ids: &[String], hints: &HashMap<String, stack::Hint>) -> HashMap<String, String> {
+    let mut seen: HashMap<(i64, Option<u32>), Vec<&String>> = HashMap::new();
+    for id in ids {
+        if let Some(time) = hints.get(id).and_then(|h| h.time_ms) {
+            seen.entry((time, hints[id].seq)).or_default().push(id);
+        }
+    }
+    let stem = |id: &str| Path::new(id).file_stem().map(|s| s.to_string_lossy().to_lowercase()).unwrap_or_default();
+    let mut copies = HashMap::new();
+    for mut same in seen.into_values().filter(|s| s.len() > 1) {
+        // The plainest name first: that one is the original.
+        same.sort_by_key(|id| (id.len(), (*id).clone()));
+        let mut originals: Vec<(&String, u64, String)> = Vec::new();
+        for id in same {
+            let (size, name) = (stat(Path::new(id)).0, stem(id));
+            match originals.iter().find(|(_, s, n)| *s == size || name.starts_with(n.as_str())) {
+                Some((original, ..)) => {
+                    copies.insert(id.clone(), (*original).clone());
+                }
+                None => originals.push((id, size, name)),
+            }
+        }
+    }
+    copies
 }
 
 /// Bursts and pixel-shift series among `paths` (the displayed file of every
@@ -207,7 +242,13 @@ pub fn stacks_of(state: &AppState, paths: &[String]) -> Vec<Stack> {
     }
     let series = state.series.lock().unwrap();
     let hints: Vec<stack::Hint> = paths.iter().map(|p| series.get(p).cloned().unwrap_or_default()).collect();
-    stack::group(&hints).into_iter().map(|s| Stack { kind: s.kind, ids: s.members.into_iter().map(|i| paths[i].clone()).collect() }).collect()
+    stack::group(&hints)
+        .into_iter()
+        .map(|s| {
+            let ids: Vec<String> = s.members.into_iter().map(|i| paths[i].clone()).collect();
+            Stack { kind: s.kind, copies: copies_of(&ids, &series), ids }
+        })
+        .collect()
 }
 
 #[tauri::command]

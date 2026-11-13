@@ -21,9 +21,10 @@ const STILL_HEAD: u64 = 1 << 20;
 
 /// How long a frame stays up when the files do not say when they were taken.
 const DEFAULT_STEP: f64 = 0.1;
-/// Frames are shown at the pace they were shot, within these bounds, so a
-/// slow burst does not turn into a slide show and a fast one stays watchable.
-const STEP_RANGE: (f64, f64) = (1.0 / 30.0, 0.25);
+/// Frames are shown at the pace they were shot, up to the fastest bursts
+/// cameras shoot (120 a second); a slow burst is sped up so that it does not
+/// turn into a slide show.
+const STEP_RANGE: (f64, f64) = (1.0 / 120.0, 0.25);
 
 /// When each frame appears, in seconds from the first, and when the movie ends.
 /// `taken` holds the capture times in milliseconds where the files record them.
@@ -116,9 +117,11 @@ mod tests {
         // Fifteen a second, the times rounded to a hundredth as cameras write them: a second of shooting is a second of movie.
         let shot: Vec<Option<i64>> = (0..16).map(|i| Some((i as f64 * 1000.0 / 15.0 / 10.0).floor() as i64 * 10)).collect();
         assert!((timeline(&shot).0[15] - 1.0).abs() < 0.01);
-        // One frame a second would be a slide show; 120 a second too fast to see.
+        // One frame a second would be a slide show.
         assert!((timeline(&[Some(0), Some(1000), Some(2000)]).1 - 0.75).abs() < 1e-9);
-        assert!((timeline(&[Some(0), Some(8), Some(16)]).1 - 0.1).abs() < 1e-9);
+        // 120 a second: several frames share a hundredth, and a second is still a second.
+        let fast: Vec<Option<i64>> = (0..121).map(|i| Some((i as f64 * 1000.0 / 120.0 / 10.0).floor() as i64 * 10)).collect();
+        assert!((timeline(&fast).0[120] - 1.0).abs() < 0.01);
         // No capture times at all.
         assert!((timeline(&[None, None, None]).1 - 0.3).abs() < 1e-9);
     }
