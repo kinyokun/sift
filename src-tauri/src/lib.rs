@@ -1,4 +1,5 @@
 pub mod commands;
+pub mod photos;
 pub mod protocol;
 pub mod state;
 pub mod transfer;
@@ -90,6 +91,7 @@ pub fn run() {
             commands::clear_cache,
             commands::list_albums,
             commands::import_files,
+            commands::save_to_photos,
             transfer_start,
             transfer_stop,
         ])

@@ -742,6 +742,7 @@ export function Library() {
             </button>
           </span>
           <Menu label={t.lookApply} items={lookItems} button={<Icon name="look" />} up />
+          {s.info?.save_to_photos && <IconButton icon="save" label={t.saveToPhotos} onClick={() => act.saveToPhotos(frames(s.selection))} />}
           {chosen.length > 1 && chosen.length <= MAX_PANES && (
             <IconButton icon="compare" label={t.compareSelected} onClick={() => act.openViewer(chosen[0], chosen)} />
           )}

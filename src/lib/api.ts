@@ -70,6 +70,8 @@ export type AppInfo = {
   nikon_sdk?: boolean;
   /** Bursts can be exported as Live Photos (Apple platforms). */
   live_photo?: boolean;
+  /** Photos can be saved to the system photo library, Live Photos as Live Photos (iOS). */
+  save_to_photos?: boolean;
 };
 
 export type CopyReport = {
@@ -152,7 +154,7 @@ export const api = {
   groupShots: (paths: string[]) => invoke<Stack[]>("group_shots", { paths }),
   /** Seconds each of `frames` is shown for when they play as a Live Photo. */
   livePhotoPace: (frames: string[]) => invoke<number>("live_photo_pace", { frames }),
-  /** Writes `frames` as a Live Photo next to them (one `.pvt` bundle holding a JPEG and a MOV), `key` being the still; resolves to the bundle's path. */
+  /** Writes `frames` as a Live Photo next to them (a JPEG and a MOV of the same name), `key` being the still; resolves to the JPEG's path. */
   saveLivePhoto: (frames: string[], key: number) => invoke<string>("save_live_photo", { frames, key }),
   setRating: (paths: string[], rating: number) => invoke<"embedded" | "sidecar">("set_rating", { paths, rating }),
   locateEyes: (path: string, af: AfBox[]) => invoke<EyeTarget | null>("locate_eyes", { path, af }),
@@ -193,6 +195,8 @@ export const api = {
   clearCache: () => invoke<void>("clear_cache"),
   listAlbums: () => invoke<Album[]>("list_albums"),
   importFiles: (sources: string[], album: string) => invoke<string>("import_files", { sources, album }),
+  /** Saves photos to the system photo library, a Live Photo's movie with its still; rejects with "denied" when not allowed. */
+  saveToPhotos: (items: Item[]) => invoke<number>("save_to_photos", { items: items.map((it) => ({ still: it.id, movie: it.live ?? null })) }),
   transferStart: (folder: string, files: string[]) => invoke<TransferInfo>("transfer_start", { folder, files }),
   transferStop: () => invoke<void>("transfer_stop"),
 };

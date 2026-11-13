@@ -1,11 +1,12 @@
 //! A burst written out as a Live Photo: a JPEG still and a QuickTime movie of
 //! the frames, with the same content identifier in both; the movie also marks
-//! the moment the still shows. The two are saved together as one bundle.
+//! the moment the still shows. The two are saved side by side under one name,
+//! the form every way of moving files keeps and Photos imports as one picture.
 //!
 //! The movie is encoded by the operating system (AVFoundation, `live.m`), so
 //! this exists on Apple platforms only.
 
-use super::{timeline, BUNDLE_EXT, BUNDLE_METADATA, BUNDLE_METADATA_NAME};
+use super::timeline;
 use crate::{preview, Error, Result};
 use image::{imageops, RgbImage};
 use std::ffi::{c_char, c_int, c_long, c_void, CStr, CString};
@@ -82,12 +83,11 @@ fn movie_frame(path: &Path, size: Option<(u32, u32)>) -> Result<(RgbImage, Vec<u
     Ok((img, bgra))
 }
 
-/// Writes `frames` (one displayable file per shot, in shooting order) as one
-/// Live Photo bundle, `<stem>.pvt` in `dest`, holding `<stem>.JPG`,
-/// `<stem>.MOV` and the bundle's `metadata.plist`. `key` is the frame that
-/// becomes the still. Returns the bundle's path; nothing is left behind on
-/// failure, and an existing bundle of that name is never replaced.
-pub fn export(frames: &[PathBuf], taken: &[Option<i64>], key: usize, dest: &Path, stem: &str, cancel: &AtomicBool, mut on_frame: impl FnMut(usize)) -> Result<PathBuf> {
+/// Writes `frames` (one displayable file per shot, in shooting order) as
+/// `<stem>.JPG` and `<stem>.MOV` in `dest`. `key` is the frame that becomes
+/// the still. Returns the paths of the still and the movie; nothing is left
+/// behind on failure, and existing files of those names are never replaced.
+pub fn export(frames: &[PathBuf], taken: &[Option<i64>], key: usize, dest: &Path, stem: &str, cancel: &AtomicBool, mut on_frame: impl FnMut(usize)) -> Result<(PathBuf, PathBuf)> {
     if frames.len() < MIN_FRAMES {
         return Err(Error::Unsupported("a Live Photo needs a burst of at least three frames"));
     }
@@ -95,13 +95,13 @@ pub fn export(frames: &[PathBuf], taken: &[Option<i64>], key: usize, dest: &Path
         return Err(Error::Unsupported("too many frames for one Live Photo"));
     }
     let key = key.min(frames.len() - 1);
-    let bundle = dest.join(format!("{stem}.{BUNDLE_EXT}"));
-    if bundle.exists() {
+    let (still, movie) = (dest.join(format!("{stem}.JPG")), dest.join(format!("{stem}.MOV")));
+    if still.exists() || movie.exists() {
         return Err(Error::Unsupported("a Live Photo of that name already exists"));
     }
-    // Put together under a hidden name, so that a half-written bundle is never
-    // listed, then renamed in one step.
-    let staging = dest.join(format!(".{stem}.{BUNDLE_EXT}.partial"));
+    // Put together in a hidden folder, so that half-written files are never
+    // listed, then moved out (the movie first: a movie alone is not listed).
+    let staging = dest.join(format!(".{stem}.live.partial"));
     let _ = std::fs::remove_dir_all(&staging);
     std::fs::create_dir(&staging)?;
     let (still_path, movie_path) = (staging.join(format!("{stem}.JPG")), staging.join(format!("{stem}.MOV")));
@@ -139,8 +139,8 @@ pub fn export(frames: &[PathBuf], taken: &[Option<i64>], key: usize, dest: &Path
                 }
             }
             // The still's moment is the middle of the time its frame is shown.
-            let still = times[key] + (duration / frames.len() as f64) / 2.0;
-            if sift_live_finish(handle, still, duration, message.ptr(), 512) == 0 {
+            let moment = times[key] + (duration / frames.len() as f64) / 2.0;
+            if sift_live_finish(handle, moment, duration, message.ptr(), 512) == 0 {
                 return Err(message.error());
             }
             let jpeg = preview::full(&frames[key])?;
@@ -150,17 +150,16 @@ pub fn export(frames: &[PathBuf], taken: &[Option<i64>], key: usize, dest: &Path
         }
         Ok(())
     })();
-    let done = made
-        .and_then(|()| Ok(std::fs::write(staging.join(BUNDLE_METADATA_NAME), BUNDLE_METADATA)?))
-        .and_then(|()| Ok(std::fs::rename(&staging, &bundle)?));
-    match done {
-        Ok(()) => Ok(bundle),
-        Err(e) => {
-            let _ = std::fs::remove_dir_all(&staging);
-            Err(e)
-        }
-    }
+    let done = made.and_then(|()| Ok(std::fs::rename(&movie_path, &movie)?)).and_then(|()| {
+        std::fs::rename(&still_path, &still).inspect_err(|_| {
+            let _ = std::fs::remove_file(&movie);
+        })?;
+        Ok(())
+    });
+    let _ = std::fs::remove_dir_all(&staging);
+    done.map(|()| (still, movie))
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;

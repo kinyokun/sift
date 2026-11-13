@@ -46,6 +46,8 @@
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Sift saves the photos you choose, Live Photos included, to your photo library.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Sift shares photos with other devices on your local network when you start a transfer.</string>
 	<key>ITSAppUsesNonExemptEncryption</key>

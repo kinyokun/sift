@@ -29,6 +29,10 @@ function Toast() {
     selectFirst: t.selectFirst,
     livePhotoSaved: t.livePhotoSaved(detail ?? ""),
     livePhotoFailed: `${t.livePhotoFailed}${detail ? ` · ${detail}` : ""}`,
+    savingToPhotos: t.savingToPhotos,
+    savedToPhotos: (([n, live]) => t.savedToPhotos(Number(n) || 0, Number(live) || 0))((detail ?? "").split(",")),
+    photosDenied: t.photosDenied,
+    photosFailed: `${t.photosFailed}${detail ? ` · ${detail}` : ""}`,
     shortcutClash: t.shortcutClash(t.actions[detail as keyof typeof t.actions] ?? detail ?? ""),
   };
   return (

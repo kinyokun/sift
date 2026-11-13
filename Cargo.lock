@@ -4287,6 +4287,7 @@ name = "sift"
 version = "0.3.3"
 dependencies = [
  "axum",
+ "cc",
  "futures-util",
  "image",
  "percent-encoding",

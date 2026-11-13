@@ -21,6 +21,7 @@
   .grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 6px; }
   .tile { position:relative; aspect-ratio:1; border-radius:10px; overflow:hidden; background: rgba(120,120,128,.16); display:block; }
   .tile img { width:100%; height:100%; object-fit:cover; display:block; }
+  .tile b { position:absolute; left:6px; top:6px; padding: 2px 6px; border-radius: 6px; font-size: 10px; font-weight: 700; letter-spacing: .04em; color:#fff; background: rgba(0,0,0,.45); }
   .tile span { position:absolute; left:0; right:0; bottom:0; padding: 14px 6px 4px; font-size: 10px; color:#fff; background: linear-gradient(transparent, rgba(0,0,0,.6)); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   input[type=tel] { width:100%; font: 600 30px/1 ui-monospace, "SF Mono", Menlo, monospace; letter-spacing:.3em; text-align:center; padding: 14px; border-radius: 12px; border: 1px solid var(--line); background: transparent; color: inherit; margin-bottom: 12px; }
   .note { color: var(--dim); font-size: 13px; margin: 10px 4px 0; }
@@ -50,10 +51,11 @@
         <a class="btn" id="zip" href="/zip"></a>
         <button class="plain" id="send" type="button"></button>
       </div>
-      <input id="picker" type="file" multiple hidden accept="image/*,.cr3,.cr2,.nef,.arw,.dng,.raf,.orf,.rw2">
+      <input id="picker" type="file" multiple hidden accept="image/*,.cr3,.cr2,.nef,.arw,.dng,.raf,.orf,.rw2,.mov">
       <progress id="bar" max="1" value="0" hidden></progress>
       <p class="note" id="status"></p>
     </div>
+    <p class="note" id="liveNote" style="margin-bottom:12px" hidden></p>
     <div class="grid" id="grid"></div>
   </section>
 </main>
@@ -63,11 +65,13 @@ const zh = (navigator.language || "").toLowerCase().startsWith("zh");
 const T = zh ? {
   pinSub: "输入电脑上显示的 6 位配对码", enter: "继续", wrong: "配对码不正确", locked: "尝试次数过多。请在 Sift 中重新开启传输。",
   count: n => `${n} 张照片 · 点按即可保存原片`, zip: "全部下载", send: "发送到电脑", sending: (i, n, name) => `正在发送 ${i}/${n}：${name}`,
-  sent: n => `已发送 ${n} 个文件`, failed: name => `发送失败：${name}`
+  sent: n => `已发送 ${n} 个文件`, failed: name => `发送失败：${name}`,
+  live: "实况照片会下载成一个压缩包，里面是同名的 JPG 和 MOV。浏览器没法把它们作为一张实况照片存进“照片”；要存成实况照片，请在 Sift App 里打开后点“存入相册”。"
 } : {
   pinSub: "Enter the 6-digit code shown on your computer", enter: "Continue", wrong: "That code is not right", locked: "Too many attempts. Restart sharing in Sift.",
   count: n => `${n} photos · tap one to save the original`, zip: "Download all", send: "Send to computer", sending: (i, n, name) => `Sending ${i}/${n}: ${name}`,
-  sent: n => `Sent ${n} file${n === 1 ? "" : "s"}`, failed: name => `Could not send ${name}`
+  sent: n => `Sent ${n} file${n === 1 ? "" : "s"}`, failed: name => `Could not send ${name}`,
+  live: "A Live Photo downloads as a ZIP holding a JPG and a MOV of the same name. A browser cannot save them to Photos as one Live Photo; to do that, open them in the Sift app and tap Save to Photos."
 };
 const $ = id => document.getElementById(id);
 $(mode).hidden = false;
@@ -81,12 +85,16 @@ if (mode === "pin") {
   $("zip").textContent = T.zip; $("send").textContent = T.send;
   if (!files.length) $("zip").hidden = true;
   const grid = $("grid");
-  files.forEach((f, i) => {
-    const a = document.createElement("a"); a.className = "tile"; a.href = `/f/${i}`; a.download = f.name;
-    const img = document.createElement("img"); img.loading = "lazy"; img.src = `/t/${i}`; img.alt = "";
+  files.forEach(f => {
+    const a = document.createElement("a"); a.className = "tile";
+    a.href = f.live ? `/l/${f.i}` : `/f/${f.i}`; a.download = f.live ? f.name.replace(/\.[^.]*$/, "") + ".zip" : f.name;
+    const img = document.createElement("img"); img.loading = "lazy"; img.src = `/t/${f.i}`; img.alt = "";
     const s = document.createElement("span"); s.textContent = f.name;
-    a.append(img, s); grid.append(a);
+    a.append(img, s);
+    if (f.live) { const b = document.createElement("b"); b.textContent = "LIVE"; a.append(b); }
+    grid.append(a);
   });
+  if (files.some(f => f.live)) { $("liveNote").textContent = T.live; $("liveNote").hidden = false; }
   $("send").onclick = () => $("picker").click();
   $("picker").onchange = async e => {
     const list = [...e.target.files]; if (!list.length) return;

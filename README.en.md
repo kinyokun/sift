@@ -56,7 +56,7 @@ Press `F` to show the AF points that Nikon, Canon, Sony and Fujifilm bodies reco
 
 Bursts and pixel-shift series fold into one grid cell with a frame count; rating, flagging and exporting it covers the whole stack. In the viewer a filmstrip shows every frame of the stack, and `↑` / `↓` jump to the previous or next stack. Nikon bodies are grouped exactly by the series number they write into the file; other makers by drive mode and the time between frames.
 
-On macOS a burst can become a Live Photo: drag the ends of the timeline to choose frames, click one as the cover, and it plays at the burst's real rate (up to 120 frames a second). It is saved as one `.pvt` Live Photo, the format AirDrop uses for Live Photos from an iPhone: press Space in Finder to preview it, double-click it or drop it into Photos and it is a Live Photo. `.pvt` Live Photos in a folder open in Sift too.
+On macOS a burst can become a Live Photo: drag the ends of the timeline to choose frames, click one as the cover, and it plays at the burst's real rate (up to 120 frames a second). It is saved as a JPG and a MOV of the same name, as an iPhone exports an unmodified original: drop both into Photos and it is a Live Photo, and cloud drives, chat apps and LAN transfer keep the pair together on the way to a phone. On an iPhone, open them in Sift and tap Save to Photos to add them to Photos as a Live Photo. Live Photos in a folder (a JPG/HEIC and MOV of the same name, or a `.pvt` left by AirDrop) open, play and cull in Sift too.
 
 <table>
 <tr>

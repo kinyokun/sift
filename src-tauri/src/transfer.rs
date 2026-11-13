@@ -101,12 +101,15 @@ async fn index(State(ctx): Ctx, headers: HeaderMap, Query(q): Query<HashMap<Stri
             .replace("__FILES__", "[]");
         return Html(page).into_response();
     }
+    let movies = live_movies(&ctx.files);
     let list: Vec<serde_json::Value> = ctx
         .files
         .iter()
-        .map(|f| {
+        .enumerate()
+        .filter(|(i, _)| !movies.values().any(|m| m == i))
+        .map(|(i, f)| {
             let size = std::fs::metadata(f).map_or(0, |m| m.len());
-            serde_json::json!({ "name": f.file_name().unwrap_or_default().to_string_lossy(), "size": size })
+            serde_json::json!({ "i": i, "name": f.file_name().unwrap_or_default().to_string_lossy(), "size": size, "live": movies.contains_key(&i) })
         })
         .collect();
     let files = serde_json::to_string(&list).unwrap_or_else(|_| "[]".into()).replace("</", "<\\/");
@@ -127,6 +130,18 @@ async fn enter_pin(State(ctx): Ctx, body: String) -> Response {
 
 fn file_at(ctx: &Shared, index: usize) -> Option<&PathBuf> {
     ctx.files.get(index)
+}
+
+fn is_movie(path: &Path) -> bool {
+    path.extension().is_some_and(|x| x.eq_ignore_ascii_case("mov"))
+}
+
+/// The Live Photos among the shared files: the index of each still that has
+/// a movie of the same name next to it, and the index of that movie.
+fn live_movies(files: &[PathBuf]) -> HashMap<usize, usize> {
+    let key = |p: &Path| p.with_extension("").to_string_lossy().to_ascii_lowercase();
+    let movies: HashMap<String, usize> = files.iter().enumerate().filter(|(_, f)| is_movie(f)).map(|(i, f)| (key(f), i)).collect();
+    files.iter().enumerate().filter(|(_, f)| !is_movie(f)).filter_map(|(i, f)| Some((i, *movies.get(&key(f))?))).collect()
 }
 
 async fn thumb(State(ctx): Ctx, headers: HeaderMap, UrlPath(index): UrlPath<usize>) -> Response {
@@ -173,8 +188,25 @@ async fn bundle(State(ctx): Ctx, headers: HeaderMap) -> Response {
     if !authed(&ctx, &headers) {
         return deny();
     }
+    zip_of(&ctx, ctx.files.clone(), Some(ctx.title.clone()), &ctx.title).await
+}
+
+/// A Live Photo's still and movie together, as one ZIP named after it: a
+/// browser cannot hand the pair to the photo library, but keeps them together.
+async fn live_pair(State(ctx): Ctx, headers: HeaderMap, UrlPath(index): UrlPath<usize>) -> Response {
+    if !authed(&ctx, &headers) {
+        return deny();
+    }
+    let Some(movie) = live_movies(&ctx.files).get(&index).map(|&m| ctx.files[m].clone()) else { return StatusCode::NOT_FOUND.into_response() };
+    let still = ctx.files[index].clone();
+    let name = still.file_stem().unwrap_or_default().to_string_lossy().into_owned();
+    zip_of(&ctx, vec![still, movie], None, &name).await
+}
+
+/// Streams `files` as `<name>.zip`, inside a folder of that name when given.
+async fn zip_of(ctx: &Shared, files: Vec<PathBuf>, folder: Option<String>, name: &str) -> Response {
     let tmp = ctx.cache_dir.join(format!("transfer-{}.zip", rand::rng().random::<u64>()));
-    let (files, folder, out) = (ctx.files.clone(), ctx.title.clone(), tmp.clone());
+    let out = tmp.clone();
     let built = tokio::task::spawn_blocking(move || -> std::io::Result<()> {
         if let Some(dir) = out.parent() {
             std::fs::create_dir_all(dir)?;
@@ -183,7 +215,8 @@ async fn bundle(State(ctx): Ctx, headers: HeaderMap) -> Response {
         let options = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored).large_file(true);
         for f in &files {
             let name = f.file_name().unwrap_or_default().to_string_lossy();
-            zip.start_file(format!("{folder}/{name}"), options).map_err(std::io::Error::other)?;
+            let entry = folder.as_ref().map_or_else(|| name.to_string(), |dir| format!("{dir}/{name}"));
+            zip.start_file(entry, options).map_err(std::io::Error::other)?;
             std::io::copy(&mut std::fs::File::open(f)?, &mut zip)?;
         }
         zip.finish().map_err(std::io::Error::other)?;
@@ -194,7 +227,7 @@ async fn bundle(State(ctx): Ctx, headers: HeaderMap) -> Response {
         let _ = tokio::fs::remove_file(&tmp).await;
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
-    let response = stream_file(&tmp, &format!("{}.zip", ctx.title), "application/zip").await;
+    let response = stream_file(&tmp, &format!("{name}.zip"), "application/zip").await;
     // The open handle keeps the data readable; the name can go right away.
     let _ = tokio::fs::remove_file(&tmp).await;
     response
@@ -204,7 +237,8 @@ async fn bundle(State(ctx): Ctx, headers: HeaderMap) -> Response {
 fn safe_name(raw: &str) -> Option<String> {
     let name = raw.rsplit(['/', '\\']).next()?.trim();
     let name: String = name.chars().filter(|c| !c.is_control() && !matches!(c, ':' | '*' | '?' | '"' | '<' | '>' | '|')).collect();
-    let ok = !name.is_empty() && !name.starts_with('.') && formats::is_supported(Path::new(&name));
+    // A movie may be the other half of a Live Photo sent along with its still.
+    let ok = !name.is_empty() && !name.starts_with('.') && (formats::is_supported(Path::new(&name)) || is_movie(Path::new(&name)));
     ok.then_some(name)
 }
 
@@ -286,6 +320,7 @@ pub async fn start(
         .route("/t/{index}", get(thumb))
         .route("/f/{index}", get(download))
         .route("/zip", get(bundle))
+        .route("/l/{index}", get(live_pair))
         .route("/up", post(upload))
         .with_state(shared);
     let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
@@ -301,7 +336,9 @@ pub async fn start(
 
 #[cfg(test)]
 mod tests {
-    use super::safe_name;
+    use super::{live_movies, safe_name};
+    use std::collections::HashMap;
+    use std::path::PathBuf;
 
     #[test]
     fn upload_names_cannot_leave_the_inbox() {
@@ -312,5 +349,12 @@ mod tests {
         assert_eq!(safe_name(".hidden.jpg"), None);
         assert_eq!(safe_name("run.sh"), None);
         assert_eq!(safe_name(""), None);
+        assert_eq!(safe_name("IMG_1.MOV").as_deref(), Some("IMG_1.MOV"));
+    }
+
+    #[test]
+    fn a_still_with_a_movie_of_its_name_is_one_live_photo() {
+        let files: Vec<PathBuf> = ["a/IMG_1.JPG", "a/IMG_2.JPG", "a/IMG_1.MOV", "a/IMG_3.HEIC", "a/clip.mov", "b/IMG_2.MOV"].iter().map(PathBuf::from).collect();
+        assert_eq!(live_movies(&files), HashMap::from([(0, 2)]));
     }
 }

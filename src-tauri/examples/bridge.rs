@@ -33,7 +33,7 @@ fn run(state: &AppState, cmd: &str, args: &Value) -> Result<Response, String> {
             "platform": std::env::consts::OS, "mobile": false, "version": env!("CARGO_PKG_VERSION"),
             "library": null, "cache_bytes": sift_lib::state::dir_size(&state.cache_dir),
             "nikon_supported": sift_core::nikon::SUPPORTED, "nikon_sdk": state.nikon().is_some(),
-            "live_photo": cfg!(target_os = "macos"),
+            "live_photo": cfg!(target_os = "macos"), "save_to_photos": false,
         })),
         "scan_folder" => {
             let dir = PathBuf::from(arg::<String>(args, "path")?);

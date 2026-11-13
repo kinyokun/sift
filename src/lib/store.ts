@@ -142,6 +142,8 @@ type State = {
   loadMeta: (id: string) => Promise<Meta | null>;
   setSheet: (sheet: SheetName | null) => void;
   notify: (text: string) => void;
+  /** Saves photos to the system photo library (iOS), Live Photos as Live Photos. */
+  saveToPhotos: (items: Item[]) => Promise<void>;
 };
 
 export function folderName(path: string): string {
@@ -593,6 +595,16 @@ export const useStore = create<State>((set, get) => {
       const id = ++toastSeq;
       set({ toast: { id, text } });
       setTimeout(() => get().toast?.id === id && set({ toast: null }), 2600);
+    },
+    saveToPhotos: async (items) => {
+      if (!items.length) return get().notify("selectFirst");
+      get().notify("savingToPhotos");
+      try {
+        const saved = await api.saveToPhotos(items);
+        get().notify(`savedToPhotos:${saved},${items.filter((it) => it.live).length}`);
+      } catch (e) {
+        get().notify(String(e) === "denied" ? "photosDenied" : `photosFailed:${e}`);
+      }
     },
   };
 });

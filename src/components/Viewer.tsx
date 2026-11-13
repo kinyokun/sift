@@ -859,6 +859,7 @@ export function Viewer() {
               {zoom.percent}%
             </button>
           )}
+          {info?.save_to_photos && <IconButton icon="save" label={t.saveToPhotos} onClick={() => useStore.getState().saveToPhotos([current])} className="on-dark" />}
           <IconButton icon="info" label={t.info} active={showInfo} onClick={toggleInfo} className="on-dark" />
         </div>
       </header>

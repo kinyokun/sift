@@ -85,6 +85,10 @@ fn stat(path: &Path) -> (u64, u64) {
     })
 }
 
+fn is_movie(path: &Path) -> bool {
+    path.extension().is_some_and(|x| x.eq_ignore_ascii_case("mov"))
+}
+
 /// The files of one shot have the same name, apart from the extension, in the same folder.
 fn shot_key(path: &Path) -> String {
     path.with_extension("").to_string_lossy().to_ascii_lowercase()
@@ -100,7 +104,7 @@ pub fn scan(dir: &Path, pair: bool, prefer_raw: bool) -> CmdResult<Vec<Item>> {
         .filter_map(|e| {
             let p = e.path();
             let hidden = p.file_name().and_then(|n| n.to_str()).is_none_or(|n| n.starts_with('.'));
-            if !hidden && p.extension().is_some_and(|x| x.eq_ignore_ascii_case("mov")) {
+            if !hidden && is_movie(&p) {
                 movies.insert(shot_key(&p), p);
                 return None;
             }
@@ -289,10 +293,10 @@ pub async fn live_photo_pace(app: AppHandle, frames: Vec<String>) -> CmdResult<f
     blocking(move || Ok(live_pace(&app.state::<AppState>(), &frames))).await
 }
 
-/// Writes a burst as a Live Photo (one `.pvt` bundle holding a JPEG and a
-/// movie that belong together) next to its frames. `frames` are the
-/// displayed files in shooting order and `key` is the one that becomes the
-/// still. Returns the path of the bundle.
+/// Writes a burst as a Live Photo (a JPEG and a movie of the same name that
+/// belong together) next to its frames. `frames` are the displayed files in
+/// shooting order and `key` is the one that becomes the still. Returns the
+/// path of the JPEG.
 #[cfg(target_vendor = "apple")]
 pub fn live_photo(state: &AppState, frames: &[String], key: usize, on_frame: impl FnMut(usize)) -> CmdResult<String> {
     let files = frames.iter().map(|p| state.check(p)).collect::<Result<Vec<_>, _>>()?;
@@ -300,15 +304,17 @@ pub fn live_photo(state: &AppState, frames: &[String], key: usize, on_frame: imp
     let cover = files.get(key).ok_or("no frames")?;
     let dest = cover.parent().ok_or("no folder")?;
     let base = cover.file_stem().map_or_else(|| "Live".into(), |s| s.to_string_lossy().into_owned());
-    // Never over an existing one: the bundle gets a name of its own.
+    // Never over an existing file: the pair gets a name of its own, also
+    // clear of an older Live Photo saved as a `.pvt` bundle.
+    let taken_name = |stem: &str| ["JPG", "MOV", sift_core::live::BUNDLE_EXT].iter().any(|ext| dest.join(format!("{stem}.{ext}")).exists());
     let stem = (1..)
         .map(|n| if n == 1 { format!("{base}_live") } else { format!("{base}_live_{n}") })
-        .find(|stem| !dest.join(format!("{stem}.{}", sift_core::live::BUNDLE_EXT)).exists())
+        .find(|stem| !taken_name(stem))
         .unwrap_or_default();
     let taken = taken_at(state, frames);
     state.cancel.store(false, AtomicOrdering::Relaxed);
-    let bundle = sift_core::live::export(&files, &taken, key, dest, &stem, &state.cancel, on_frame).map_err(err)?;
-    Ok(bundle.to_string_lossy().into_owned())
+    let (still, _) = sift_core::live::export(&files, &taken, key, dest, &stem, &state.cancel, on_frame).map_err(err)?;
+    Ok(still.to_string_lossy().into_owned())
 }
 
 #[cfg(not(target_vendor = "apple"))]
@@ -842,6 +848,8 @@ pub struct AppInfo {
     nikon_sdk: bool,
     /// Whether a burst can be written as a Live Photo here.
     live_photo: bool,
+    /// Whether photos can be saved to the system photo library (iOS).
+    save_to_photos: bool,
 }
 
 pub fn library_dir(app: &AppHandle) -> Option<PathBuf> {
@@ -878,6 +886,7 @@ pub async fn app_info(app: AppHandle) -> CmdResult<AppInfo> {
             nikon_supported: sift_core::nikon::SUPPORTED,
             nikon_sdk: state.nikon().is_some(),
             live_photo: cfg!(target_os = "macos"),
+            save_to_photos: crate::photos::SUPPORTED,
         })
     })
     .await
@@ -929,6 +938,37 @@ pub async fn list_albums(app: AppHandle) -> CmdResult<Vec<Album>> {
     .await
 }
 
+/// A photo to save to the system photo library, with its Live Photo movie.
+#[derive(Deserialize)]
+pub struct ToPhotos {
+    still: String,
+    movie: Option<String>,
+}
+
+/// Saves photos to the system photo library, each with its movie as one Live
+/// Photo. Returns how many were saved; stops at the first failure, reported
+/// as `denied` when the user has not allowed it.
+#[tauri::command]
+pub async fn save_to_photos(app: AppHandle, items: Vec<ToPhotos>) -> CmdResult<usize> {
+    blocking(move || {
+        let state = app.state::<AppState>();
+        let total = items.len();
+        let mut emit = progress(&app);
+        for (done, item) in items.iter().enumerate() {
+            let still = state.check(&item.still)?;
+            let movie = item.movie.as_deref().map(|m| state.check(m)).transpose()?;
+            emit(Progress { done, total, name: still.file_name().unwrap_or_default().to_string_lossy().into_owned() });
+            crate::photos::save(&still, movie.as_deref()).map_err(|e| match e {
+                crate::photos::Failure::Denied => "denied".to_string(),
+                crate::photos::Failure::Other(message) => message,
+            })?;
+        }
+        emit(Progress { done: total, total, name: String::new() });
+        Ok(total)
+    })
+    .await
+}
+
 /// Copies files chosen in the system picker into a new album of the mobile library.
 #[tauri::command]
 pub async fn import_files(app: AppHandle, sources: Vec<String>, album: String) -> CmdResult<String> {
@@ -959,8 +999,9 @@ pub async fn import_files(app: AppHandle, sources: Vec<String>, album: String) -
                 output.write_all(&buf[..n]).map_err(err)?;
             }
             drop(output);
-            // Android pickers return opaque document ids; name the copy by its contents.
-            if !formats::is_supported(&target) {
+            // Android pickers return opaque document ids; name the copy by its
+            // contents. A movie stays: it may be a Live Photo's other half.
+            if !formats::is_supported(&target) && !is_movie(&target) {
                 match formats::sniff_ext(&target) {
                     Some(ext) => fs::rename(&target, dir.join(format!("IMG_{:04}.{ext}", i + 1))).map_err(err)?,
                     None => fs::remove_file(&target).map_err(err)?,

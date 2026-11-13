@@ -1,7 +1,7 @@
 //! File operations after culling: copy the keepers out, and pull the RAW
 //! files that belong to a set of selected JPEGs.
 
-use crate::{formats, live, rating, Error, Result};
+use crate::{formats, rating, Error, Result};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fs;
@@ -168,7 +168,7 @@ pub fn stems(shots: &[Vec<PathBuf>], rename: Option<&Rename>) -> Vec<String> {
 
 /// Copies the chosen kind of file of every shot into `dest`, renaming on the
 /// way if asked. A RAW file's `.xmp` sidecar travels with it, and the halves
-/// of a Live Photo bundle stay in one.
+/// of a Live Photo bundle come out as a still and a movie of the shot's name.
 pub fn export(
     shots: &[Vec<PathBuf>],
     dest: &Path,
@@ -197,21 +197,9 @@ pub fn export_named(
             if (kind == Kind::Raw && !raw) || (kind == Kind::Jpeg && raw) {
                 continue;
             }
-            // The halves of a Live Photo bundle go into a bundle of the shot's name.
-            let into = match live::bundle_of(f) {
-                Some(_) => {
-                    let bundle = dest.join(format!("{stem}.{}", live::BUNDLE_EXT));
-                    fs::create_dir_all(&bundle)?;
-                    let metadata = bundle.join(live::BUNDLE_METADATA_NAME);
-                    if !metadata.exists() {
-                        fs::write(metadata, live::BUNDLE_METADATA)?;
-                    }
-                    bundle
-                }
-                None => dest.to_path_buf(),
-            };
             let ext = |p: &Path| p.extension().and_then(|e| e.to_str()).unwrap_or("").to_string();
-            jobs.push((f.clone(), into.join(format!("{stem}.{}", ext(f)))));            let side = rating::sidecar_path(f);
+            jobs.push((f.clone(), dest.join(format!("{stem}.{}", ext(f)))));
+            let side = rating::sidecar_path(f);
             if raw && side.is_file() {
                 jobs.push((side.clone(), dest.join(format!("{stem}.{}", ext(&side)))));
             }
@@ -315,7 +303,7 @@ mod tests {
     }
 
     #[test]
-    fn a_live_photo_bundle_is_exported_as_a_bundle() {
+    fn a_live_photo_bundle_is_exported_as_a_still_and_a_movie() {
         let dir = std::env::temp_dir().join(format!("sift-export-pvt-{}", std::process::id()));
         let (bundle, out) = (dir.join("src/A_live.pvt"), dir.join("out"));
         fs::create_dir_all(&bundle).unwrap();
@@ -326,12 +314,10 @@ mod tests {
         let rule = Rename { template: "Trip_{seq}".into(), start: 1 };
         let report = export(&list, &out, Kind::All, Some(&rule), &AtomicBool::new(false), |_| {}).unwrap();
         assert_eq!(report.copied, 2);
-        let made = out.join("Trip_001.pvt");
-        let mut names: Vec<String> = fs::read_dir(&made).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        let mut names: Vec<String> = fs::read_dir(&out).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
         names.sort();
-        assert_eq!(names, ["Trip_001.JPG", "Trip_001.MOV", "metadata.plist"]);
-        assert_eq!(fs::read_to_string(made.join("Trip_001.MOV")).unwrap(), "A_live.MOV");
-        assert_eq!(fs::read_dir(&out).unwrap().count(), 1);
+        assert_eq!(names, ["Trip_001.JPG", "Trip_001.MOV"]);
+        assert_eq!(fs::read_to_string(out.join("Trip_001.MOV")).unwrap(), "A_live.MOV");
         let _ = fs::remove_dir_all(&dir);
     }
 }
