@@ -367,7 +367,7 @@ button.primary.large {
 }
 
 .mark-focus {
-  stroke: var(--green);
+  fill: var(--green);
 }
 
 .welcome h1 {

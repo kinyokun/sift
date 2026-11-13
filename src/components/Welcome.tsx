@@ -21,11 +21,16 @@ export async function importPhotos(): Promise<string | null> {
 
 function Mark() {
   return (
-    <svg className="mark" viewBox="0 0 64 64" aria-hidden="true">
-      <g fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M10 22v-6a6 6 0 0 1 6-6h6M42 10h6a6 6 0 0 1 6 6v6M54 42v6a6 6 0 0 1-6 6h-6M22 54h-6a6 6 0 0 1-6-6v-6" />
-        <rect className="mark-focus" x="24" y="24" width="16" height="16" rx="4" />
-      </g>
+    <svg className="mark" viewBox="236 236 560 560" aria-hidden="true">
+      <path
+        d="M560 292C544 289 528 288 510 288C430 288 372 330 372 398C372 468 432 492 512 514C596 538 660 566 660 638C660 708 596 744 512 744C450 744 400 722 372 688"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="84"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle className="mark-focus" cx="642" cy="352" r="46" />
     </svg>
   );
 }
