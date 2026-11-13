@@ -11,13 +11,15 @@ type Props = {
   kind: StackKind;
   frames: Item[];
   current: string;
+  /** Photo id -> numbers of the compare panes showing it. */
+  marks?: Record<string, number[]>;
   onChoose: (id: string) => void;
   /** Present when the frames can be written out as a Live Photo. */
   onLivePhoto?: () => void;
 };
 
 /** The frames of the stack the photo on screen belongs to, to step through or jump between. */
-export function StackStrip({ kind, frames, current, onChoose, onLivePhoto }: Props) {
+export function StackStrip({ kind, frames, current, marks, onChoose, onLivePhoto }: Props) {
   const t = useT();
   const flags = useStore((s) => s.flags);
   const ratings = useStore((s) => s.ratings);
@@ -47,6 +49,7 @@ export function StackStrip({ kind, frames, current, onChoose, onLivePhoto }: Pro
               {flag === 1 && <i className="pick" />}
               {flag === -1 && <i className="reject" />}
               {(ratings[f.id] || 0) > 0 && <i className="stars">{ratings[f.id]}</i>}
+              {marks?.[f.id] && <i className="slot-mark">{marks[f.id].join(" ")}</i>}
             </button>
           );
         })}

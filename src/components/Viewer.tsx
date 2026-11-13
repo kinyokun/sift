@@ -11,6 +11,7 @@ import { Histogram } from "./Histogram";
 import { LookWall } from "./LookWall";
 import { LiveEditor, LiveMovie, LivePreview, MIN_LIVE_FRAMES, type LiveDraft } from "./Live";
 import { StackStrip } from "./StackStrip";
+import { ComparePicker, MAX_PANES, SLOT_BAR, SlotBar, paneGrid } from "./Compare";
 import { Pane, fullUrlOf, lookSource, type Nudge, type PaneHandle, type PaneStatus } from "./Pane";
 
 export function formatShutter(s: number): string {
@@ -125,15 +126,22 @@ export function Viewer() {
   const [cropRatio, setCropRatio] = useState<string | null>(null);
   const [crop, setCrop] = useState<Crop | null>(null);
   const [eye, setEye] = useState(false);
-  const [compare, setCompare] = useState(false);
+  // Compare: the first pane is the viewer's own position, these are the others.
+  const [extra, setExtra] = useState<number[]>(() =>
+    (viewer.compare ?? [])
+      .slice(1, MAX_PANES)
+      .map((id) => viewer.ids.indexOf(id))
+      .filter((i) => i >= 0),
+  );
   const [link, setLink] = useState(true);
-  const [active, setActive] = useState<0 | 1>(0);
-  const [rightIndex, setRightIndex] = useState(0);
+  const [active, setActive] = useState(0);
+  const [picking, setPicking] = useState<number | null>(null);
+  const [statuses, setStatuses] = useState<PaneStatus[]>([]);
+  const [stageSize, setStageSize] = useState({ w: 0, h: 0 });
   const [floatingInfo, setFloatingInfo] = useState(false);
   const [immersive, setImmersive] = useState(false);
   const [wall, setWall] = useState(false);
   const [zoom, setZoom] = useState({ percent: 0, fit: true });
-  const [status, setStatus] = useState<PaneStatus>(null);
   const [live, setLive] = useState<LiveDraft | null>(null);
   const liveRef = useRef(live);
   liveRef.current = live;
@@ -148,21 +156,26 @@ export function Viewer() {
   const warm = useRef<HTMLImageElement[]>([]);
   const [insets, setInsets] = useState({ top: 0, bottom: 0 });
 
-  const panes = [useRef<PaneHandle>(null), useRef<PaneHandle>(null)];
+  const panes = [useRef<PaneHandle>(null), useRef<PaneHandle>(null), useRef<PaneHandle>(null), useRef<PaneHandle>(null)];
+  const stage = useRef<HTMLDivElement>(null);
   const topBar = useRef<HTMLElement>(null);
   const dock = useRef<HTMLDivElement>(null);
   const strip = useRef<HTMLDivElement>(null);
 
-  const leftItem = byId.get(viewer.ids[viewer.index]);
-  const rightItem = compare ? byId.get(viewer.ids[rightIndex]) : undefined;
-  const current = active === 1 && rightItem ? rightItem : leftItem;
+  const compare = extra.length > 0;
+  const indices = [viewer.index, ...extra];
+  const indexKey = indices.join(",");
+  const slotItems = indices.map((i) => byId.get(viewer.ids[i]));
+  const slotKey = slotItems.map((it) => it?.id).join("\n");
+  const leftItem = slotItems[0];
+  const current = slotItems[active] ?? leftItem;
   const currentMeta = current ? metas[current.id] ?? null : null;
+  const status = statuses[active] ?? null;
 
   // Metadata for what is on screen, and warm the neighbours.
   useEffect(() => {
     const st = useStore.getState();
-    if (leftItem) st.loadMeta(leftItem.id);
-    if (rightItem) st.loadMeta(rightItem.id);
+    slotItems.forEach((it) => it && st.loadMeta(it.id));
     warm.current = [];
     for (const d of [1, -1, 2]) {
       const next = byId.get(viewer.ids[viewer.index + d]);
@@ -181,7 +194,7 @@ export function Viewer() {
         warm.current.push(full);
       });
     }
-  }, [leftItem?.id, rightItem?.id]);
+  }, [slotKey]);
 
   // The frames of the stack the photo on screen is in, as far as the viewer holds them.
   const inViewer = useMemo(() => new Set(viewer.ids), [viewer.ids]);
@@ -205,6 +218,16 @@ export function Viewer() {
     return () => ro.disconnect();
   }, [immersive, compare, showInfo, showStrip, !!live]);
 
+  useLayoutEffect(() => {
+    const el = stage.current;
+    if (!el) return;
+    const measure = () => setStageSize({ w: el.clientWidth, h: el.clientHeight });
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   // Eye zoom follows the photo: stepping through a burst keeps the eyes centred.
   const focusEyes = useCallback(async (item: Item, pane: PaneHandle | null, announce: boolean) => {
     const st = useStore.getState();
@@ -223,12 +246,18 @@ export function Viewer() {
     });
   }, []);
 
+  // Each pane follows the eyes of its own photo; only a new photo is looked at again.
+  const eyed = useRef<(string | undefined)[]>([]);
   useEffect(() => {
-    if (eye && leftItem) focusEyes(leftItem, panes[0].current, true);
-  }, [eye, leftItem?.id]);
-  useEffect(() => {
-    if (eye && rightItem) focusEyes(rightItem, panes[1].current, false);
-  }, [eye, rightItem?.id]);
+    if (!eye) {
+      eyed.current = [];
+      return;
+    }
+    slotItems.forEach((it, i) => {
+      if (it && eyed.current[i] !== it.id) focusEyes(it, panes[i].current, i === active);
+    });
+    eyed.current = slotItems.map((it) => it?.id);
+  }, [eye, slotKey]);
 
   // An unconfirmed crop belongs to the photo it was started on.
   useEffect(() => {
@@ -241,29 +270,27 @@ export function Viewer() {
     setEye(!eye);
   };
 
-  const step = useCallback(
-    (delta: number) => {
-      if (compare && active === 1) setRightIndex((i) => Math.min(viewer.ids.length - 1, Math.max(0, i + delta)));
-      else useStore.getState().setViewerIndex(viewer.index + delta);
+  /** Puts the photo at `index` in one pane; the first pane is the viewer's own position. */
+  const setSlot = useCallback(
+    (slot: number, index: number) => {
+      if (index < 0 || index >= viewer.ids.length) return;
+      if (slot === 0) useStore.getState().setViewerIndex(index);
+      else setExtra((e) => e.map((v, i) => (i === slot - 1 ? index : v)));
     },
-    [compare, active, viewer.index, viewer.ids.length],
+    [viewer.ids.length],
   );
 
+  /** Steps the pane that has the keyboard. */
+  const step = useCallback((delta: number) => setSlot(active, indices[active] + delta), [setSlot, active, indexKey]);
+
   /** Shows another photo in the pane that has the keyboard. */
-  const show = useCallback(
-    (index: number) => {
-      if (index < 0 || index >= viewer.ids.length) return;
-      if (compare && active === 1) setRightIndex(index);
-      else useStore.getState().setViewerIndex(index);
-    },
-    [compare, active, viewer.ids.length],
-  );
+  const show = useCallback((index: number) => setSlot(active, index), [setSlot, active]);
 
   /** Leaves the stack on screen for the one after or before it; a photo on its own is a stack of one. */
   const stepStack = (delta: number) => {
     const ids = viewer.ids;
     const key = (i: number) => (settings.stacks ? stackOf[ids[i]]?.[0] : undefined) ?? `one:${i}`;
-    const from = compare && active === 1 ? rightIndex : viewer.index;
+    const from = indices[active];
     let i = from + delta;
     while (i >= 0 && i < ids.length && key(i) === key(from)) i += delta;
     // Going back lands on the first frame of the stack before.
@@ -280,13 +307,16 @@ export function Viewer() {
     if (!current) return;
     const origin = copies?.[current.id] ?? current.id;
     const at = Math.max(0, liveSource.findIndex((f) => f.id === origin));
-    if (origin !== current.id) show(viewer.ids.indexOf(origin));
+    // The editor works on one photo: the burst frame of the pane in use.
+    if (compare || origin !== current.id) useStore.getState().setViewerIndex(viewer.ids.indexOf(origin));
+    setExtra([]);
+    setActive(0);
+    setPicking(null);
     // A very long burst starts as the stretch around the frame on screen.
     const start = Math.max(0, Math.min(at - MAX_LIVE_FRAMES / 2, liveSource.length - MAX_LIVE_FRAMES));
     setLive({ start, end: Math.min(liveSource.length, start + MAX_LIVE_FRAMES) - 1, cover: at });
     setLiveReady(0);
     setPlaying(false);
-    setCompare(false);
     api
       .livePhotoPace(liveSource.map((f) => f.id))
       .then(setLiveStep)
@@ -333,11 +363,37 @@ export function Viewer() {
     if (at !== draft.cover) setLive({ start: Math.min(draft.start, at), end: Math.max(draft.end, at), cover: at });
   }, [currentId, liveSource, copies]);
 
-  const toggleCompare = () => {
-    if (!compare) setRightIndex(Math.min(viewer.ids.length - 1, viewer.index + 1));
+  /** Leaves compare on the photo of the pane in use. */
+  const endCompare = () => {
+    if (active > 0) useStore.getState().setViewerIndex(indices[active]);
+    setExtra([]);
     setActive(0);
-    setCompare(!compare);
+    setPicking(null);
   };
+
+  /** Compares `n` photos. Panes that stay keep their photos; new ones take the
+   * photos after the last one shown (before the first, near the end of the folder). */
+  const setPaneCount = (n: number) => {
+    if (n <= 1) return endCompare();
+    const next = indices.slice(0, n);
+    const used = new Set(next);
+    let after = Math.max(...next) + 1;
+    let before = Math.min(...next) - 1;
+    while (next.length < n) {
+      while (used.has(after)) after++;
+      while (used.has(before)) before--;
+      // A folder with fewer photos than panes shows the last one again.
+      const index = after < viewer.ids.length ? after++ : before >= 0 ? before-- : next[next.length - 1];
+      used.add(index);
+      next.push(index);
+    }
+    setExtra(next.slice(1));
+    setActive((a) => Math.min(a, n - 1));
+    if (picking !== null && picking >= n) setPicking(null);
+  };
+
+  const toggleCompare = () => (compare ? endCompare() : setPaneCount(2));
+  const cyclePanes = () => setPaneCount(!compare || indices.length >= MAX_PANES ? 2 : indices.length + 1);
 
   /** Starts (or, with `null`, abandons) a crop on the current photo. Nothing
    * changes until it is confirmed. Editing always shows the whole frame. */
@@ -456,7 +512,8 @@ export function Viewer() {
         if (crop) chooseCrop(null);
         else if (live) endLive();
         else if (immersive) setImmersive(false);
-        else if (compare) setCompare(false);
+        else if (picking !== null) setPicking(null);
+        else if (compare) endCompare();
         else st.closeViewer();
         return;
       }
@@ -513,8 +570,10 @@ export function Viewer() {
           return chooseCrop(cropRatio ? null : current && cropOf(crops, current) ? "free" : "original");
         case "compare":
           return toggleCompare();
+        case "panes":
+          return cyclePanes();
         case "side":
-          if (compare) setActive((a) => (a === 0 ? 1 : 0));
+          if (compare) setActive((a) => (a + 1) % indices.length);
           return;
         case "link":
           return setLink((v) => !v);
@@ -530,8 +589,8 @@ export function Viewer() {
 
   if (!leftItem || !current) return null;
 
-  const relay = (from: 0 | 1) => (n: Nudge) => {
-    if (compare && link) panes[from === 0 ? 1 : 0].current?.nudge(n);
+  const relay = (from: number) => (n: Nudge) => {
+    if (compare && link) panes.forEach((p, i) => i !== from && i < indices.length && p.current?.nudge(n));
   };
   const wheelZoom = settings.wheelZoom ?? info?.platform !== "macos";
   const sdk = !!info?.nikon_sdk;
@@ -540,7 +599,7 @@ export function Viewer() {
     mobile,
     wheelZoom,
     // Zooming out of a photo that fits goes back to the grid, as zooming into the grid came here.
-    onZoomOut: crop || live || mobile ? undefined : () => useStore.getState().closeViewer(),
+    onZoomOut: crop || live || mobile || compare ? undefined : () => useStore.getState().closeViewer(),
     autoDevelop: settings.autoDevelop,
     nikon: sdk,
     showAf,
@@ -568,7 +627,22 @@ export function Viewer() {
     })),
   ];
   const flag = flagOf(flags, current);
-  const position = compare && active === 1 ? rightIndex : viewer.index;
+  const position = indices[active];
+  const closePicker = () => setPicking(null);
+  const { cols, rows } = paneGrid(indices.length, stageSize.w, stageSize.h);
+  /** The chrome only covers the panes along the top and bottom edges. */
+  const rowOf = (i: number) => Math.floor(i / cols);
+  const barTop = (i: number) => (rowOf(i) === 0 ? insets.top : 0);
+  const insetsOf = (i: number) => ({ top: barTop(i) + (compare ? SLOT_BAR : 0), bottom: rowOf(i) === rows - 1 ? insets.bottom : 0 });
+  const marks: Record<string, number[]> = {};
+  if (compare) slotItems.forEach((it, i) => it && (marks[it.id] ??= []).push(i + 1));
+  const reportStatus = (i: number) => (s: PaneStatus) =>
+    setStatuses((prev) => {
+      if (prev[i] === s) return prev;
+      const next = [...prev];
+      next[i] = s;
+      return next;
+    });
   const docked = showInfo && !mobile && !immersive;
   const look = currentMeta?.look;
   const currentLook = lookOf(looks, current);
@@ -607,43 +681,60 @@ export function Viewer() {
   return (
     <div className={`viewer ${immersive ? "immersive" : ""} ${compare ? "comparing" : ""} ${docked ? "with-info" : ""}`}>
       <div className="viewer-main">
-        <div className="stage">
-          <Pane
-            ref={panes[0]}
-            key="left"
-            item={leftItem}
-            meta={metas[leftItem.id] ?? null}
-            active={active === 0}
-            dimmed={flagOf(flags, leftItem) === -1}
-            look={lookOf(looks, leftItem)}
-            frame={crop ? null : cropOf(crops, leftItem)}
-            onSwipeV={cycleLook}
-            {...paneProps}
-            crop={active === 0 ? crop : null}
-            onActivate={() => setActive(0)}
-            onNudge={relay(0)}
-            onSwipe={step}
-            onZoom={(percent, fit) => active === 0 && setZoom({ percent, fit })}
-            onStatus={setStatus}
-          />
-          {rightItem && (
-            <Pane
-              ref={panes[1]}
-              key="right"
-              item={rightItem}
-              meta={metas[rightItem.id] ?? null}
-              active={active === 1}
-              dimmed={flagOf(flags, rightItem) === -1}
-              look={lookOf(looks, rightItem)}
-              frame={crop ? null : cropOf(crops, rightItem)}
-              onSwipeV={cycleLook}
-              {...paneProps}
-              crop={active === 1 ? crop : null}
-              onActivate={() => setActive(1)}
-              onNudge={relay(1)}
-              onSwipe={step}
-              onZoom={(percent, fit) => active === 1 && setZoom({ percent, fit })}
-            />
+        <div className={`stage panes-${indices.length}`} ref={stage} style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))` }}>
+          {slotItems.map(
+            (item, i) =>
+              item && (
+                <div className="slot" key={i}>
+                  <Pane
+                    ref={panes[i]}
+                    item={item}
+                    meta={metas[item.id] ?? null}
+                    active={active === i}
+                    dimmed={flagOf(flags, item) === -1}
+                    look={lookOf(looks, item)}
+                    frame={crop ? null : cropOf(crops, item)}
+                    onSwipeV={cycleLook}
+                    {...paneProps}
+                    insets={insetsOf(i)}
+                    crop={active === i ? crop : null}
+                    onActivate={() => setActive(i)}
+                    onNudge={relay(i)}
+                    onSwipe={step}
+                    onZoom={(percent, fit) => active === i && setZoom({ percent, fit })}
+                    onStatus={reportStatus(i)}
+                  />
+                  {compare && !immersive && (
+                    <SlotBar
+                      number={i + 1}
+                      item={item}
+                      index={indices[i]}
+                      total={viewer.ids.length}
+                      active={active === i}
+                      picking={picking === i}
+                      top={barTop(i)}
+                      onActivate={() => setActive(i)}
+                      onStep={(d) => setSlot(i, indices[i] + d)}
+                      onPick={() => setPicking(picking === i ? null : i)}
+                    />
+                  )}
+                  {compare && picking === i && (
+                    <ComparePicker
+                      items={viewer.ids.map((id) => byId.get(id)!).filter(Boolean)}
+                      current={item.id}
+                      marks={marks}
+                      top={barTop(i)}
+                      bottom={insetsOf(i).bottom}
+                      onChoose={(id) => {
+                        setSlot(i, viewer.ids.indexOf(id));
+                        setActive(i);
+                        setPicking(null);
+                      }}
+                      onClose={closePicker}
+                    />
+                  )}
+                </div>
+              ),
           )}
         </div>
 
@@ -652,7 +743,7 @@ export function Viewer() {
 
         {pill && <div className={`status-pill glass ${!status ? "quiet" : ""}`}>{pill}</div>}
 
-        {!mobile && !immersive && (
+        {!mobile && !immersive && !compare && (
           <>
             <button className="edge prev" aria-label={t.actions.prev} disabled={position === 0} onClick={() => step(-1)}>
               <Icon name="back" size={22} />
@@ -685,6 +776,7 @@ export function Viewer() {
                   kind={stack.kind}
                   frames={stackFrames}
                   current={current.id}
+                  marks={compare ? marks : undefined}
                   onChoose={(id) => show(viewer.ids.indexOf(id))}
                   onLivePhoto={stack.kind === "burst" && liveSource.length >= MIN_LIVE_FRAMES && info?.live_photo && !mobile ? startLive : undefined}
                 />
@@ -717,6 +809,17 @@ export function Viewer() {
             <IconButton icon="compare" label={t.compare} active={compare} onClick={toggleCompare} />
             {compare && <IconButton icon="link" label={t.link} active={link} onClick={() => setLink(!link)} />}
           </div>
+          {compare && (
+            <div className="dock-group">
+              <div className="segmented pane-count" role="group" aria-label={t.actions.panes}>
+                {[2, 3, 4].map((n) => (
+                  <button key={n} className={indices.length === n ? "on" : ""} aria-pressed={indices.length === n} title={t.comparePanes(n)} onClick={() => setPaneCount(n)}>
+                    {n}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

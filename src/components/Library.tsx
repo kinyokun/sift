@@ -8,6 +8,7 @@ import { IconButton, Menu, Segmented, Stars, type MenuItem } from "../ui/control
 import { Icon } from "../ui/Icon";
 import { useWheelSize } from "../lib/wheelSize";
 import { chooseFolder, importPhotos } from "./Welcome";
+import { MAX_PANES } from "./Compare";
 
 const GAP = 6;
 const THUMB_EDGE = 512;
@@ -213,6 +214,7 @@ export function Library() {
       thumb: st.settings.thumb,
       sortBy: st.settings.sortBy,
       sortDesc: st.settings.sortDesc,
+      viewing: !!st.viewer,
     })),
   );
   const act = useStore.getState();
@@ -548,6 +550,7 @@ export function Library() {
       else if (action === "unflag") st.flag(targets, 0);
       else if (action === "next") move(1);
       else if (action === "prev") move(-1);
+      else if (action === "compare" && targets.length > 1 && targets.length <= MAX_PANES) st.openViewer(targets[0], targets);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -631,7 +634,8 @@ export function Library() {
   // The bar for acting on several photos at once.
   const chosen = useMemo(() => frames(s.selection).map((m) => m.id), [frames, s.selection]);
   // One folded stack is already several photos.
-  const bar = mobile ? selecting : s.selection.length > 1;
+  // The bar floats above everything, so it would cover the viewer's dock.
+  const bar = !s.viewing && (mobile ? selecting : s.selection.length > 1);
   const sharedRating = chosen.length && chosen.every((id) => (s.ratings[id] || 0) === (s.ratings[chosen[0]] || 0)) ? s.ratings[chosen[0]] || 0 : 0;
   const flagAll = (value: number) => chosen.length && act.flag(chosen, value);
 
@@ -738,6 +742,9 @@ export function Library() {
             </button>
           </span>
           <Menu label={t.lookApply} items={lookItems} button={<Icon name="look" />} up />
+          {chosen.length > 1 && chosen.length <= MAX_PANES && (
+            <IconButton icon="compare" label={t.compareSelected} onClick={() => act.openViewer(chosen[0], chosen)} />
+          )}
           <button className="text-button select-all" onClick={selectAll}>
             {t.selectAll}
           </button>

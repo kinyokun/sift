@@ -32,6 +32,7 @@ Where a window cannot be screenshotted (agents, CI), the UI is exercised in head
     ONLY=select,select-phone node scripts/shots.mjs /path/to/many-photos   # selection, drag-select, sorting, scrolling; results printed
     ONLY=animals node scripts/shots.mjs /path/to/pet-and-bird-photos   # eye close-up on animals
     ONLY=trackpad,touch node scripts/shots.mjs /path/to/photos   # gesture checks, results printed
+    ONLY=compare,compare-phone node scripts/shots.mjs /path/to/photos-with-a-burst   # 2-4 pane compare, results printed
 
 The README images are made the same way (`scripts/readme-shots.mjs`, `readme-anim.mjs`, `readme-art.mjs`, from public sample photos only); the commands and photo credits are in `docs/readme/README.md`.
 
@@ -58,6 +59,7 @@ The README images are made the same way (`scripts/readme-shots.mjs`, `readme-ani
 - Network shares (SMB) reject `fsync` with ENOTSUP on macOS; always flush through `sift_core::io::sync`, which treats that as success. A plain `sync_all()` makes every rating write on a NAS fail.
 - A crop only takes effect when confirmed (`setCrop` in the store, saved per file name with the session). `Pane` then shows just that part (`frame`), and export renders it (`commands::styled_pixels`). Shots with a look or crop are exported as rendered JPEGs; everything else is a byte-for-byte copy.
 - Shortcuts: `Mod` means Command on Apple and Ctrl elsewhere. `resolveKeys` drops a default that collides with a saved binding; bump `KEYS_VERSION` in the store when defaults change.
+- Compare (`Viewer.tsx`, `Compare.tsx`) shows up to `MAX_PANES` photos. The first pane is always the store's `viewer.index`, the others are local indices into `viewer.ids` (`extra`); every action of the viewer (keys, dock, burst strip) goes to the active pane, and leaving compare keeps the active pane's photo. Each pane gets its own insets: only the panes along the top and bottom edges sit under the chrome. `openViewer(id, compare)` opens comparing a grid selection.
 - Grid selection lives in `Library.tsx`: a range runs from `anchor` and is added to what was selected before it began (`anchor.base`), so shift-clicking back shrinks it. A plain click on one of several selected photos collapses the selection only after the double-click interval, and closing the viewer keeps a multi-selection that contains the photo. On touch screens the tick is not a target (browsers snap taps to it); a long press starts selecting.
 - The grid re-renders when the first visible row changes, not per scroll event, and a new cell waits `SETTLE_MS` before asking for its thumbnail, so rows flung past cost no request. `Library` subscribes to the store through `useShallow`; do not go back to `useStore()` there.
 - Sorting is a setting (`sortBy`, `sortDesc`) applied in `visibleItems`, so the viewer follows the grid. Capture times and ratings come from one pass over the files (`read_briefs`); files without a capture time sort by their modification time.

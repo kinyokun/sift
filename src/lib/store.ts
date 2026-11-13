@@ -110,8 +110,9 @@ type State = {
   /** Grid cells that are selected: a collapsed stack counts as one, by its first frame. */
   selection: string[];
   cursor: string | null;
-  /** Ids shown in the viewer, frozen when it opens so marking never reshuffles them. */
-  viewer: { ids: string[]; index: number } | null;
+  /** Ids shown in the viewer, frozen when it opens so marking never reshuffles them.
+   * `compare` holds the photos it opened comparing, if it did. */
+  viewer: { ids: string[]; index: number; compare?: string[] } | null;
   sheet: SheetName | null;
   toast: Toast | null;
 
@@ -127,7 +128,8 @@ type State = {
   select: (ids: string[], cursor?: string | null) => void;
   /** Opens a stack in the grid, or folds it up again. */
   toggleStack: (key: string) => void;
-  openViewer: (id: string) => void;
+  /** Opens the viewer on a photo, or comparing several (in grid order). */
+  openViewer: (id: string, compare?: string[]) => void;
   closeViewer: () => void;
   setViewerIndex: (index: number) => void;
   rate: (ids: string[], rating: number) => Promise<void>;
@@ -477,10 +479,11 @@ export const useStore = create<State>((set, get) => {
       settle();
     },
 
-    openViewer: (id) => {
+    openViewer: (id, compare) => {
       const ids = visibleItems(get()).map((it) => it.id);
-      const index = ids.indexOf(id);
-      if (index >= 0) set({ viewer: { ids, index } });
+      const shown = (compare ?? []).filter((c) => ids.includes(c)).sort((a, b) => ids.indexOf(a) - ids.indexOf(b));
+      const index = ids.indexOf(shown.length > 1 ? shown[0] : id);
+      if (index >= 0) set({ viewer: shown.length > 1 ? { ids, index, compare: shown } : { ids, index } });
       save();
     },
     closeViewer: () => {

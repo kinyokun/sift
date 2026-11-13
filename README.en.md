@@ -75,11 +75,11 @@ Import `.cube`, `.3dl`, HaldCLUT `.png` and Nikon `.NP3` looks. Press `W` to see
 
 ## Compare and exposure
 
-Press `C` to compare two photos side by side, with zoom and pan in sync if you like. Press `H` to mark blown highlights (red) and crushed shadows (blue), using the same thresholds as the histogram.
+Press `C` to compare photos side by side: two, three or four at a time (`Shift+C` switches, four make a 2 × 2 grid). Each pane is controlled on its own: click its title bar to put any photo of the folder in it, step it with its own arrows, or click a frame in the burst strip to show that frame in the pane you are on; zoom and pan can stay in sync across all of them. Select two to four photos in the grid and press `C` to compare exactly those. Press `H` to mark blown highlights (red) and crushed shadows (blue), using the same thresholds as the histogram.
 
 <table>
 <tr>
-<td width="50%"><img src="docs/readme/compare-en.webp" alt="Two frames of a burst side by side"></td>
+<td width="50%"><img src="docs/readme/compare-en.webp" alt="Four photos side by side, each pane with its own title bar and arrows"></td>
 <td width="50%"><img src="docs/readme/clipping-en.webp" alt="Highlight and shadow clipping warning"></td>
 </tr>
 </table>
@@ -143,7 +143,7 @@ Every release includes `SHA256SUMS.txt` for checking the files. iOS and Android 
 - Selection: click the circle at a photo's top left, drag a box, Shift for a range, ⌘/Ctrl to add; with several selected, a bar at the bottom rates, flags or applies a look to all of them. On phones, a long press starts selecting
 - Pick / reject / 0–5 stars; ratings are written into the XMP inside the file (or a `.xmp` sidecar when that is not possible), and RAW files are never rewritten
 - 100% view, eye close-up (people, and the eyes of cats, dogs, birds, horses, sheep, cows and other animals), AF points (Nikon, Canon, Sony, Fujifilm)
-- Side-by-side compare with synced zoom and pan
+- Compare 2, 3 or 4 photos side by side; each pane picks and steps its own photo, burst frames included; zoom and pan can be synced; compare a grid selection directly
 - Composition guides and crop preview (applied on export once confirmed)
 - Histogram and on-screen clipping warning
 - Progress is saved per folder automatically and picked up next time
@@ -175,7 +175,9 @@ Every release includes `SHA256SUMS.txt` for checking the files. iOS and Android 
 - `⌘A` / `⌘D`: previous / next look (Ctrl on Windows)
 - `W`: look wall
 - `H`: clipping warning
-- `C`: compare
+- `C`: compare (in the grid, the 2–4 selected photos)
+- `Shift+C`: 2 / 3 / 4 photos in compare
+- `Tab`: next pane in compare
 - `R`: crop preview
 - `I`: info panel
 - `Space`: hide the interface

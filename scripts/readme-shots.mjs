@@ -169,7 +169,9 @@ await session("stack", desktop, async (page, shot) => {
   await shot("strip");
   await page.keyboard.press("C");
   await page.waitForTimeout(500);
-  await page.locator(".pane").nth(1).locator(".tier.full.ready").waitFor({ timeout: 30000 });
+  await page.locator(".pane-count button", { hasText: "4" }).click();
+  await page.locator(".pane").nth(3).locator(".tier.full.ready").waitFor({ timeout: 30000 });
+  await page.mouse.move(5, 5);
   await shot("compare");
   await page.keyboard.press("C");
   const live = page.getByRole("button", { name: T.livePhoto });
