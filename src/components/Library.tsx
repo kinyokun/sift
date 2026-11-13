@@ -6,10 +6,14 @@ import { useShallow } from "zustand/react/shallow";
 import { flagOf, folderName, lookOf, useStore, visibleItems, type FlagFilter, type SortBy } from "../lib/store";
 import { IconButton, Menu, Segmented, Stars, type MenuItem } from "../ui/controls";
 import { Icon } from "../ui/Icon";
+import { useWheelSize } from "../lib/wheelSize";
 import { chooseFolder, importPhotos } from "./Welcome";
 
 const GAP = 6;
 const THUMB_EDGE = 512;
+/** Range of the cell size, for the slider and Ctrl + wheel. */
+const THUMB_MIN = 110;
+const THUMB_MAX = 360;
 const OVERSCAN_ROWS = 4;
 const CELL_INSET = 5;
 /** A new cell waits this long before asking for its thumbnail, so rows flung past cost nothing. */
@@ -230,6 +234,7 @@ export function Library() {
     anchor.current = { id: null, base: [] };
   }, [s.folder, s.filter, s.minStars]);
   useEffect(() => setSelecting(false), [s.folder]);
+  useWheelSize(scroller, () => useStore.getState().settings.thumb, (thumb) => act.setSettings({ thumb }), THUMB_MIN, THUMB_MAX, !mobile);
 
   /** Adds or removes one photo; ranges then start from it. */
   const toggle = useCallback((id: string) => {
@@ -556,11 +561,11 @@ export function Library() {
             <input
               className="size-slider"
               type="range"
-              min={110}
-              max={360}
+              min={THUMB_MIN}
+              max={THUMB_MAX}
               step={2}
               value={s.thumb}
-              title={t.size}
+              title={`${t.size} · ${t.pinchOrCtrl}`}
               aria-label={t.size}
               onChange={(e) => act.setSettings({ thumb: Number(e.target.value) })}
             />

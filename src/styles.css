@@ -563,6 +563,17 @@ button.primary.large {
   height: 3px;
 }
 
+.look-wall > header .wall-size {
+  align-self: center;
+  accent-color: rgba(255, 255, 255, 0.7);
+}
+
+@media (max-width: 700px) {
+  .look-wall > header .wall-size {
+    display: none;
+  }
+}
+
 .grid-scroller {
   position: absolute;
   inset: 0;
@@ -2048,7 +2059,7 @@ input.text {
   flex: 1;
   overflow-y: auto;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(var(--tile, 230px), 1fr));
   gap: 14px;
   padding: 8px 22px 28px;
   align-content: start;

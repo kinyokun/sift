@@ -20,6 +20,8 @@ export type Settings = {
   clipping: boolean;
   wheelZoom: boolean | null;
   thumb: number;
+  /** Width of a tile on the look wall. */
+  wallTile: number;
   /** Order of the grid and of the viewer opened from it. */
   sortBy: SortBy;
   sortDesc: boolean;
@@ -46,6 +48,7 @@ const defaults: Settings = {
   clipping: false,
   wheelZoom: null,
   thumb: 184,
+  wallTile: 230,
   sortBy: "name",
   sortDesc: false,
   keys: { ...DEFAULT_KEYS },

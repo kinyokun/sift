@@ -1,6 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { NO_LOOK, imageUrl, isRawPath, type Item, type LookInfo } from "../lib/api";
 import { useT } from "../lib/i18n";
+import { useStore } from "../lib/store";
+import { useWheelSize } from "../lib/wheelSize";
 import { Icon } from "../ui/Icon";
 
 /** Long edge of a tile's rendition. */
@@ -8,6 +10,9 @@ const TILE_EDGE = 640;
 /** Tiles rendered at a time: looks on a RAW take a moment each, and closing
  * the wall should not leave a long queue behind. */
 const AT_ONCE = 2;
+/** Width of a tile, which the slider and Ctrl + wheel change. */
+const TILE_MIN = 160;
+const TILE_MAX = 560;
 
 type Props = {
   item: Item;
@@ -23,6 +28,10 @@ type Props = {
 /** One photo in every look of the library, side by side; a click picks one. */
 export function LookWall({ item, source, looks, current, onChoose, onClose }: Props) {
   const t = useT();
+  const tileSize = useStore((s) => s.settings.wallTile);
+  const setTile = (wallTile: number) => useStore.getState().setSettings({ wallTile });
+  const grid = useRef<HTMLDivElement>(null);
+  useWheelSize(grid, () => useStore.getState().settings.wallTile, setTile, TILE_MIN, TILE_MAX);
   const tiles: { id: string | null; name: string; url: string }[] = [
     { id: null, name: t.lookAsShot, url: imageUrl("screen", item.id, item.mtime, 1024) },
     ...(item.paths.some(isRawPath) ? [{ id: NO_LOOK, name: t.original, url: imageUrl("look", source.path, item.mtime, TILE_EDGE, NO_LOOK) }] : []),
@@ -39,11 +48,23 @@ export function LookWall({ item, source, looks, current, onChoose, onClose }: Pr
       <header>
         <strong>{t.lookWallTitle}</strong>
         <span>{t.lookWallHint}</span>
+        <input
+          className="size-slider wall-size"
+          type="range"
+          min={TILE_MIN}
+          max={TILE_MAX}
+          step={2}
+          value={tileSize}
+          title={`${t.size} · ${t.pinchOrCtrl}`}
+          aria-label={t.size}
+          onClick={(e) => e.stopPropagation()}
+          onChange={(e) => setTile(Number(e.target.value))}
+        />
         <button className="icon-button on-dark" aria-label={t.cancel} title={t.cancel} onClick={onClose}>
           <Icon name="x" />
         </button>
       </header>
-      <div className="look-wall-grid">
+      <div className="look-wall-grid" ref={grid} style={{ "--tile": `${tileSize}px` } as CSSProperties}>
         {tiles.map((tile, i) => (
           <button
             key={tile.id ?? "as-shot"}
