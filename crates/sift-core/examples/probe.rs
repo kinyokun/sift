@@ -111,6 +111,18 @@ fn main() {
         }
         return;
     }
+    if args.first().map(String::as_str) == Some("--stacks") {
+        // Bursts and pixel-shift series among the given files.
+        let files = &args[1..];
+        let hints: Vec<_> = files.iter().map(|a| sift_core::stack::read(Path::new(a)).unwrap_or_default()).collect();
+        let name = |i: usize| Path::new(&files[i]).file_name().unwrap_or_default().to_string_lossy().into_owned();
+        let stacks = sift_core::stack::group(&hints);
+        for s in &stacks {
+            println!("{:?} x{}: {} .. {}", s.kind, s.members.len(), name(s.members[0]), name(*s.members.last().unwrap()));
+        }
+        println!("{} files, {} stacks, {} files in them", files.len(), stacks.len(), stacks.iter().map(|s| s.members.len()).sum::<usize>());
+        return;
+    }
     if args.first().map(String::as_str) == Some("--ratings") {
         let t = Instant::now();
         let sum: u32 = args[1..].iter().map(|a| sift_core::meta::rating(Path::new(a)).unwrap_or(0) as u32).sum();

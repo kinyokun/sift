@@ -10,6 +10,10 @@ export type Item = {
   mtime: number;
 };
 
+/** Shots that belong together: one burst, or a pixel-shift series with its merged file first. */
+export type StackKind = "burst" | "pixelshift";
+export type Stack = { kind: StackKind; ids: string[] };
+
 export type AfBox = { x: number; y: number; w: number; h: number; focused: boolean };
 
 export type Exif = {
@@ -61,6 +65,8 @@ export type AppInfo = {
   /** Nikon's renderer exists for this platform / is part of this build. */
   nikon_supported?: boolean;
   nikon_sdk?: boolean;
+  /** Bursts can be exported as Live Photos (Apple platforms). */
+  live_photo?: boolean;
 };
 
 export type CopyReport = {
@@ -139,6 +145,10 @@ export const api = {
   scanFolder: (path: string, pair: boolean, preferRaw: boolean) => invoke<Item[]>("scan_folder", { path, pair, preferRaw }),
   readMeta: (path: string) => invoke<Meta>("read_meta", { path }),
   readBriefs: (paths: string[]) => invoke<{ rating: number; date: string | null }[]>("read_briefs", { paths }),
+  /** Bursts and pixel-shift series among the displayed files of a folder. */
+  groupShots: (paths: string[]) => invoke<Stack[]>("group_shots", { paths }),
+  /** Writes `frames` as a Live Photo (JPEG + MOV) into `dest`; resolves to the JPEG's path. */
+  exportLivePhoto: (frames: string[], key: number, dest: string) => invoke<string>("export_live_photo", { frames, key, dest }),
   setRating: (paths: string[], rating: number) => invoke<"embedded" | "sidecar">("set_rating", { paths, rating }),
   locateEyes: (path: string, af: AfBox[]) => invoke<EyeTarget | null>("locate_eyes", { path, af }),
   developRaw: (path: string) => invoke<void>("develop_raw", { path }),

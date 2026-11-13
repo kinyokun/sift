@@ -2,7 +2,7 @@ use crate::af::{self, AfInfo};
 use crate::container::{self, Format};
 use crate::exif::{self, Exif};
 use crate::io::Src;
-use crate::{formats, rating, Result};
+use crate::{formats, rating, stack, Result};
 use serde::Serialize;
 use std::path::Path;
 
@@ -97,12 +97,15 @@ pub struct Brief {
     pub rating: u8,
     /// Capture time as "YYYY-MM-DD HH:MM:SS" (sorts as text), when the file records one.
     pub date: Option<String>,
+    /// What the file says about the burst or pixel-shift series it belongs to.
+    #[serde(skip)]
+    pub series: stack::Hint,
 }
 
 pub fn brief(path: &Path) -> Result<Brief> {
     let src = Src::open(path)?;
     let p = container::parse_metadata(&src);
-    Ok(Brief { rating: rating::read(&src, &p, path), date: exif::read(&p).datetime })
+    Ok(Brief { rating: rating::read(&src, &p, path), date: exif::read(&p).datetime, series: stack::hint(&p, path) })
 }
 
 pub fn read(path: &Path) -> Result<Meta> {

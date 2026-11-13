@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { api, fileName, type AppInfo, type CropBox, type Item, type LookInfo, type Meta, type Session } from "./api";
+import { api, fileName, type AppInfo, type CropBox, type Item, type LookInfo, type Meta, type Session, type Stack, type StackKind } from "./api";
 import { DEFAULT_KEYS, resolveKeys, type Action } from "./shortcuts";
 
 export type FlagFilter = "all" | "picked" | "unflagged" | "rejected";
@@ -11,6 +11,8 @@ export type Settings = {
   pair: boolean;
   /** For RAW+JPEG pairs, show the RAW's embedded preview instead of the JPEG. */
   preferRaw: boolean;
+  /** Show a burst or a pixel-shift series as one cell in the grid. */
+  stacks: boolean;
   autoDevelop: boolean;
   /** Move to the next photo after rating or flagging in the viewer. */
   autoAdvance: boolean;
@@ -34,7 +36,7 @@ export type Settings = {
 
 const SETTINGS_KEY = "sift.settings";
 const MAX_RECENTS = 6;
-const KEYS_VERSION = 4;
+const KEYS_VERSION = 5;
 /** Progress is written this long after the last change. */
 const SAVE_DELAY_MS = 250;
 
@@ -42,6 +44,7 @@ const defaults: Settings = {
   lang: "auto",
   pair: true,
   preferRaw: false,
+  stacks: true,
   autoDevelop: true,
   autoAdvance: false,
   infoPinned: true,
@@ -61,8 +64,8 @@ function loadSettings(): Settings {
   try {
     const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
     let keys = { ...DEFAULT_KEYS };
-    // Version 4 only added actions; bindings saved under version 3 carry over.
-    if (saved.keysVersion === KEYS_VERSION || saved.keysVersion === 3) keys = resolveKeys(saved.keys || {});
+    // Versions 4 and 5 only added actions; bindings saved since version 3 carry over.
+    if (saved.keysVersion === KEYS_VERSION || saved.keysVersion === 4 || saved.keysVersion === 3) keys = resolveKeys(saved.keys || {});
     else if (saved.keysVersion === 2) {
       // Version 2 put "original" on the letter O, which reads like the 0 of
       // "clear rating". Move it unless the user had already changed it; every
@@ -98,6 +101,13 @@ type State = {
   library: LookInfo[];
   filter: FlagFilter;
   minStars: number;
+  /** Bursts and pixel-shift series of the folder, known once every file has been read. */
+  stacks: Stack[];
+  /** Photo id -> its stack and its place in it. */
+  stackOf: Record<string, [number, number]>;
+  /** Stacks opened in the grid, by the id of their first photo. */
+  expanded: string[];
+  /** Grid cells that are selected: a collapsed stack counts as one, by its first frame. */
   selection: string[];
   cursor: string | null;
   /** Ids shown in the viewer, frozen when it opens so marking never reshuffles them. */
@@ -113,6 +123,8 @@ type State = {
   setFilter: (filter: FlagFilter) => void;
   setMinStars: (n: number) => void;
   select: (ids: string[], cursor?: string | null) => void;
+  /** Opens a stack in the grid, or folds it up again. */
+  toggleStack: (key: string) => void;
   openViewer: (id: string) => void;
   closeViewer: () => void;
   setViewerIndex: (index: number) => void;
@@ -169,8 +181,34 @@ export function takenAt(dates: Record<string, string>, item: Item): string {
   return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${two(d.getHours())}:${two(d.getMinutes())}:${two(d.getSeconds())}`;
 }
 
-/** The photos that pass the filters, in the chosen order. Scans arrive sorted by name. */
-export function visibleItems(s: Pick<State, "items" | "filter" | "minStars" | "flags" | "ratings" | "dates"> & { settings: Pick<Settings, "sortBy" | "sortDesc"> }): Item[] {
+/** One cell of the grid: a photo, or a folded stack of them. */
+export type Entry = {
+  /** What selection and the cursor go by: the first frame shown. */
+  id: string;
+  /** The frame that stands for the stack. */
+  item: Item;
+  /** Every frame the cell covers, in shooting order. */
+  members: Item[];
+  /** Set when the photo belongs to a stack with more than one frame on show.
+   * `index` is its place among them (from 1) once the stack is opened. */
+  stack: { key: string; kind: StackKind; index: number; total: number; open: boolean } | null;
+};
+
+type Shown = Pick<State, "items" | "filter" | "minStars" | "flags" | "ratings" | "dates" | "stacks" | "stackOf" | "expanded"> & {
+  settings: Pick<Settings, "sortBy" | "sortDesc" | "stacks">;
+};
+
+/** The frame a folded stack shows: a pick, else the best rated, else the first that is not rejected. */
+function coverOf(members: Item[], s: Pick<State, "flags" | "ratings">): Item {
+  const picked = members.find((m) => flagOf(s.flags, m) === 1);
+  if (picked) return picked;
+  let best: Item | null = null;
+  for (const m of members) if ((s.ratings[m.id] || 0) > (best ? s.ratings[best.id] || 0 : 0)) best = m;
+  return best ?? members.find((m) => flagOf(s.flags, m) !== -1) ?? members[0];
+}
+
+/** The cells of the grid: the photos that pass the filters, stacks folded, in the chosen order. */
+export function visibleEntries(s: Shown): Entry[] {
   const shown = s.items.filter((it) => {
     const flag = flagOf(s.flags, it);
     if (s.filter === "picked" && flag !== 1) return false;
@@ -178,16 +216,60 @@ export function visibleItems(s: Pick<State, "items" | "filter" | "minStars" | "f
     if (s.filter === "unflagged" && flag !== 0) return false;
     return (s.ratings[it.id] || 0) >= s.minStars;
   });
+  const single = (it: Item): Entry => ({ id: it.id, item: it, members: [it], stack: null });
+  let entries: Entry[];
+  if (!s.settings.stacks || !s.stacks.length) entries = shown.map(single);
+  else {
+    // A stack is as large as the number of its frames that pass the filters.
+    const frames = new Map<number, Item[]>();
+    for (const it of shown) {
+      const at = s.stackOf[it.id];
+      if (!at) continue;
+      const list = frames.get(at[0]);
+      if (list) list.push(it);
+      else frames.set(at[0], [it]);
+    }
+    const open = new Set(s.expanded);
+    const placed = new Set<number>();
+    entries = [];
+    for (const it of shown) {
+      const at = s.stackOf[it.id];
+      const members = at && frames.get(at[0]);
+      if (!at || !members || members.length < 2) {
+        entries.push(single(it));
+        continue;
+      }
+      // The whole stack goes where the first of its frames is.
+      if (placed.has(at[0])) continue;
+      placed.add(at[0]);
+      members.sort((x, y) => s.stackOf[x.id][1] - s.stackOf[y.id][1]);
+      const { kind, ids } = s.stacks[at[0]];
+      const stack = { key: ids[0], kind, total: members.length };
+      if (open.has(stack.key)) members.forEach((m, i) => entries.push({ ...single(m), stack: { ...stack, index: i + 1, open: true } }));
+      else entries.push({ id: members[0].id, item: coverOf(members, s), members, stack: { ...stack, index: 0, open: false } });
+    }
+  }
   const { sortBy, sortDesc } = s.settings;
-  if (sortBy === "name") return sortDesc ? shown.reverse() : shown;
+  if (sortBy === "name") return sortDesc ? entries.reverse() : entries;
   const key: (it: Item) => string | number =
     sortBy === "time" ? (it) => takenAt(s.dates, it) : sortBy === "rating" ? (it) => s.ratings[it.id] || 0 : (it) => it.size;
   const sign = sortDesc ? -1 : 1;
   // Array.sort is stable, so equal photos stay in name order either way.
-  return shown
-    .map((it) => ({ it, k: key(it) }))
+  return entries
+    .map((e) => ({ e, k: key(e.item) }))
     .sort((a, b) => (a.k < b.k ? -sign : a.k > b.k ? sign : 0))
-    .map((x) => x.it);
+    .map((x) => x.e);
+}
+
+/** Every photo that passes the filters, in grid order; the frames of a stack stay together. Scans arrive sorted by name. */
+export function visibleItems(s: Shown): Item[] {
+  return visibleEntries(s).flatMap((e) => e.members);
+}
+
+/** The photos behind grid cells: a folded stack stands for all its frames. */
+export function framesOf(entries: Entry[], ids: string[]): Item[] {
+  const by = new Map(entries.map((e) => [e.id, e]));
+  return ids.flatMap((id) => by.get(id)?.members ?? []);
 }
 
 let toastSeq = 0;
@@ -231,6 +313,25 @@ export const useStore = create<State>((set, get) => {
       });
       set({ ratings, dates });
     }
+    // Every file has been read by now, so the stacks cost no second pass.
+    const stacks = await api.groupShots(items.map((it) => it.id)).catch(() => []);
+    if (get().folder !== path) return;
+    const stackOf: Record<string, [number, number]> = {};
+    stacks.forEach((st, k) => st.ids.forEach((id, i) => (stackOf[id] = [k, i])));
+    set({ stacks, stackOf });
+    settle();
+  };
+
+  /** The grid cell a photo is in. */
+  const cellOf = (id: string): string => visibleEntries(get()).find((e) => e.members.some((m) => m.id === id))?.id ?? id;
+
+  /** After stacks fold or open, selection and cursor move to the cells their photos are in now. */
+  const settle = () => {
+    const { selection, cursor, viewer } = get();
+    if (viewer || (!selection.length && !cursor)) return;
+    const cells = new Map<string, string>();
+    for (const e of visibleEntries(get())) for (const m of e.members) cells.set(m.id, e.id);
+    set({ selection: [...new Set(selection.map((id) => cells.get(id) ?? id))], cursor: cursor ? cells.get(cursor) ?? cursor : null });
   };
 
   return {
@@ -248,6 +349,9 @@ export const useStore = create<State>((set, get) => {
     library: [],
     filter: "all",
     minStars: 0,
+    stacks: [],
+    stackOf: {},
+    expanded: [],
     selection: [],
     cursor: null,
     viewer: null,
@@ -280,11 +384,12 @@ export const useStore = create<State>((set, get) => {
       const settings = { ...get().settings, ...patch };
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
       set({ settings });
+      if ("stacks" in patch) settle();
     },
 
     openFolder: async (path) => {
       saveNow();
-      set({ loading: true, folder: path, items: [], ratings: {}, dates: {}, flags: {}, looks: {}, crops: {}, metas: {}, selection: [], cursor: null, viewer: null });
+      set({ loading: true, folder: path, items: [], ratings: {}, dates: {}, flags: {}, looks: {}, crops: {}, metas: {}, stacks: [], stackOf: {}, expanded: [], selection: [], cursor: null, viewer: null });
       try {
         const { pair, preferRaw } = get().settings;
         const [items, saved] = await Promise.all([api.scanFolder(path, pair, preferRaw), api.loadSession(path)]);
@@ -318,7 +423,7 @@ export const useStore = create<State>((set, get) => {
     closeFolder: () => {
       saveNow();
       api.clearLastSession().catch(() => {});
-      set({ folder: null, items: [], viewer: null, selection: [], cursor: null });
+      set({ folder: null, items: [], stacks: [], stackOf: {}, expanded: [], viewer: null, selection: [], cursor: null });
     },
 
     reload: async () => {
@@ -328,7 +433,7 @@ export const useStore = create<State>((set, get) => {
       const items = await api.scanFolder(folder, settings.pair, settings.preferRaw);
       if (get().folder !== folder) return;
       const keep = items.find((it) => it.paths.some((p) => fileName(p) === at));
-      set({ items, metas: {}, dates: {}, viewer: null, selection: keep ? [keep.id] : [], cursor: keep?.id ?? null });
+      set({ items, metas: {}, dates: {}, stacks: [], stackOf: {}, viewer: null, selection: keep ? [keep.id] : [], cursor: keep?.id ?? null });
       await readRatings(folder, items);
     },
 
@@ -344,6 +449,11 @@ export const useStore = create<State>((set, get) => {
       set({ selection: ids, cursor: cursor === undefined ? ids[ids.length - 1] ?? null : cursor });
       save();
     },
+    toggleStack: (key) => {
+      const { expanded } = get();
+      set({ expanded: expanded.includes(key) ? expanded.filter((k) => k !== key) : [...expanded, key] });
+      settle();
+    },
 
     openViewer: (id) => {
       const ids = visibleItems(get()).map((it) => it.id);
@@ -354,7 +464,8 @@ export const useStore = create<State>((set, get) => {
     closeViewer: () => {
       const v = get().viewer;
       if (!v) return;
-      const id = v.ids[v.index];
+      // Back in the grid the photo may be inside a folded stack.
+      const id = cellOf(v.ids[v.index]);
       // A selection made in the grid survives a look at one of its photos.
       const { selection } = get();
       set({ viewer: null, selection: selection.length > 1 && selection.includes(id) ? selection : [id], cursor: id });

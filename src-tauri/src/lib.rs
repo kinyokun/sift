@@ -65,6 +65,8 @@ pub fn run() {
             commands::scan_folder,
             commands::read_meta,
             commands::read_briefs,
+            commands::group_shots,
+            commands::export_live_photo,
             commands::set_rating,
             commands::locate_eyes,
             commands::develop_raw,

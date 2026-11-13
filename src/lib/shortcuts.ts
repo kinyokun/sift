@@ -2,6 +2,8 @@
 export const ACTIONS = [
   "prev",
   "next",
+  "stackPrev",
+  "stackNext",
   "pick",
   "reject",
   "unflag",
@@ -38,6 +40,8 @@ export const RATE_ACTIONS: Action[] = ["rate0", "rate1", "rate2", "rate3", "rate
 export const DEFAULT_KEYS: Record<Action, string> = {
   prev: "A",
   next: "D",
+  stackPrev: "ArrowUp",
+  stackNext: "ArrowDown",
   pick: "P",
   reject: "X",
   unflag: "U",

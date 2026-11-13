@@ -1,9 +1,9 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { NO_LOOK, imageUrl, isRawPath, type Item } from "../lib/api";
+import { NO_LOOK, imageUrl, isRawPath, type Item, type StackKind } from "../lib/api";
 import { useT } from "../lib/i18n";
 import { actionFor, isTyping, keyOf, ratingOf } from "../lib/shortcuts";
 import { useShallow } from "zustand/react/shallow";
-import { flagOf, folderName, lookOf, useStore, visibleItems, type FlagFilter, type SortBy } from "../lib/store";
+import { flagOf, folderName, framesOf, lookOf, useStore, visibleEntries, type Entry, type FlagFilter, type SortBy } from "../lib/store";
 import { IconButton, Menu, Segmented, Stars, type MenuItem } from "../ui/controls";
 import { Icon } from "../ui/Icon";
 import { useWheelSize } from "../lib/wheelSize";
@@ -33,7 +33,17 @@ const ratios = new Map<string, number>();
 type Box = { x0: number; y0: number; x1: number; y1: number };
 
 const Cell = memo(function Cell(props: {
+  /** The grid cell's id: the photo's own, or the first frame of a folded stack. */
+  id: string;
+  /** The photo shown. */
   item: Item;
+  /** Folded stack: how many frames it holds. Opened stack: this frame's place in it. */
+  stack: StackKind | null;
+  stackKey: string;
+  stackOpen: boolean;
+  stackIndex: number;
+  stackTotal: number;
+  stackLabel: string;
   rating: number;
   flag: number;
   /** Name of the look chosen for this photo, if any. */
@@ -45,13 +55,16 @@ const Cell = memo(function Cell(props: {
   left: number;
   top: number;
   checkLabel: string;
-  onPress: (item: Item, e: React.MouseEvent) => void;
-  onCheck: (item: Item, e: React.MouseEvent) => void;
-  onOpen: (item: Item, e: React.MouseEvent) => void;
+  onPress: (id: string, shown: string, e: React.MouseEvent) => void;
+  onCheck: (id: string, e: React.MouseEvent) => void;
+  onOpen: (id: string, shown: string, e: React.MouseEvent) => void;
+  /** Opens or folds the stack. */
+  onStack: (key: string) => void;
   /** Touch screens: a long press. */
-  onHold?: (item: Item) => void;
+  onHold?: (id: string) => void;
 }) {
-  const { item, rating, flag, selected, size } = props;
+  const { id, item, rating, flag, selected, size } = props;
+  const folded = !!props.stack && !props.stackOpen;
   const seen = ratios.has(item.id);
   const [ratio, setRatio] = useState(ratios.get(item.id) ?? 0);
   const [asked, setAsked] = useState(seen);
@@ -70,7 +83,7 @@ const Cell = memo(function Cell(props: {
   const touch = onHold && {
     onPointerDown: (e: React.PointerEvent) => {
       clearTimeout(hold.current?.timer);
-      const state = { timer: setTimeout(() => ((state.fired = true), onHold(item)), HOLD_MS), x: e.clientX, y: e.clientY, fired: false };
+      const state = { timer: setTimeout(() => ((state.fired = true), onHold(id)), HOLD_MS), x: e.clientX, y: e.clientY, fired: false };
       hold.current = state;
     },
     onPointerMove: (e: React.PointerEvent) => {
@@ -83,14 +96,14 @@ const Cell = memo(function Cell(props: {
   };
   return (
     <div
-      className={`cell ${selected ? "selected" : ""} ${props.cursor && !selected ? "cursor" : ""} ${flag === -1 ? "rejected" : ""}`}
+      className={`cell ${selected ? "selected" : ""} ${props.cursor && !selected ? "cursor" : ""} ${flag === -1 ? "rejected" : ""} ${folded ? "stacked" : ""}`}
       style={{ width: size, height: size, transform: `translate(${props.left}px, ${props.top}px)` }}
       onClick={(e) => {
         // The click that ends a long press has already been acted on.
         if (hold.current?.fired) return void (hold.current = null);
-        props.onPress(item, e);
+        props.onPress(id, item.id, e);
       }}
-      onDoubleClick={(e) => props.onOpen(item, e)}
+      onDoubleClick={(e) => props.onOpen(id, item.id, e)}
       {...touch}
     >
       <div className={`cell-frame ${ready ? "" : "pending"}`} style={frame}>
@@ -123,6 +136,22 @@ const Cell = memo(function Cell(props: {
             </span>
           )}
         </div>
+        {props.stack && (
+          <button
+            className={`cell-stack ${props.stack}`}
+            title={props.stackLabel}
+            aria-label={props.stackLabel}
+            tabIndex={-1}
+            onClick={(e) => {
+              e.stopPropagation();
+              props.onStack(props.stackKey);
+            }}
+            onDoubleClick={(e) => e.stopPropagation()}
+          >
+            <Icon name={props.stack === "pixelshift" ? "shift" : "stack"} size={12} />
+            {folded ? props.stackTotal : `${props.stackIndex}/${props.stackTotal}`}
+          </button>
+        )}
         {flag === 1 && (
           <span className="cell-flag pick">
             <Icon name="check" size={12} />
@@ -143,7 +172,7 @@ const Cell = memo(function Cell(props: {
         tabIndex={-1}
         onClick={(e) => {
           e.stopPropagation();
-          props.onCheck(item, e);
+          props.onCheck(id, e);
         }}
         onDoubleClick={(e) => e.stopPropagation()}
       >
@@ -168,6 +197,10 @@ export function Library() {
       library: st.library,
       filter: st.filter,
       minStars: st.minStars,
+      stacks: st.stacks,
+      stackOf: st.stackOf,
+      expanded: st.expanded,
+      stacking: st.settings.stacks,
       selection: st.selection,
       cursor: st.cursor,
       thumb: st.settings.thumb,
@@ -176,11 +209,15 @@ export function Library() {
     })),
   );
   const act = useStore.getState();
-  const items = useMemo(
-    () => visibleItems({ ...s, settings: { sortBy: s.sortBy, sortDesc: s.sortDesc } }),
+  // The cells of the grid; a folded stack is one of them.
+  const items: Entry[] = useMemo(
+    () => visibleEntries({ ...s, settings: { sortBy: s.sortBy, sortDesc: s.sortDesc, stacks: s.stacking } }),
     // Capture times only matter when sorting by them.
-    [s.items, s.filter, s.minStars, s.flags, s.ratings, s.sortBy, s.sortDesc, s.sortBy === "time" ? s.dates : null],
+    [s.items, s.filter, s.minStars, s.flags, s.ratings, s.sortBy, s.sortDesc, s.sortBy === "time" ? s.dates : null, s.stacks, s.expanded, s.stacking],
   );
+  const photoCount = useMemo(() => items.reduce((n, e) => n + e.members.length, 0), [items]);
+  /** The photos an action on these cells reaches: every frame of a folded stack. */
+  const frames = useCallback((ids: string[]) => framesOf(items, ids), [items]);
   const mobile = !!s.info?.mobile;
   const scroller = useRef<HTMLDivElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
@@ -265,37 +302,39 @@ export function Library() {
   );
 
   const onPress = useCallback(
-    (item: Item, e: React.MouseEvent) => {
+    (id: string, shown: string, e: React.MouseEvent) => {
       if (dragged.current) return;
       clearTimeout(collapse.current);
       const st = useStore.getState();
-      if (st.info?.mobile) return selecting ? toggle(item.id) : st.openViewer(item.id);
-      if (e.shiftKey) return extendTo(item.id);
-      if (e.metaKey || e.ctrlKey) return toggle(item.id);
+      if (st.info?.mobile) return selecting ? toggle(id) : st.openViewer(shown);
+      if (e.shiftKey) return extendTo(id);
+      if (e.metaKey || e.ctrlKey) return toggle(id);
       const only = () => {
-        anchor.current = { id: item.id, base: [] };
-        useStore.getState().select([item.id]);
+        anchor.current = { id, base: [] };
+        useStore.getState().select([id]);
       };
       // A click on one of several selected photos may be the first half of a
       // double click that opens it; the selection is kept until that is ruled out.
-      if (st.selection.length > 1 && st.selection.includes(item.id)) collapse.current = setTimeout(only, DOUBLE_CLICK_MS);
+      if (st.selection.length > 1 && st.selection.includes(id)) collapse.current = setTimeout(only, DOUBLE_CLICK_MS);
       else only();
     },
     [selecting, toggle, extendTo],
   );
-  const onCheck = useCallback((item: Item, e: React.MouseEvent) => (e.shiftKey ? extendTo(item.id) : toggle(item.id)), [toggle, extendTo]);
-  const onOpen = useCallback((item: Item, e: React.MouseEvent) => {
+  const onCheck = useCallback((id: string, e: React.MouseEvent) => (e.shiftKey ? extendTo(id) : toggle(id)), [toggle, extendTo]);
+  // A folded stack opens in the viewer on the frame it shows; its other frames follow there.
+  const onOpen = useCallback((id: string, shown: string, e: React.MouseEvent) => {
     if (e.shiftKey || e.metaKey || e.ctrlKey) return;
     clearTimeout(collapse.current);
     const st = useStore.getState();
-    st.select(st.selection, item.id);
-    st.openViewer(item.id);
+    st.select(st.selection, id);
+    st.openViewer(shown);
   }, []);
-  const onHold = useCallback((item: Item) => {
+  const onHold = useCallback((id: string) => {
     setSelecting(true);
-    anchor.current = { id: item.id, base: [item.id] };
-    useStore.getState().select([item.id]);
+    anchor.current = { id, base: [id] };
+    useStore.getState().select([id]);
   }, []);
+  const onStack = useCallback((key: string) => useStore.getState().toggleStack(key), []);
 
   const clearSelection = useCallback(() => {
     const st = useStore.getState();
@@ -430,7 +469,9 @@ export function Library() {
         anchor.current = { id: next, base: [] };
         st.select([next]);
       };
-      const targets = st.selection.length ? st.selection : st.cursor ? [st.cursor] : [];
+      const cells = st.selection.length ? st.selection : st.cursor ? [st.cursor] : [];
+      const members = frames(cells);
+      const targets = members.map((m) => m.id);
       switch (e.key) {
         case "ArrowRight":
           return move(1);
@@ -441,9 +482,9 @@ export function Library() {
         case "ArrowUp":
           return move(-cols);
         case "Enter":
-          if (st.cursor) {
+          if (at >= 0) {
             e.preventDefault();
-            st.openViewer(st.cursor);
+            st.openViewer(items[at].item.id);
           }
           return;
       }
@@ -451,11 +492,7 @@ export function Library() {
       const action = actionFor(st.settings.keys, e);
       const stars = ratingOf(action);
       if (stars !== null) return void st.rate(targets, stars);
-      const allFlagged = (v: number) =>
-        targets.every((id) => {
-          const item = items.find((it) => it.id === id);
-          return !!item && flagOf(st.flags, item) === v;
-        });
+      const allFlagged = (v: number) => members.every((m) => flagOf(st.flags, m) === v);
       if (action === "pick") st.flag(targets, allFlagged(1) ? 0 : 1);
       else if (action === "reject") st.flag(targets, allFlagged(-1) ? 0 : -1);
       else if (action === "unflag") st.flag(targets, 0);
@@ -464,7 +501,7 @@ export function Library() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [items, cols, indexOf, extendTo, selectAll, selecting]);
+  }, [items, cols, indexOf, extendTo, selectAll, selecting, frames]);
 
   const counts = useMemo(() => {
     let picked = 0;
@@ -505,8 +542,8 @@ export function Library() {
 
   /** Sets one look on every selected photo; "original" only where there is a RAW. */
   const applyLook = (look: string | null) => {
-    const picked = s.selection.length ? s.selection : s.cursor ? [s.cursor] : [];
-    const ids = look === NO_LOOK ? picked.filter((id) => s.items.find((it) => it.id === id)?.paths.some(isRawPath)) : picked;
+    const picked = frames(s.selection.length ? s.selection : s.cursor ? [s.cursor] : []);
+    const ids = (look === NO_LOOK ? picked.filter((it) => it.paths.some(isRawPath)) : picked).map((it) => it.id);
     if (!picked.length) return act.notify("selectFirst");
     if (!ids.length) return act.notify("originalNeedsRaw");
     act.setLook(ids, look);
@@ -534,6 +571,7 @@ export function Library() {
     ...(mobile ? [{ label: t.selectPhotos, icon: "check", onSelect: () => setSelecting(true) } as MenuItem] : []),
     ...(mobile ? [] : [{ label: t.findRaw, icon: "raw", onSelect: () => act.setSheet("findraw") } as MenuItem]),
     "divider",
+    ...(s.stacks.length ? [{ label: t.stackPhotos, checked: s.stacking, onSelect: () => act.setSettings({ stacks: !s.stacking }) } as MenuItem, "divider" as const] : []),
     { label: t.settings, icon: "gear", onSelect: () => act.setSheet("settings") },
     { label: t.help, icon: "help", onSelect: () => act.setSheet("help") },
   ];
@@ -541,9 +579,11 @@ export function Library() {
   const lookLabel = (id: string | null) => (!id ? "" : id === NO_LOOK ? t.original : (lookNames.get(id) ?? id));
 
   // The bar for acting on several photos at once.
+  const chosen = useMemo(() => frames(s.selection).map((m) => m.id), [frames, s.selection]);
+  // One folded stack is already several photos.
   const bar = mobile ? selecting : s.selection.length > 1;
-  const sharedRating = s.selection.length && s.selection.every((id) => (s.ratings[id] || 0) === (s.ratings[s.selection[0]] || 0)) ? s.ratings[s.selection[0]] || 0 : 0;
-  const flagAll = (value: number) => s.selection.length && act.flag(s.selection, value);
+  const sharedRating = chosen.length && chosen.every((id) => (s.ratings[id] || 0) === (s.ratings[chosen[0]] || 0)) ? s.ratings[chosen[0]] || 0 : 0;
+  const flagAll = (value: number) => chosen.length && act.flag(chosen, value);
 
   return (
     <div className="library">
@@ -552,7 +592,7 @@ export function Library() {
           <IconButton icon="back" label={t.back} onClick={act.closeFolder} />
           <div className="toolbar-title" data-tauri-drag-region>
             <strong>{s.folder ? folderName(s.folder) : ""}</strong>
-            <span>{s.loading ? t.readingFolder : t.photos(items.length)}</span>
+            <span>{s.loading ? t.readingFolder : t.photos(photoCount)}</span>
           </div>
         </div>
         <Segmented className="toolbar-filter" value={s.filter} options={filters} onChange={act.setFilter} />
@@ -585,17 +625,25 @@ export function Library() {
           ref={gridRef}
           style={{ height: rows * pitch - GAP + pad * 2 + (bar ? 76 : 0), marginTop: box.head }}
         >
-          {shown.map((item, k) => {
+          {shown.map((entry, k) => {
             const i = first * cols + k;
+            const { item, stack } = entry;
             return (
               <Cell
-                key={item.id}
+                key={entry.id}
+                id={entry.id}
                 item={item}
+                stack={stack?.kind ?? null}
+                stackKey={stack?.key ?? ""}
+                stackOpen={!!stack?.open}
+                stackIndex={stack?.index ?? 0}
+                stackTotal={stack?.total ?? 0}
+                stackLabel={!stack ? "" : `${stack.kind === "pixelshift" ? t.pixelShift : t.burst} · ${stack.open ? t.stackFold : t.stackOpen(stack.total)}`}
                 rating={s.ratings[item.id] || 0}
                 flag={flagOf(s.flags, item)}
                 look={lookLabel(lookOf(s.looks, item))}
-                selected={selected.has(item.id)}
-                cursor={item.id === s.cursor}
+                selected={selected.has(entry.id)}
+                cursor={entry.id === s.cursor}
                 size={size}
                 left={pad + (i % cols) * pitch}
                 top={pad + Math.floor(i / cols) * pitch}
@@ -603,6 +651,7 @@ export function Library() {
                 onPress={onPress}
                 onCheck={onCheck}
                 onOpen={onOpen}
+                onStack={onStack}
                 onHold={mobile ? onHold : undefined}
               />
             );
@@ -624,9 +673,9 @@ export function Library() {
       </div>
 
       {bar && (
-        <div className="selection-bar glass" role="toolbar" aria-label={t.selectedCount(s.selection.length)}>
-          <strong>{t.selectedCount(s.selection.length)}</strong>
-          <Stars value={sharedRating} size={17} onChange={(n) => s.selection.length && act.rate(s.selection, n)} />
+        <div className="selection-bar glass" role="toolbar" aria-label={t.selectedCount(chosen.length)}>
+          <strong>{t.selectedCount(chosen.length)}</strong>
+          <Stars value={sharedRating} size={17} onChange={(n) => chosen.length && act.rate(chosen, n)} />
           <span className="selection-flags">
             <button className="flag-button pick" title={t.pick} aria-label={t.pick} onClick={() => flagAll(1)}>
               <Icon name="check" size={15} />

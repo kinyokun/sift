@@ -27,6 +27,8 @@ function Toast() {
     lookSaved: t.lookSaved(detail ?? ""),
     lookApplied: t.lookApplied(Number(detail) || 0),
     selectFirst: t.selectFirst,
+    livePhotoSaved: t.livePhotoSaved(detail ?? ""),
+    livePhotoFailed: `${t.livePhotoFailed}${detail ? ` · ${detail}` : ""}`,
     shortcutClash: t.shortcutClash(t.actions[detail as keyof typeof t.actions] ?? detail ?? ""),
   };
   return (

@@ -16,6 +16,8 @@ pub struct AppState {
     /// Loaded the first time a photo turns out to have no face in it.
     pub animals: OnceLock<Option<animal::Detector>>,
     pub eyes: Mutex<HashMap<String, Option<crate::commands::EyeTarget>>>,
+    /// What each file read so far says about its burst or pixel-shift series.
+    pub series: Mutex<HashMap<String, sift_core::stack::Hint>>,
     pub cancel: Arc<AtomicBool>,
     /// Bounds concurrent image decodes so a fast scroll cannot saturate the CPU.
     pub image_slots: Arc<tokio::sync::Semaphore>,
@@ -38,6 +40,7 @@ impl AppState {
             detector: OnceLock::new(),
             animals: OnceLock::new(),
             eyes: Mutex::new(HashMap::new()),
+            series: Mutex::new(HashMap::new()),
             cancel: Arc::new(AtomicBool::new(false)),
             image_slots: Arc::new(tokio::sync::Semaphore::new(workers)),
             transfer: Mutex::new(None),

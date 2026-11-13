@@ -2122,3 +2122,212 @@ input.text {
     padding: 6px 8px 24px;
   }
 }
+
+/* A burst or pixel-shift series folded into one cell: its frame sits on two more. */
+.cell.stacked .cell-frame {
+  transform: translate(-50%, -50%) translate(-4px, 4px) scale(0.92);
+}
+
+.cell.stacked .cell-frame::before,
+.cell.stacked .cell-frame::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--text) 26%, var(--bg));
+  box-shadow: 0 0 0 0.5px var(--hairline);
+  transform: translate(5px, -5px);
+}
+
+.cell.stacked .cell-frame::after {
+  z-index: -2;
+  background: color-mix(in srgb, var(--text) 14%, var(--bg));
+  transform: translate(10px, -10px);
+}
+
+.cell-stack {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 19px;
+  padding: 0 7px 0 5px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.6);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+
+.cell-stack.pixelshift {
+  background: color-mix(in srgb, var(--tint) 82%, #000);
+}
+
+.cell-stack:hover {
+  background: var(--tint);
+}
+
+/* The frames of the stack on screen, above the viewer's dock. */
+.stack-strip-holder {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 10px);
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: min(calc(100vw - 24px), 980px);
+}
+
+.viewer.with-info .stack-strip-holder {
+  max-width: min(calc(100vw - var(--info-width) - 24px), 980px);
+}
+
+.stack-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+}
+
+.stack-strip-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  padding-left: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.stack-strip-label b {
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.stack-strip-frames {
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding: 2px;
+}
+
+.stack-strip-frames::-webkit-scrollbar {
+  display: none;
+}
+
+.stack-strip-frames button {
+  position: relative;
+  flex: none;
+  width: 66px;
+  height: 46px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--fill);
+  opacity: 0.62;
+  transition: opacity 0.12s;
+}
+
+.stack-strip-frames button:hover {
+  opacity: 0.9;
+}
+
+.stack-strip-frames button.on {
+  opacity: 1;
+  box-shadow: 0 0 0 2px var(--tint);
+}
+
+.stack-strip-frames img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.stack-strip-frames .rejected img {
+  opacity: 0.35;
+  filter: grayscale(0.6);
+}
+
+.stack-strip-frames i {
+  position: absolute;
+  font-style: normal;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 13px;
+  color: #fff;
+}
+
+.stack-strip-frames i.pick,
+.stack-strip-frames i.reject {
+  top: 3px;
+  right: 3px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+
+.stack-strip-frames i.reject {
+  background: var(--red);
+}
+
+.stack-strip-frames i.stars,
+.stack-strip-frames i.merged {
+  left: 3px;
+  bottom: 3px;
+  padding: 0 4px;
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.stack-strip-frames i.merged {
+  top: 3px;
+  bottom: auto;
+  background: var(--tint);
+}
+
+.stack-strip-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  height: 30px;
+  padding: 0 11px;
+  border-radius: 15px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  background: var(--fill);
+}
+
+.stack-strip-action:hover:not(:disabled) {
+  background: var(--fill-2);
+}
+
+.stack-strip-action .spinner {
+  width: 13px;
+  height: 13px;
+  border-width: 2px;
+}
+
+@media (max-width: 700px) {
+  .stack-strip-label {
+    display: none;
+  }
+
+  .stack-strip-frames button {
+    width: 52px;
+    height: 38px;
+  }
+}

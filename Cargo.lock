@@ -4310,6 +4310,7 @@ name = "sift-core"
 version = "0.2.0"
 dependencies = [
  "ab_glyph",
+ "cc",
  "core-foundation",
  "core-foundation-sys",
  "filetime",

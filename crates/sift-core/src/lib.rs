@@ -17,12 +17,15 @@ pub mod histogram;
 pub mod frame;
 pub mod io;
 pub mod jpeg;
+#[cfg(target_vendor = "apple")]
+pub mod live;
 pub mod look;
 pub mod nikon;
 pub mod meta;
 pub mod preview;
 pub mod rating;
 pub mod render;
+pub mod stack;
 pub mod tiff;
 pub mod xmp;
 

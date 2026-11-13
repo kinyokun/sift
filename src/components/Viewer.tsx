@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { NO_LOOK, api, imageUrl, isRawPath, type CropBox, type Item, type Meta } from "../lib/api";
+import { NO_LOOK, api, fileName, imageUrl, isRawPath, type CropBox, type Item, type Meta } from "../lib/api";
 import { useT } from "../lib/i18n";
 import { actionFor, isTyping, ratingOf } from "../lib/shortcuts";
 import { cropOf, flagOf, lookOf, useStore } from "../lib/store";
@@ -9,6 +9,7 @@ import { Icon } from "../ui/Icon";
 import { CROP_RATIOS, GUIDE_MODES, ROTATABLE_GUIDES, centeredCrop, type Crop } from "./Overlay";
 import { Histogram } from "./Histogram";
 import { LookWall } from "./LookWall";
+import { StackStrip } from "./StackStrip";
 import { Pane, fullUrlOf, lookSource, type Nudge, type PaneHandle, type PaneStatus } from "./Pane";
 
 export function formatShutter(s: number): string {
@@ -109,6 +110,8 @@ export function Viewer() {
   const crops = useStore((s) => s.crops);
   const settings = useStore((s) => s.settings);
   const info = useStore((s) => s.info);
+  const stacks = useStore((s) => s.stacks);
+  const stackOf = useStore((s) => s.stackOf);
   const mobile = !!info?.mobile;
   const byId = useMemo(() => new Map(items.map((it) => [it.id, it])), [items]);
 
@@ -127,6 +130,7 @@ export function Viewer() {
   const [wall, setWall] = useState(false);
   const [zoom, setZoom] = useState({ percent: 0, fit: true });
   const [status, setStatus] = useState<PaneStatus>(null);
+  const [exporting, setExporting] = useState(false);
   // On desktop the info sidebar stays open across photos and sessions.
   const showInfo = mobile ? floatingInfo : settings.infoPinned;
   const toggleInfo = () => (mobile ? setFloatingInfo((v) => !v) : useStore.getState().setSettings({ infoPinned: !settings.infoPinned }));
@@ -136,6 +140,7 @@ export function Viewer() {
   const panes = [useRef<PaneHandle>(null), useRef<PaneHandle>(null)];
   const topBar = useRef<HTMLElement>(null);
   const dock = useRef<HTMLDivElement>(null);
+  const strip = useRef<HTMLDivElement>(null);
 
   const leftItem = byId.get(viewer.ids[viewer.index]);
   const rightItem = compare ? byId.get(viewer.ids[rightIndex]) : undefined;
@@ -167,15 +172,27 @@ export function Viewer() {
     }
   }, [leftItem?.id, rightItem?.id]);
 
+  // The frames of the stack the photo on screen is in, as far as the viewer holds them.
+  const inViewer = useMemo(() => new Set(viewer.ids), [viewer.ids]);
+  const stackAt = current && settings.stacks ? stackOf[current.id] : undefined;
+  const stack = stackAt ? stacks[stackAt[0]] : undefined;
+  const stackFrames = useMemo(() => {
+    const frames = (stack?.ids ?? []).filter((id) => inViewer.has(id)).map((id) => byId.get(id)!).filter(Boolean);
+    return frames.length > 1 ? frames : [];
+  }, [stack, inViewer, byId]);
+  const showStrip = stackFrames.length > 0 && !crop && !immersive;
+
   useLayoutEffect(() => {
-    const measure = () =>
-      setInsets(immersive ? { top: 0, bottom: 0 } : { top: topBar.current?.offsetHeight ?? 0, bottom: (dock.current?.offsetHeight ?? 0) + 20 });
+    const measure = () => {
+      const band = strip.current ? strip.current.offsetHeight + 10 : 0;
+      setInsets(immersive ? { top: 0, bottom: 0 } : { top: topBar.current?.offsetHeight ?? 0, bottom: (dock.current?.offsetHeight ?? 0) + 20 + band });
+    };
     measure();
     const ro = new ResizeObserver(measure);
     if (topBar.current) ro.observe(topBar.current);
     if (dock.current) ro.observe(dock.current);
     return () => ro.disconnect();
-  }, [immersive, compare, showInfo]);
+  }, [immersive, compare, showInfo, showStrip]);
 
   // Eye zoom follows the photo: stepping through a burst keeps the eyes centred.
   const focusEyes = useCallback(async (item: Item, pane: PaneHandle | null, announce: boolean) => {
@@ -220,6 +237,45 @@ export function Viewer() {
     },
     [compare, active, viewer.index, viewer.ids.length],
   );
+
+  /** Shows another photo in the pane that has the keyboard. */
+  const show = useCallback(
+    (index: number) => {
+      if (index < 0 || index >= viewer.ids.length) return;
+      if (compare && active === 1) setRightIndex(index);
+      else useStore.getState().setViewerIndex(index);
+    },
+    [compare, active, viewer.ids.length],
+  );
+
+  /** Leaves the stack on screen for the one after or before it; a photo on its own is a stack of one. */
+  const stepStack = (delta: number) => {
+    const ids = viewer.ids;
+    const key = (i: number) => (settings.stacks ? stackOf[ids[i]]?.[0] : undefined) ?? `one:${i}`;
+    const from = compare && active === 1 ? rightIndex : viewer.index;
+    let i = from + delta;
+    while (i >= 0 && i < ids.length && key(i) === key(from)) i += delta;
+    // Going back lands on the first frame of the stack before.
+    while (delta < 0 && i > 0 && key(i - 1) === key(i)) i--;
+    show(i);
+  };
+
+  /** Writes the burst on screen as a Live Photo, with the frame on screen as its still. */
+  const exportLivePhoto = async () => {
+    if (!current || exporting) return;
+    const dest = await open({ directory: true });
+    if (typeof dest !== "string") return;
+    setExporting(true);
+    try {
+      const frames = stackFrames.map((f) => f.id);
+      const saved = await api.exportLivePhoto(frames, Math.max(0, frames.indexOf(current.id)), dest);
+      useStore.getState().notify(`livePhotoSaved:${fileName(saved)}`);
+    } catch (e) {
+      useStore.getState().notify(`livePhotoFailed:${e}`);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const toggleCompare = () => {
     if (!compare) setRightIndex(Math.min(viewer.ids.length - 1, viewer.index + 1));
@@ -364,6 +420,10 @@ export function Viewer() {
           return step(1);
         case "prev":
           return step(-1);
+        case "stackNext":
+          return stepStack(1);
+        case "stackPrev":
+          return stepStack(-1);
         case "pick":
           return setFlag(1);
         case "reject":
@@ -542,6 +602,18 @@ export function Viewer() {
         )}
 
         <div className="dock glass" ref={dock}>
+          {showStrip && stack && (
+            <div className="stack-strip-holder" ref={strip}>
+              <StackStrip
+                kind={stack.kind}
+                frames={stackFrames}
+                current={current.id}
+                onChoose={(id) => show(viewer.ids.indexOf(id))}
+                onLivePhoto={stack.kind === "burst" && info?.live_photo && !mobile ? exportLivePhoto : undefined}
+                busy={exporting}
+              />
+            </div>
+          )}
           {crop && (
             <div className="crop-bar glass">
               <button onClick={() => chooseCrop(null)}>{t.cancel}</button>

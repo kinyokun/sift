@@ -33,6 +33,7 @@ fn run(state: &AppState, cmd: &str, args: &Value) -> Result<Response, String> {
             "platform": std::env::consts::OS, "mobile": false, "version": env!("CARGO_PKG_VERSION"),
             "library": null, "cache_bytes": sift_lib::state::dir_size(&state.cache_dir),
             "nikon_supported": sift_core::nikon::SUPPORTED, "nikon_sdk": state.nikon().is_some(),
+            "live_photo": cfg!(target_os = "macos"),
         })),
         "scan_folder" => {
             let dir = PathBuf::from(arg::<String>(args, "path")?);
@@ -44,6 +45,8 @@ fn run(state: &AppState, cmd: &str, args: &Value) -> Result<Response, String> {
         }
         "read_meta" => json(&sift_core::meta::read(&state.check(&arg::<String>(args, "path")?)?).map_err(|e| e.to_string())?),
         "read_briefs" => json(&commands::briefs_of(state, &arg::<Vec<String>>(args, "paths")?)),
+        "group_shots" => json(&commands::stacks_of(state, &arg::<Vec<String>>(args, "paths")?)),
+        "export_live_photo" => json(&commands::live_photo(state, &arg::<Vec<String>>(args, "frames")?, arg(args, "key")?, &arg::<String>(args, "dest")?, |_| {})?),
         "set_rating" => json(&commands::rate(state, &arg::<Vec<String>>(args, "paths")?, arg(args, "rating")?)?),
         "locate_eyes" => json(&commands::eyes_of(state, arg(args, "path")?, &arg::<Vec<sift_core::af::AfBox>>(args, "af")?)?),
         "load_session" => ok(commands::session_of(state, &arg::<String>(args, "folder")?)),

@@ -4,7 +4,7 @@ import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, isRawPath, type CropBox, type CopyReport, type ExportKind, type FrameOptions, type FrameStyle, type Item, type Progress, type Rename } from "../lib/api";
 import { useT } from "../lib/i18n";
-import { cropOf, flagOf, folderName, lookOf, useStore, visibleItems } from "../lib/store";
+import { cropOf, flagOf, folderName, framesOf, lookOf, useStore, visibleEntries } from "../lib/store";
 import { Row, Segmented, Sheet, Toggle } from "../ui/controls";
 
 const LAST_DEST_KEY = "sift.exportDest";
@@ -18,13 +18,15 @@ type Scope = "picked" | "selection" | "shown";
 export function useScopes(): { scopes: Record<Scope, Item[]>; initial: Scope } {
   const s = useStore();
   return useMemo(() => {
-    const shown = visibleItems(s);
+    const cells = visibleEntries(s);
+    const shown = cells.flatMap((e) => e.members);
     const picked = s.items.filter((it) => flagOf(s.flags, it) === 1);
-    const chosen = new Set(s.selection);
-    const selection = s.selection.length > 1 ? s.items.filter((it) => chosen.has(it.id)) : [];
+    // A folded stack that is selected stands for all of its frames.
+    const chosen = framesOf(cells, s.selection);
+    const selection = chosen.length > 1 ? chosen : [];
     const initial: Scope = picked.length ? "picked" : selection.length ? "selection" : "shown";
     return { scopes: { picked, selection, shown }, initial };
-  }, [s.items, s.flags, s.selection, s.filter, s.minStars, s.ratings]);
+  }, [s.items, s.flags, s.selection, s.filter, s.minStars, s.ratings, s.stacks, s.expanded, s.settings.stacks, s.settings.sortBy, s.settings.sortDesc]);
 }
 
 function useProgress(): Progress | null {

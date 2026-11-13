@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use sift_core::af::AfBox;
 use sift_core::export::{self, CopyReport, Progress};
 use sift_core::frame::FrameOptions;
-use sift_core::{face, formats, frame, meta, preview, rating};
+use sift_core::{face, formats, frame, meta, preview, rating, stack};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fs;
@@ -169,7 +169,82 @@ pub fn briefs_of(state: &AppState, paths: &[String]) -> Vec<meta::Brief> {
             });
         }
     });
+    // The series each file belongs to is kept for `stacks_of`, which needs the whole folder at once.
+    let mut series = state.series.lock().unwrap();
+    for (path, brief) in paths.iter().zip(&out) {
+        series.insert(path.clone(), brief.series.clone());
+    }
     out
+}
+
+/// Shots that belong together, by the path they are displayed by.
+#[derive(Serialize)]
+pub struct Stack {
+    pub kind: stack::Kind,
+    /// In shooting order; a merged pixel-shift file comes first.
+    pub ids: Vec<String>,
+}
+
+/// Bursts and pixel-shift series among `paths` (the displayed file of every
+/// shot in a folder). Files `read_briefs` has seen are not read again.
+pub fn stacks_of(state: &AppState, paths: &[String]) -> Vec<Stack> {
+    let unread: Vec<String> = {
+        let series = state.series.lock().unwrap();
+        paths.iter().filter(|p| !series.contains_key(*p)).cloned().collect()
+    };
+    if !unread.is_empty() {
+        briefs_of(state, &unread);
+    }
+    let series = state.series.lock().unwrap();
+    let hints: Vec<stack::Hint> = paths.iter().map(|p| series.get(p).cloned().unwrap_or_default()).collect();
+    stack::group(&hints).into_iter().map(|s| Stack { kind: s.kind, ids: s.members.into_iter().map(|i| paths[i].clone()).collect() }).collect()
+}
+
+#[tauri::command]
+pub async fn group_shots(app: AppHandle, paths: Vec<String>) -> CmdResult<Vec<Stack>> {
+    blocking(move || Ok(stacks_of(&app.state::<AppState>(), &paths))).await
+}
+
+/// Writes a burst as a Live Photo (a JPEG and a movie that belong together)
+/// into `dest`. `frames` are the displayed files in shooting order and `key`
+/// is the one that becomes the still. Returns the path of the JPEG.
+#[cfg(target_vendor = "apple")]
+pub fn live_photo(state: &AppState, frames: &[String], key: usize, dest: &str, on_frame: impl FnMut(usize)) -> CmdResult<String> {
+    let files = frames.iter().map(|p| state.check(p)).collect::<Result<Vec<_>, _>>()?;
+    let dest = Path::new(dest);
+    if !dest.is_dir() {
+        return Err(format!("not a folder: {}", dest.display()));
+    }
+    let key = key.min(files.len().saturating_sub(1));
+    let base = files.get(key).and_then(|f| f.file_stem()).map_or_else(|| "Live".into(), |s| s.to_string_lossy().into_owned());
+    // Never over an existing file: the pair gets a name of its own.
+    let stem = (1..)
+        .map(|n| if n == 1 { format!("{base}_live") } else { format!("{base}_live_{n}") })
+        .find(|stem| !dest.join(format!("{stem}.JPG")).exists() && !dest.join(format!("{stem}.MOV")).exists())
+        .unwrap_or_default();
+    stacks_of(state, frames);
+    let taken: Vec<Option<i64>> = {
+        let series = state.series.lock().unwrap();
+        frames.iter().map(|p| series.get(p).and_then(|h| h.time_ms)).collect()
+    };
+    state.cancel.store(false, AtomicOrdering::Relaxed);
+    let (still, _) = sift_core::live::export(&files, &taken, key, dest, &stem, &state.cancel, on_frame).map_err(err)?;
+    Ok(still.to_string_lossy().into_owned())
+}
+
+#[cfg(not(target_vendor = "apple"))]
+pub fn live_photo(_: &AppState, _: &[String], _: usize, _: &str, _: impl FnMut(usize)) -> CmdResult<String> {
+    Err("Live Photos can only be written on Apple platforms".into())
+}
+
+#[tauri::command]
+pub async fn export_live_photo(app: AppHandle, frames: Vec<String>, key: usize, dest: String) -> CmdResult<String> {
+    blocking(move || {
+        let total = frames.len();
+        let mut emit = progress(&app);
+        live_photo(&app.state::<AppState>(), &frames, key, &dest, |done| emit(Progress { done, total, name: String::new() }))
+    })
+    .await
 }
 
 #[tauri::command]
@@ -686,6 +761,8 @@ pub struct AppInfo {
     /// Whether Nikon's Image SDK can be used on this platform, and is installed.
     nikon_supported: bool,
     nikon_sdk: bool,
+    /// Whether a burst can be written as a Live Photo here.
+    live_photo: bool,
 }
 
 pub fn library_dir(app: &AppHandle) -> Option<PathBuf> {
@@ -721,6 +798,7 @@ pub async fn app_info(app: AppHandle) -> CmdResult<AppInfo> {
             cache_bytes: crate::state::dir_size(&state.cache_dir),
             nikon_supported: sift_core::nikon::SUPPORTED,
             nikon_sdk: state.nikon().is_some(),
+            live_photo: cfg!(target_os = "macos"),
         })
     })
     .await

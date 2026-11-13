@@ -105,6 +105,9 @@ export function SettingsSheet({ onClose }: { onClose: () => void }) {
               }}
             />
           </Row>
+          <Row label={t.stackPhotos} hint={t.stackPhotosHint}>
+            <Toggle checked={settings.stacks} onChange={(stacks) => setSettings({ stacks })} />
+          </Row>
           <Row label={t.autoAdvance}>
             <Toggle checked={settings.autoAdvance} onChange={(autoAdvance) => setSettings({ autoAdvance })} />
           </Row>
