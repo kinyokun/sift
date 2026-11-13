@@ -5,7 +5,8 @@
 //   pnpm dev &
 //   LOOKS=a.cube,b.cube node scripts/readme-shots.mjs <photo folder> [outDir]
 //
-// LANG_UI=en switches the UI to English; ONLY=library,viewer picks sessions.
+// LANG_UI=en switches the UI to English; ONLY=library,viewer picks sessions;
+// LOOK_PHOTO and LOOK_NAME choose the photo and look of the looks session.
 import { chromium } from "playwright-core";
 import { mkdirSync, writeFileSync } from "node:fs";
 
@@ -141,9 +142,9 @@ await session("eyes", desktop, async (page, shot) => {
 await session("looks", desktop, async (page, shot) => {
   if (!lookFiles.length) return console.log("[looks] skipped: set LOOKS");
   await openLibrary(page);
-  await open(page, "R5A_2034");
+  await open(page, process.env.LOOK_PHOTO ?? "R5A_2034");
   await importLooks(page);
-  await pickLook(page, "Teal Orange");
+  await pickLook(page, process.env.LOOK_NAME ?? "Teal Orange");
   await shot("applied");
   await page.keyboard.press("W");
   await page.locator(".look-wall").waitFor();
