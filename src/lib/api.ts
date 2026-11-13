@@ -152,7 +152,7 @@ export const api = {
   groupShots: (paths: string[]) => invoke<Stack[]>("group_shots", { paths }),
   /** Seconds each of `frames` is shown for when they play as a Live Photo. */
   livePhotoPace: (frames: string[]) => invoke<number>("live_photo_pace", { frames }),
-  /** Writes `frames` as a Live Photo (JPEG + MOV) next to them, `key` being the still; resolves to the JPEG's path. */
+  /** Writes `frames` as a Live Photo next to them (one `.pvt` bundle holding a JPEG and a MOV), `key` being the still; resolves to the bundle's path. */
   saveLivePhoto: (frames: string[], key: number) => invoke<string>("save_live_photo", { frames, key }),
   setRating: (paths: string[], rating: number) => invoke<"embedded" | "sidecar">("set_rating", { paths, rating }),
   locateEyes: (path: string, af: AfBox[]) => invoke<EyeTarget | null>("locate_eyes", { path, af }),

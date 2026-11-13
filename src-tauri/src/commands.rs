@@ -85,9 +85,15 @@ fn stat(path: &Path) -> (u64, u64) {
     })
 }
 
+/// The files of one shot have the same name, apart from the extension, in the same folder.
+fn shot_key(path: &Path) -> String {
+    path.with_extension("").to_string_lossy().to_ascii_lowercase()
+}
+
 pub fn scan(dir: &Path, pair: bool, prefer_raw: bool) -> CmdResult<Vec<Item>> {
     // Movies are not listed; one named like a photo may be its Live Photo half.
     let mut movies: HashMap<String, PathBuf> = HashMap::new();
+    let mut bundles: Vec<PathBuf> = Vec::new();
     let mut files: Vec<PathBuf> = fs::read_dir(dir)
         .map_err(err)?
         .flatten()
@@ -95,7 +101,11 @@ pub fn scan(dir: &Path, pair: bool, prefer_raw: bool) -> CmdResult<Vec<Item>> {
             let p = e.path();
             let hidden = p.file_name().and_then(|n| n.to_str()).is_none_or(|n| n.starts_with('.'));
             if !hidden && p.extension().is_some_and(|x| x.eq_ignore_ascii_case("mov")) {
-                movies.insert(formats::stem_key(&p), p);
+                movies.insert(shot_key(&p), p);
+                return None;
+            }
+            if !hidden && sift_core::live::is_bundle(&p) {
+                bundles.push(p);
                 return None;
             }
             if hidden || !formats::is_supported(&p) {
@@ -111,15 +121,20 @@ pub fn scan(dir: &Path, pair: bool, prefer_raw: bool) -> CmdResult<Vec<Item>> {
             file.then_some(p)
         })
         .collect();
+    // A Live Photo bundle is listed as its still, with its movie attached like a loose one's.
+    for (still, movie) in bundles.iter().filter_map(|b| sift_core::live::bundle_members(b)) {
+        movies.insert(shot_key(&movie), movie);
+        files.push(still);
+    }
     files.sort_by(|a, b| natural_cmp(&a.to_string_lossy(), &b.to_string_lossy()));
 
     let mut groups: Vec<Vec<PathBuf>> = Vec::new();
     let mut by_stem: HashMap<String, usize> = HashMap::new();
     for f in files {
-        match by_stem.get(&formats::stem_key(&f)).filter(|_| pair) {
+        match by_stem.get(&shot_key(&f)).filter(|_| pair) {
             Some(&i) => groups[i].push(f),
             None => {
-                by_stem.insert(formats::stem_key(&f), groups.len());
+                by_stem.insert(shot_key(&f), groups.len());
                 groups.push(vec![f]);
             }
         }
@@ -137,7 +152,7 @@ pub fn scan(dir: &Path, pair: bool, prefer_raw: bool) -> CmdResult<Vec<Item>> {
                 name: primary.file_name().unwrap_or_default().to_string_lossy().into_owned(),
                 raw: g.iter().any(|p| formats::is_raw(p)),
                 paired: g.len() > 1,
-                live: movies.get(&formats::stem_key(primary)).and_then(|m| sift_core::live::movie_of(primary, m)).map(|m| m.to_string_lossy().into_owned()),
+                live: movies.get(&shot_key(primary)).and_then(|m| sift_core::live::movie_of(primary, m)).map(|m| m.to_string_lossy().into_owned()),
                 paths: g.iter().map(|p| p.to_string_lossy().into_owned()).collect(),
                 size,
                 mtime,
@@ -274,9 +289,10 @@ pub async fn live_photo_pace(app: AppHandle, frames: Vec<String>) -> CmdResult<f
     blocking(move || Ok(live_pace(&app.state::<AppState>(), &frames))).await
 }
 
-/// Writes a burst as a Live Photo (a JPEG and a movie that belong together)
-/// next to its frames. `frames` are the displayed files in shooting order and
-/// `key` is the one that becomes the still. Returns the path of the JPEG.
+/// Writes a burst as a Live Photo (one `.pvt` bundle holding a JPEG and a
+/// movie that belong together) next to its frames. `frames` are the
+/// displayed files in shooting order and `key` is the one that becomes the
+/// still. Returns the path of the bundle.
 #[cfg(target_vendor = "apple")]
 pub fn live_photo(state: &AppState, frames: &[String], key: usize, on_frame: impl FnMut(usize)) -> CmdResult<String> {
     let files = frames.iter().map(|p| state.check(p)).collect::<Result<Vec<_>, _>>()?;
@@ -284,15 +300,15 @@ pub fn live_photo(state: &AppState, frames: &[String], key: usize, on_frame: imp
     let cover = files.get(key).ok_or("no frames")?;
     let dest = cover.parent().ok_or("no folder")?;
     let base = cover.file_stem().map_or_else(|| "Live".into(), |s| s.to_string_lossy().into_owned());
-    // Never over an existing file: the pair gets a name of its own.
+    // Never over an existing one: the bundle gets a name of its own.
     let stem = (1..)
         .map(|n| if n == 1 { format!("{base}_live") } else { format!("{base}_live_{n}") })
-        .find(|stem| !dest.join(format!("{stem}.JPG")).exists() && !dest.join(format!("{stem}.MOV")).exists())
+        .find(|stem| !dest.join(format!("{stem}.{}", sift_core::live::BUNDLE_EXT)).exists())
         .unwrap_or_default();
     let taken = taken_at(state, frames);
     state.cancel.store(false, AtomicOrdering::Relaxed);
-    let (still, _) = sift_core::live::export(&files, &taken, key, dest, &stem, &state.cancel, on_frame).map_err(err)?;
-    Ok(still.to_string_lossy().into_owned())
+    let bundle = sift_core::live::export(&files, &taken, key, dest, &stem, &state.cancel, on_frame).map_err(err)?;
+    Ok(bundle.to_string_lossy().into_owned())
 }
 
 #[cfg(not(target_vendor = "apple"))]

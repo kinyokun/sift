@@ -2,6 +2,7 @@
 //! What ties them is a content identifier, a UUID stored in the still (in its
 //! Apple maker note) and in the movie's metadata. Recognising a pair works
 //! everywhere; writing one needs the system's encoder (`writer`, Apple only).
+//! A pair is either two files side by side or one Live Photo bundle (`.pvt`).
 
 use crate::Result;
 use std::fs::File;
@@ -42,6 +43,47 @@ pub fn timeline(taken: &[Option<i64>]) -> (Vec<f64>, f64) {
     });
     let step = step.clamp(STEP_RANGE.0, STEP_RANGE.1);
     ((0..taken.len()).map(|i| i as f64 * step).collect(), taken.len() as f64 * step)
+}
+
+/// Extension of the package Photos and AirDrop use for a Live Photo: a folder
+/// holding the still, the movie (both with the same name) and
+/// `metadata.plist`. Finder shows it as one file, Quick Look plays it and
+/// Photos imports it as one Live Photo.
+pub const BUNDLE_EXT: &str = "pvt";
+pub const BUNDLE_METADATA_NAME: &str = "metadata.plist";
+/// A bundle's `metadata.plist`. It only records its version; the two halves
+/// are tied by their name and content identifier.
+pub const BUNDLE_METADATA: &str = concat!(
+    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n",
+    "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n",
+    "<plist version=\"1.0\">\n<dict>\n\t<key>PFVideoComplementMetadataVersionKey</key>\n\t<string>1</string>\n</dict>\n</plist>\n",
+);
+
+/// Whether `path` names a Live Photo bundle (by its extension).
+pub fn is_bundle(path: &Path) -> bool {
+    path.extension().is_some_and(|e| e.eq_ignore_ascii_case(BUNDLE_EXT))
+}
+
+/// The Live Photo bundle a file sits in, if any.
+pub fn bundle_of(path: &Path) -> Option<&Path> {
+    path.parent().filter(|dir| is_bundle(dir))
+}
+
+/// The still and the movie inside a Live Photo bundle.
+pub fn bundle_members(bundle: &Path) -> Option<(PathBuf, PathBuf)> {
+    let (mut still, mut movie) = (None, None);
+    for entry in std::fs::read_dir(bundle).ok()?.flatten() {
+        let p = entry.path();
+        if p.file_name().and_then(|n| n.to_str()).is_none_or(|n| n.starts_with('.')) {
+            continue;
+        }
+        if p.extension().is_some_and(|x| x.eq_ignore_ascii_case("mov")) {
+            movie = Some(p);
+        } else if crate::formats::is_supported(&p) {
+            still = Some(p);
+        }
+    }
+    Some((still?, movie?))
 }
 
 fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
@@ -158,6 +200,23 @@ mod tests {
         // A clip that merely shares the name is not part of the photo.
         assert_eq!(movie_identifier(&plain).unwrap(), None);
         assert_eq!(movie_of(&still, &plain), None);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_bundle_holds_one_still_and_one_movie() {
+        let dir = std::env::temp_dir().join(format!("sift-pvt-{}", std::process::id()));
+        let bundle = dir.join("IMG_1_live.pvt");
+        std::fs::create_dir_all(&bundle).unwrap();
+        for name in ["IMG_1_live.JPG", "IMG_1_live.MOV", "metadata.plist", "._IMG_1_live.JPG"] {
+            std::fs::write(bundle.join(name), b"x").unwrap();
+        }
+        assert!(is_bundle(&bundle) && !is_bundle(&dir));
+        assert_eq!(bundle_members(&bundle), Some((bundle.join("IMG_1_live.JPG"), bundle.join("IMG_1_live.MOV"))));
+        assert_eq!(bundle_of(&bundle.join("IMG_1_live.JPG")), Some(bundle.as_path()));
+        assert_eq!(bundle_of(&dir.join("a.jpg")), None);
+        std::fs::remove_file(bundle.join("IMG_1_live.MOV")).unwrap();
+        assert_eq!(bundle_members(&bundle), None);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
