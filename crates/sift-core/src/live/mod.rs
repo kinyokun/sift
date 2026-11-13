@@ -28,10 +28,18 @@ const STEP_RANGE: (f64, f64) = (1.0 / 30.0, 0.25);
 /// When each frame appears, in seconds from the first, and when the movie ends.
 /// `taken` holds the capture times in milliseconds where the files record them.
 pub fn timeline(taken: &[Option<i64>]) -> (Vec<f64>, f64) {
-    let mut gaps: Vec<f64> = taken.windows(2).filter_map(|w| Some((w[1]? - w[0]?) as f64 / 1000.0)).filter(|g| *g > 0.0).collect();
-    gaps.sort_by(f64::total_cmp);
-    // One pace for the whole movie: the usual gap, so a hiccup does not freeze it.
-    let step = gaps.get(gaps.len() / 2).copied().unwrap_or(DEFAULT_STEP).clamp(STEP_RANGE.0, STEP_RANGE.1);
+    let gaps: Vec<f64> = taken.windows(2).filter_map(|w| Some((w[1]? - w[0]?) as f64 / 1000.0)).filter(|g| *g >= 0.0).collect();
+    let mut usual: Vec<f64> = gaps.iter().copied().filter(|g| *g > 0.0).collect();
+    usual.sort_by(f64::total_cmp);
+    // One pace for the whole movie: the real rate of the burst. Cameras record
+    // the time to a hundredth of a second, so single gaps are off by up to that
+    // much and only their average is right. Pauses (a full buffer) are left out
+    // so that they do not slow everything down.
+    let step = usual.get(usual.len() / 2).map_or(DEFAULT_STEP, |median| {
+        let steady: Vec<f64> = gaps.iter().copied().filter(|g| *g <= median * 2.0).collect();
+        steady.iter().sum::<f64>() / steady.len() as f64
+    });
+    let step = step.clamp(STEP_RANGE.0, STEP_RANGE.1);
     ((0..taken.len()).map(|i| i as f64 * step).collect(), taken.len() as f64 * step)
 }
 
@@ -101,10 +109,13 @@ mod tests {
 
     #[test]
     fn the_movie_keeps_the_pace_of_the_burst_within_bounds() {
-        // Seven frames a second, with one gap twice as long.
-        let (times, duration) = timeline(&[Some(0), Some(140), Some(280), Some(560), Some(700)]);
+        // Seven frames a second, with one pause.
+        let (times, duration) = timeline(&[Some(0), Some(140), Some(280), Some(900), Some(1040)]);
         assert!((times[1] - 0.14).abs() < 1e-9 && (times[4] - 0.56).abs() < 1e-9);
         assert!((duration - 0.7).abs() < 1e-9);
+        // Fifteen a second, the times rounded to a hundredth as cameras write them: a second of shooting is a second of movie.
+        let shot: Vec<Option<i64>> = (0..16).map(|i| Some((i as f64 * 1000.0 / 15.0 / 10.0).floor() as i64 * 10)).collect();
+        assert!((timeline(&shot).0[15] - 1.0).abs() < 0.01);
         // One frame a second would be a slide show; 120 a second too fast to see.
         assert!((timeline(&[Some(0), Some(1000), Some(2000)]).1 - 0.75).abs() < 1e-9);
         assert!((timeline(&[Some(0), Some(8), Some(16)]).1 - 0.1).abs() < 1e-9);
