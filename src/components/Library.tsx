@@ -11,9 +11,10 @@ import { chooseFolder, importPhotos } from "./Welcome";
 
 const GAP = 6;
 const THUMB_EDGE = 512;
-/** Range of the cell size, for the slider and Ctrl + wheel. */
+/** Smallest cell size of the slider and Ctrl + wheel; the largest is two cells to a row. */
 const THUMB_MIN = 110;
-const THUMB_MAX = 360;
+/** Thumbnails for cells wider than this many device pixels are asked for at twice the size. */
+const THUMB_SHARP = 600;
 const OVERSCAN_ROWS = 4;
 const CELL_INSET = 5;
 /** A new cell waits this long before asking for its thumbnail, so rows flung past cost nothing. */
@@ -109,7 +110,7 @@ const Cell = memo(function Cell(props: {
       <div className={`cell-frame ${ready ? "" : "pending"}`} style={frame}>
         {asked && (
           <img
-            src={imageUrl("thumb", item.id, item.mtime, THUMB_EDGE)}
+            src={imageUrl("thumb", item.id, item.mtime, size * devicePixelRatio > THUMB_SHARP ? THUMB_EDGE * 2 : THUMB_EDGE)}
             alt=""
             decoding="async"
             draggable={false}
@@ -256,8 +257,10 @@ export function Library() {
 
   // Columns fill the width exactly; the slider sets the target cell size.
   const pad = mobile ? 4 : 14;
-  const target = mobile ? Math.min(s.thumb, 132) : s.thumb;
   const inner = Math.max(0, box.width - pad * 2);
+  // The largest cells are two to a row; zooming on from there opens the photo.
+  const thumbMax = Math.max(THUMB_MIN, Math.floor((inner - GAP) / 2));
+  const target = mobile ? Math.min(s.thumb, 132) : Math.min(s.thumb, thumbMax);
   const cols = Math.max(mobile ? 3 : 2, Math.floor((inner + GAP) / (target + GAP)));
   const size = Math.max(40, (inner - GAP * (cols - 1)) / cols);
   const pitch = size + GAP;
@@ -277,7 +280,46 @@ export function Library() {
     anchor.current = { id: null, base: [] };
   }, [s.folder, s.filter, s.minStars]);
   useEffect(() => setSelecting(false), [s.folder]);
-  useWheelSize(scroller, () => useStore.getState().settings.thumb, (thumb) => act.setSettings({ thumb }), THUMB_MIN, THUMB_MAX, !mobile);
+  /** The cell under a point of the window, and how far down it the point is. */
+  const cellAt = (at: { clientX: number; clientY: number }) => {
+    const el = scroller.current;
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    const col = Math.floor((at.clientX - r.left - pad) / pitch);
+    const y = at.clientY - r.top + el.scrollTop - box.head - pad;
+    const index = Math.floor(y / pitch) * cols + col;
+    if (col < 0 || col >= cols || y < 0 || index >= items.length) return null;
+    return { index, part: (y % pitch) / pitch, y: at.clientY - r.top };
+  };
+  /** The cell the wheel is resizing the grid around, to be put back under the pointer. */
+  const held = useRef<{ index: number; part: number; y: number } | null>(null);
+  const settled = useRef(false);
+  useWheelSize(scroller, {
+    get: () => useStore.getState().settings.thumb,
+    set: (thumb, at) => {
+      held.current = cellAt(at);
+      act.setSettings({ thumb });
+    },
+    min: THUMB_MIN,
+    max: thumbMax,
+    past: (at) => {
+      const entry = items[cellAt(at)?.index ?? indexOf(s.cursor)] ?? items[row * cols];
+      if (!entry) return;
+      act.select(useStore.getState().selection, entry.id);
+      act.openViewer(entry.item.id);
+    },
+    on: !mobile,
+  });
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    const at = held.current;
+    held.current = null;
+    if (!el || !at) return;
+    el.scrollTop = box.head + pad + (Math.floor(at.index / cols) + at.part) * pitch - at.y;
+    settled.current = true;
+  }, [cols, pitch]);
+  // A turn of the wheel that left the rows as they were holds nothing.
+  useEffect(() => void (held.current = null));
 
   /** Adds or removes one photo; ranges then start from it. */
   const toggle = useCallback((id: string) => {
@@ -445,6 +487,8 @@ export function Library() {
   useEffect(() => {
     const i = indexOf(s.cursor);
     const el = scroller.current;
+    // The wheel has just put the grid where the pointer is.
+    if (settled.current) return void (settled.current = false);
     if (i < 0 || !el || dragged.current) return;
     const top = box.head + Math.floor(i / cols) * pitch;
     if (top < el.scrollTop + box.head) el.scrollTop = top - box.head;
@@ -608,9 +652,9 @@ export function Library() {
               className="size-slider"
               type="range"
               min={THUMB_MIN}
-              max={THUMB_MAX}
+              max={thumbMax}
               step={2}
-              value={s.thumb}
+              value={Math.min(s.thumb, thumbMax)}
               title={`${t.size} · ${t.pinchOrCtrl}`}
               aria-label={t.size}
               onChange={(e) => act.setSettings({ thumb: Number(e.target.value) })}

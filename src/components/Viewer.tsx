@@ -539,6 +539,8 @@ export function Viewer() {
     insets,
     mobile,
     wheelZoom,
+    // Zooming out of a photo that fits goes back to the grid, as zooming into the grid came here.
+    onZoomOut: crop || live || mobile ? undefined : () => useStore.getState().closeViewer(),
     autoDevelop: settings.autoDevelop,
     nikon: sdk,
     showAf,
