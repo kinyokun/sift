@@ -17,7 +17,6 @@ pub mod histogram;
 pub mod frame;
 pub mod io;
 pub mod jpeg;
-#[cfg(target_vendor = "apple")]
 pub mod live;
 pub mod look;
 pub mod nikon;

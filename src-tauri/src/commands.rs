@@ -35,6 +35,9 @@ pub struct Item {
     pub paths: Vec<String>,
     pub raw: bool,
     pub paired: bool,
+    /// The movie of a Live Photo, when the displayed file has one. It is not
+    /// among `paths`: ratings are never written to it.
+    pub live: Option<String>,
     pub size: u64,
     /// Modification time in milliseconds, used to version image URLs.
     pub mtime: u64,
@@ -83,12 +86,18 @@ fn stat(path: &Path) -> (u64, u64) {
 }
 
 pub fn scan(dir: &Path, pair: bool, prefer_raw: bool) -> CmdResult<Vec<Item>> {
+    // Movies are not listed; one named like a photo may be its Live Photo half.
+    let mut movies: HashMap<String, PathBuf> = HashMap::new();
     let mut files: Vec<PathBuf> = fs::read_dir(dir)
         .map_err(err)?
         .flatten()
         .filter_map(|e| {
             let p = e.path();
             let hidden = p.file_name().and_then(|n| n.to_str()).is_none_or(|n| n.starts_with('.'));
+            if !hidden && p.extension().is_some_and(|x| x.eq_ignore_ascii_case("mov")) {
+                movies.insert(formats::stem_key(&p), p);
+                return None;
+            }
             if hidden || !formats::is_supported(&p) {
                 return None;
             }
@@ -128,6 +137,7 @@ pub fn scan(dir: &Path, pair: bool, prefer_raw: bool) -> CmdResult<Vec<Item>> {
                 name: primary.file_name().unwrap_or_default().to_string_lossy().into_owned(),
                 raw: g.iter().any(|p| formats::is_raw(p)),
                 paired: g.len() > 1,
+                live: movies.get(&formats::stem_key(primary)).and_then(|m| sift_core::live::movie_of(primary, m)).map(|m| m.to_string_lossy().into_owned()),
                 paths: g.iter().map(|p| p.to_string_lossy().into_owned()).collect(),
                 size,
                 mtime,
@@ -205,44 +215,56 @@ pub async fn group_shots(app: AppHandle, paths: Vec<String>) -> CmdResult<Vec<St
     blocking(move || Ok(stacks_of(&app.state::<AppState>(), &paths))).await
 }
 
+/// Capture times of `frames`, in milliseconds, where the files record them.
+fn taken_at(state: &AppState, frames: &[String]) -> Vec<Option<i64>> {
+    stacks_of(state, frames);
+    let series = state.series.lock().unwrap();
+    frames.iter().map(|p| series.get(p).and_then(|h| h.time_ms)).collect()
+}
+
+/// Seconds each frame of a burst is shown for when it plays as a Live Photo.
+pub fn live_pace(state: &AppState, frames: &[String]) -> f64 {
+    let (_, duration) = sift_core::live::timeline(&taken_at(state, frames));
+    duration / frames.len().max(1) as f64
+}
+
+#[tauri::command]
+pub async fn live_photo_pace(app: AppHandle, frames: Vec<String>) -> CmdResult<f64> {
+    blocking(move || Ok(live_pace(&app.state::<AppState>(), &frames))).await
+}
+
 /// Writes a burst as a Live Photo (a JPEG and a movie that belong together)
-/// into `dest`. `frames` are the displayed files in shooting order and `key`
-/// is the one that becomes the still. Returns the path of the JPEG.
+/// next to its frames. `frames` are the displayed files in shooting order and
+/// `key` is the one that becomes the still. Returns the path of the JPEG.
 #[cfg(target_vendor = "apple")]
-pub fn live_photo(state: &AppState, frames: &[String], key: usize, dest: &str, on_frame: impl FnMut(usize)) -> CmdResult<String> {
+pub fn live_photo(state: &AppState, frames: &[String], key: usize, on_frame: impl FnMut(usize)) -> CmdResult<String> {
     let files = frames.iter().map(|p| state.check(p)).collect::<Result<Vec<_>, _>>()?;
-    let dest = Path::new(dest);
-    if !dest.is_dir() {
-        return Err(format!("not a folder: {}", dest.display()));
-    }
     let key = key.min(files.len().saturating_sub(1));
-    let base = files.get(key).and_then(|f| f.file_stem()).map_or_else(|| "Live".into(), |s| s.to_string_lossy().into_owned());
+    let cover = files.get(key).ok_or("no frames")?;
+    let dest = cover.parent().ok_or("no folder")?;
+    let base = cover.file_stem().map_or_else(|| "Live".into(), |s| s.to_string_lossy().into_owned());
     // Never over an existing file: the pair gets a name of its own.
     let stem = (1..)
         .map(|n| if n == 1 { format!("{base}_live") } else { format!("{base}_live_{n}") })
         .find(|stem| !dest.join(format!("{stem}.JPG")).exists() && !dest.join(format!("{stem}.MOV")).exists())
         .unwrap_or_default();
-    stacks_of(state, frames);
-    let taken: Vec<Option<i64>> = {
-        let series = state.series.lock().unwrap();
-        frames.iter().map(|p| series.get(p).and_then(|h| h.time_ms)).collect()
-    };
+    let taken = taken_at(state, frames);
     state.cancel.store(false, AtomicOrdering::Relaxed);
     let (still, _) = sift_core::live::export(&files, &taken, key, dest, &stem, &state.cancel, on_frame).map_err(err)?;
     Ok(still.to_string_lossy().into_owned())
 }
 
 #[cfg(not(target_vendor = "apple"))]
-pub fn live_photo(_: &AppState, _: &[String], _: usize, _: &str, _: impl FnMut(usize)) -> CmdResult<String> {
-    Err("Live Photos can only be written on Apple platforms".into())
+pub fn live_photo(_: &AppState, _: &[String], _: usize, _: impl FnMut(usize)) -> CmdResult<String> {
+    Err("Live Photos can only be made on Apple platforms".into())
 }
 
 #[tauri::command]
-pub async fn export_live_photo(app: AppHandle, frames: Vec<String>, key: usize, dest: String) -> CmdResult<String> {
+pub async fn save_live_photo(app: AppHandle, frames: Vec<String>, key: usize) -> CmdResult<String> {
     blocking(move || {
         let total = frames.len();
         let mut emit = progress(&app);
-        live_photo(&app.state::<AppState>(), &frames, key, &dest, |done| emit(Progress { done, total, name: String::new() }))
+        live_photo(&app.state::<AppState>(), &frames, key, |done| emit(Progress { done, total, name: String::new() }))
     })
     .await
 }

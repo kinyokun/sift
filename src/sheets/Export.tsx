@@ -131,7 +131,10 @@ export function ExportSheet({ onClose }: { onClose: () => void }) {
     if (look) sources[it.id] = it.paths.find(isRawPath) ?? it.id;
   }
   // The copy job gets every file of a shot; a look is rendered from its RAW even when only JPEGs are wanted.
-  const wanted = items.map((it) => it.paths).filter((paths) => kind === "all" || paths.some((p) => (kind === "raw") === isRawPath(p)));
+  // The movie of a Live Photo goes with its still.
+  const wanted = items
+    .filter((it) => kind === "all" || it.paths.some((p) => (kind === "raw") === isRawPath(p)))
+    .map((it) => (it.live && kind !== "raw" ? [...it.paths, it.live] : it.paths));
 
   // Show what the first and last file will be called.
   useEffect(() => {
@@ -400,7 +403,7 @@ export function TransferSheet({ onClose }: { onClose: () => void }) {
   const [info, setInfo] = useState<Awaited<ReturnType<typeof api.transferStart>> | null>(null);
   const [received, setReceived] = useState(0);
   const [error, setError] = useState("");
-  const files = useRef(scopes[initial].flatMap((it) => it.paths));
+  const files = useRef(scopes[initial].flatMap((it) => (it.live ? [...it.paths, it.live] : it.paths)));
 
   useEffect(() => {
     let closed = false;

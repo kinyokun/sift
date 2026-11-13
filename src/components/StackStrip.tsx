@@ -14,11 +14,10 @@ type Props = {
   onChoose: (id: string) => void;
   /** Present when the frames can be written out as a Live Photo. */
   onLivePhoto?: () => void;
-  busy?: boolean;
 };
 
 /** The frames of the stack the photo on screen belongs to, to step through or jump between. */
-export function StackStrip({ kind, frames, current, onChoose, onLivePhoto, busy }: Props) {
+export function StackStrip({ kind, frames, current, onChoose, onLivePhoto }: Props) {
   const t = useT();
   const flags = useStore((s) => s.flags);
   const ratings = useStore((s) => s.ratings);
@@ -53,8 +52,8 @@ export function StackStrip({ kind, frames, current, onChoose, onLivePhoto, busy 
         })}
       </div>
       {onLivePhoto && (
-        <button className="stack-strip-action" disabled={busy} title={t.livePhotoHint} onClick={onLivePhoto}>
-          {busy ? <span className="spinner" /> : <Icon name="live" size={15} />}
+        <button className="stack-strip-action" title={t.livePhotoHint} onClick={onLivePhoto}>
+          <Icon name="live" size={15} />
           {t.livePhoto}
         </button>
       )}

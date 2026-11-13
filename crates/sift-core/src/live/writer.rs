@@ -1,11 +1,11 @@
-//! A burst written out as an Apple Live Photo: a JPEG still and a QuickTime
-//! movie of the frames, tied together by a shared content identifier (in the
-//! still's Apple maker note and in the movie's metadata; the movie also marks
-//! the moment the still shows).
+//! A burst written out as a Live Photo: a JPEG still and a QuickTime movie of
+//! the frames, with the same content identifier in both; the movie also marks
+//! the moment the still shows.
 //!
 //! The movie is encoded by the operating system (AVFoundation, `live.m`), so
 //! this exists on Apple platforms only.
 
+use super::timeline;
 use crate::{preview, Error, Result};
 use image::{imageops, RgbImage};
 use std::ffi::{c_char, c_int, c_long, c_void, CStr, CString};
@@ -18,12 +18,6 @@ pub const MOVIE_EDGE: u32 = 1920;
 pub const MIN_FRAMES: usize = 3;
 /// More frames than this are not written (about half a minute at the slowest pace).
 pub const MAX_FRAMES: usize = 600;
-/// How long a frame stays up when the files do not say when they were taken.
-const DEFAULT_STEP: f64 = 0.1;
-/// Frames are shown at the pace they were shot, within these bounds, so a
-/// slow burst does not turn into a slide show and a fast one stays watchable.
-const STEP_RANGE: (f64, f64) = (1.0 / 30.0, 0.25);
-
 extern "C" {
     fn sift_live_begin(path: *const c_char, width: c_int, height: c_int, identifier: *const c_char, err: *mut c_char, cap: c_int) -> *mut c_void;
     fn sift_live_frame(handle: *mut c_void, bgra: *const u8, seconds: f64, err: *mut c_char, cap: c_int) -> c_int;
@@ -70,16 +64,6 @@ fn identifier(seed: &Path) -> String {
     bytes[8] = (bytes[8] & 0x3F) | 0x80;
     let hex: String = bytes.iter().map(|b| format!("{b:02X}")).collect();
     format!("{}-{}-{}-{}-{}", &hex[..8], &hex[8..12], &hex[12..16], &hex[16..20], &hex[20..])
-}
-
-/// When each frame appears, in seconds from the first, and when the movie ends.
-/// `taken` holds the capture times in milliseconds where the files record them.
-pub fn timeline(taken: &[Option<i64>]) -> (Vec<f64>, f64) {
-    let mut gaps: Vec<f64> = taken.windows(2).filter_map(|w| Some((w[1]? - w[0]?) as f64 / 1000.0)).filter(|g| *g > 0.0).collect();
-    gaps.sort_by(f64::total_cmp);
-    // One pace for the whole movie: the usual gap, so a hiccup does not freeze it.
-    let step = gaps.get(gaps.len() / 2).copied().unwrap_or(DEFAULT_STEP).clamp(STEP_RANGE.0, STEP_RANGE.1);
-    ((0..taken.len()).map(|i| i as f64 * step).collect(), taken.len() as f64 * step)
 }
 
 /// The frame as the movie shows it: upright, `width` x `height`, BGRA.
@@ -177,18 +161,5 @@ mod tests {
         assert_eq!(a.as_bytes()[14], b'4');
         assert!(a.chars().all(|c| c == '-' || c.is_ascii_digit() || c.is_ascii_uppercase()));
         assert_ne!(a, b);
-    }
-
-    #[test]
-    fn the_movie_keeps_the_pace_of_the_burst_within_bounds() {
-        // Seven frames a second, with one gap twice as long.
-        let (times, duration) = timeline(&[Some(0), Some(140), Some(280), Some(560), Some(700)]);
-        assert!((times[1] - 0.14).abs() < 1e-9 && (times[4] - 0.56).abs() < 1e-9);
-        assert!((duration - 0.7).abs() < 1e-9);
-        // One frame a second would be a slide show; 120 a second too fast to see.
-        assert!((timeline(&[Some(0), Some(1000), Some(2000)]).1 - 0.75).abs() < 1e-9);
-        assert!((timeline(&[Some(0), Some(8), Some(16)]).1 - 0.1).abs() < 1e-9);
-        // No capture times at all.
-        assert!((timeline(&[None, None, None]).1 - 0.3).abs() < 1e-9);
     }
 }

@@ -130,6 +130,12 @@ const Cell = memo(function Cell(props: {
             </span>
           )}
           {item.raw && <span className="cell-raw">{item.paired ? "RAW+J" : "RAW"}</span>}
+          {item.live && (
+            <span className="cell-live">
+              <Icon name="live" size={10} />
+              LIVE
+            </span>
+          )}
           {props.look && (
             <span className="cell-look" title={props.look}>
               <Icon name="look" size={11} />

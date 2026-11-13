@@ -6,6 +6,8 @@ export type Item = {
   paths: string[];
   raw: boolean;
   paired: boolean;
+  /** The movie of a Live Photo, when this photo has one. */
+  live?: string | null;
   size: number;
   mtime: number;
 };
@@ -94,7 +96,7 @@ export type FrameOptions = {
   caption: string;
 };
 
-export type ImageKind = "thumb" | "screen" | "full" | "dev" | "orig" | "look" | "clip";
+export type ImageKind = "thumb" | "screen" | "full" | "dev" | "orig" | "look" | "clip" | "live";
 /** A look in the library; `approximate` marks Nikon NP3 recipes, which are emulated. */
 export type LookInfo = {
   id: string;
@@ -147,8 +149,10 @@ export const api = {
   readBriefs: (paths: string[]) => invoke<{ rating: number; date: string | null }[]>("read_briefs", { paths }),
   /** Bursts and pixel-shift series among the displayed files of a folder. */
   groupShots: (paths: string[]) => invoke<Stack[]>("group_shots", { paths }),
-  /** Writes `frames` as a Live Photo (JPEG + MOV) into `dest`; resolves to the JPEG's path. */
-  exportLivePhoto: (frames: string[], key: number, dest: string) => invoke<string>("export_live_photo", { frames, key, dest }),
+  /** Seconds each of `frames` is shown for when they play as a Live Photo. */
+  livePhotoPace: (frames: string[]) => invoke<number>("live_photo_pace", { frames }),
+  /** Writes `frames` as a Live Photo (JPEG + MOV) next to them, `key` being the still; resolves to the JPEG's path. */
+  saveLivePhoto: (frames: string[], key: number) => invoke<string>("save_live_photo", { frames, key }),
   setRating: (paths: string[], rating: number) => invoke<"embedded" | "sidecar">("set_rating", { paths, rating }),
   locateEyes: (path: string, af: AfBox[]) => invoke<EyeTarget | null>("locate_eyes", { path, af }),
   developRaw: (path: string) => invoke<void>("develop_raw", { path }),

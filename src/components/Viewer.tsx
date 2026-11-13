@@ -9,6 +9,7 @@ import { Icon } from "../ui/Icon";
 import { CROP_RATIOS, GUIDE_MODES, ROTATABLE_GUIDES, centeredCrop, type Crop } from "./Overlay";
 import { Histogram } from "./Histogram";
 import { LookWall } from "./LookWall";
+import { LiveEditor, LiveMovie, LivePreview, MIN_LIVE_FRAMES, type LiveDraft } from "./Live";
 import { StackStrip } from "./StackStrip";
 import { Pane, fullUrlOf, lookSource, type Nudge, type PaneHandle, type PaneStatus } from "./Pane";
 
@@ -49,7 +50,7 @@ function InfoPanel({ item, meta, docked, crop, histogram, onSaveLook }: InfoProp
   const equivalent = x?.focal35 && x.focal && Math.abs(x.focal35 - x.focal) > 1 ? t.equiv(x.focal35) : "";
   const shooting = [t.programs[x?.program ?? 0], t.meterings[x?.metering ?? 0], x?.flash ? t.flashFired : ""].filter(Boolean).join("  ·  ");
   const rows: [string, React.ReactNode][] = [
-    [t.file, item.paths.map((p) => p.split(/[\\/]/).pop()).join("  +  ")],
+    [t.file, [...item.paths, ...(item.live ? [item.live] : [])].map((p) => p.split(/[\\/]/).pop()).join("  +  ")],
     [t.camera, camera],
     [t.lens, x?.lens],
     [t.exposure, meta ? [exposureLine(meta), equivalent].filter(Boolean).join("  ·  ") : ""],
@@ -98,6 +99,9 @@ function InfoPanel({ item, meta, docked, crop, histogram, onSaveLook }: InfoProp
   );
 }
 
+/** Frames one Live Photo holds at most; the backend refuses more. */
+const MAX_LIVE_FRAMES = 600;
+
 export function Viewer() {
   const t = useT();
   const viewer = useStore((s) => s.viewer)!;
@@ -130,7 +134,14 @@ export function Viewer() {
   const [wall, setWall] = useState(false);
   const [zoom, setZoom] = useState({ percent: 0, fit: true });
   const [status, setStatus] = useState<PaneStatus>(null);
-  const [exporting, setExporting] = useState(false);
+  const [live, setLive] = useState<LiveDraft | null>(null);
+  const liveRef = useRef(live);
+  liveRef.current = live;
+  const peeking = useRef(false);
+  const [liveStep, setLiveStep] = useState(0.1);
+  const [liveReady, setLiveReady] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const [saving, setSaving] = useState(false);
   // On desktop the info sidebar stays open across photos and sessions.
   const showInfo = mobile ? floatingInfo : settings.infoPinned;
   const toggleInfo = () => (mobile ? setFloatingInfo((v) => !v) : useStore.getState().setSettings({ infoPinned: !settings.infoPinned }));
@@ -192,7 +203,7 @@ export function Viewer() {
     if (topBar.current) ro.observe(topBar.current);
     if (dock.current) ro.observe(dock.current);
     return () => ro.disconnect();
-  }, [immersive, compare, showInfo, showStrip]);
+  }, [immersive, compare, showInfo, showStrip, !!live]);
 
   // Eye zoom follows the photo: stepping through a burst keeps the eyes centred.
   const focusEyes = useCallback(async (item: Item, pane: PaneHandle | null, announce: boolean) => {
@@ -260,22 +271,62 @@ export function Viewer() {
     show(i);
   };
 
-  /** Writes the burst on screen as a Live Photo, with the frame on screen as its still. */
-  const exportLivePhoto = async () => {
-    if (!current || exporting) return;
-    const dest = await open({ directory: true });
-    if (typeof dest !== "string") return;
-    setExporting(true);
+  // Making a Live Photo from the burst on screen. Indices are into `stackFrames`.
+  const liveFrames = live ? stackFrames.slice(live.start, live.end + 1) : [];
+  const startLive = () => {
+    if (!current) return;
+    const at = Math.max(0, stackFrames.findIndex((f) => f.id === current.id));
+    // A very long burst starts as the stretch around the frame on screen.
+    const start = Math.max(0, Math.min(at - MAX_LIVE_FRAMES / 2, stackFrames.length - MAX_LIVE_FRAMES));
+    setLive({ start, end: Math.min(stackFrames.length, start + MAX_LIVE_FRAMES) - 1, cover: at });
+    setLiveReady(0);
+    setPlaying(false);
+    setCompare(false);
+    api
+      .livePhotoPace(stackFrames.map((f) => f.id))
+      .then(setLiveStep)
+      .catch(() => {});
+  };
+  const endLive = () => {
+    setLive(null);
+    setPlaying(false);
+  };
+  const changeLive = (next: LiveDraft) => {
+    if (next.end - next.start >= MAX_LIVE_FRAMES) return;
+    liveRef.current = next;
+    setLive(next);
+    if (!peeking.current && next.cover !== live?.cover) show(viewer.ids.indexOf(stackFrames[next.cover].id));
+  };
+  /** While an end of the range is dragged the photo shows that end; afterwards the still again. */
+  const peek = (index: number | null) => {
+    peeking.current = index !== null;
+    const frame = stackFrames[index ?? liveRef.current?.cover ?? 0];
+    if (frame) show(viewer.ids.indexOf(frame.id));
+  };
+  const saveLive = async () => {
+    if (!live || saving) return;
+    setSaving(true);
+    setPlaying(false);
     try {
-      const frames = stackFrames.map((f) => f.id);
-      const saved = await api.exportLivePhoto(frames, Math.max(0, frames.indexOf(current.id)), dest);
+      const saved = await api.saveLivePhoto(liveFrames.map((f) => f.id), live.cover - live.start);
+      endLive();
       useStore.getState().notify(`livePhotoSaved:${fileName(saved)}`);
+      useStore.getState().rescan();
     } catch (e) {
       useStore.getState().notify(`livePhotoFailed:${e}`);
     } finally {
-      setExporting(false);
+      setSaving(false);
     }
   };
+  // Stepping to another frame of the burst makes it the still; leaving the burst ends the editing.
+  const currentId = current?.id;
+  useEffect(() => {
+    const draft = liveRef.current;
+    if (!draft || peeking.current || !currentId) return;
+    const at = stackFrames.findIndex((f) => f.id === currentId);
+    if (at < 0) return endLive();
+    if (at !== draft.cover) setLive({ start: Math.min(draft.start, at), end: Math.max(draft.end, at), cover: at });
+  }, [currentId, stackFrames]);
 
   const toggleCompare = () => {
     if (!compare) setRightIndex(Math.min(viewer.ids.length - 1, viewer.index + 1));
@@ -398,6 +449,7 @@ export function Viewer() {
       }
       if (e.key === "Escape") {
         if (crop) chooseCrop(null);
+        else if (live) endLive();
         else if (immersive) setImmersive(false);
         else if (compare) setCompare(false);
         else st.closeViewer();
@@ -588,6 +640,9 @@ export function Viewer() {
           )}
         </div>
 
+        {live && <LivePreview frames={liveFrames} step={liveStep} playing={playing} area={insets} onReady={setLiveReady} />}
+        {!live && !compare && !crop && !immersive && leftItem.live && <LiveMovie item={leftItem} area={insets} />}
+
         {pill && <div className={`status-pill glass ${!status ? "quiet" : ""}`}>{pill}</div>}
 
         {!mobile && !immersive && (
@@ -604,14 +659,29 @@ export function Viewer() {
         <div className="dock glass" ref={dock}>
           {showStrip && stack && (
             <div className="stack-strip-holder" ref={strip}>
-              <StackStrip
-                kind={stack.kind}
-                frames={stackFrames}
-                current={current.id}
-                onChoose={(id) => show(viewer.ids.indexOf(id))}
-                onLivePhoto={stack.kind === "burst" && info?.live_photo && !mobile ? exportLivePhoto : undefined}
-                busy={exporting}
-              />
+              {live ? (
+                <LiveEditor
+                  frames={stackFrames}
+                  draft={live}
+                  step={liveStep}
+                  playing={playing}
+                  ready={liveReady}
+                  saving={saving}
+                  onChange={changeLive}
+                  onPeek={peek}
+                  onPlay={() => setPlaying((v) => !v)}
+                  onCancel={endLive}
+                  onSave={saveLive}
+                />
+              ) : (
+                <StackStrip
+                  kind={stack.kind}
+                  frames={stackFrames}
+                  current={current.id}
+                  onChoose={(id) => show(viewer.ids.indexOf(id))}
+                  onLivePhoto={stack.kind === "burst" && stackFrames.length >= MIN_LIVE_FRAMES && info?.live_photo && !mobile ? startLive : undefined}
+                />
+              )}
             </div>
           )}
           {crop && (
@@ -668,6 +738,7 @@ export function Viewer() {
           <span>
             {position + 1} / {viewer.ids.length}
             {current.raw && <em>{current.paired ? "RAW+JPG" : "RAW"}</em>}
+            {current.live && <em>LIVE</em>}
             {look?.custom && <em className="recipe">{look.name}</em>}
             {savedCrop && <em>{t.cropped}</em>}
           </span>

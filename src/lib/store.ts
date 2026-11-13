@@ -120,6 +120,8 @@ type State = {
   openFolder: (path: string) => Promise<void>;
   closeFolder: () => void;
   reload: () => Promise<void>;
+  /** Picks up files that appeared in the folder, leaving everything on screen as it is. */
+  rescan: () => Promise<void>;
   setFilter: (filter: FlagFilter) => void;
   setMinStars: (n: number) => void;
   select: (ids: string[], cursor?: string | null) => void;
@@ -314,7 +316,8 @@ export const useStore = create<State>((set, get) => {
       set({ ratings, dates });
     }
     // Every file has been read by now, so the stacks cost no second pass.
-    const stacks = await api.groupShots(items.map((it) => it.id)).catch(() => []);
+    // A Live Photo made from a burst is a photo of its own, not one more frame of it.
+    const stacks = await api.groupShots(items.filter((it) => !it.live).map((it) => it.id)).catch(() => []);
     if (get().folder !== path) return;
     const stackOf: Record<string, [number, number]> = {};
     stacks.forEach((st, k) => st.ids.forEach((id, i) => (stackOf[id] = [k, i])));
@@ -435,6 +438,25 @@ export const useStore = create<State>((set, get) => {
       const keep = items.find((it) => it.paths.some((p) => fileName(p) === at));
       set({ items, metas: {}, dates: {}, stacks: [], stackOf: {}, viewer: null, selection: keep ? [keep.id] : [], cursor: keep?.id ?? null });
       await readRatings(folder, items);
+    },
+
+    rescan: async () => {
+      const { folder, settings } = get();
+      if (!folder) return;
+      const items = await api.scanFolder(folder, settings.pair, settings.preferRaw);
+      if (get().folder !== folder) return;
+      const known = new Set(get().items.map((it) => it.id));
+      const fresh = items.filter((it) => !known.has(it.id));
+      set({ items });
+      const briefs = await api.readBriefs(fresh.map((it) => it.id)).catch(() => []);
+      if (get().folder !== folder) return;
+      const ratings = { ...get().ratings };
+      const dates = { ...get().dates };
+      fresh.forEach((it, k) => {
+        if (briefs[k]?.rating) ratings[it.id] = briefs[k].rating;
+        if (briefs[k]?.date) dates[it.id] = briefs[k].date!;
+      });
+      set({ ratings, dates });
     },
 
     setFilter: (filter) => {

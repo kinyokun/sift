@@ -2331,3 +2331,203 @@ input.text {
     height: 38px;
   }
 }
+
+/* Live Photos */
+.cell-badges .cell-live {
+  gap: 3px;
+  letter-spacing: 0.04em;
+}
+
+.live-layer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  width: 100%;
+  background: #000;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.live-mark {
+  position: absolute;
+  left: calc(12px + var(--safe-left, 0px));
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 11px 0 9px;
+  border-radius: 14px;
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: var(--shadow);
+}
+
+.live-mark.on {
+  color: #ffd60a;
+}
+
+.live-mark:disabled {
+  opacity: 0.55;
+}
+
+.live-editor {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  width: min(calc(100vw - 24px), 860px);
+  max-width: 100%;
+}
+
+.live-play {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--fill);
+}
+
+.live-play:hover:not(:disabled) {
+  background: var(--fill-2);
+}
+
+.live-play .spinner {
+  width: 14px;
+  height: 14px;
+  border-width: 2px;
+}
+
+.live-track {
+  position: relative;
+  flex: 1;
+  min-width: 120px;
+  height: 46px;
+  margin: 0 8px;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.live-slivers {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--fill);
+}
+
+.live-slivers i {
+  flex: 1;
+  min-width: 0;
+  background-size: cover;
+  background-position: center;
+}
+
+.live-slivers i.out {
+  opacity: 0.28;
+  filter: grayscale(0.7);
+}
+
+.live-range {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  border: 2px solid #ffd60a;
+  border-radius: 7px;
+  pointer-events: none;
+}
+
+.live-handle {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 12px;
+  background: #ffd60a;
+  cursor: ew-resize;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+/* A wider target than the bar that is drawn. */
+.live-handle::before {
+  content: "";
+  position: absolute;
+  inset: 0 -7px;
+}
+
+.live-handle::after {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 30%;
+  bottom: 30%;
+  width: 2px;
+  border-radius: 1px;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.live-handle.start {
+  left: -12px;
+  border-radius: 6px 0 0 6px;
+}
+
+.live-handle.end {
+  right: -12px;
+  border-radius: 0 6px 6px 0;
+}
+
+.live-cover {
+  position: absolute;
+  top: -5px;
+  bottom: -5px;
+  width: 0;
+  border-left: 2px solid #fff;
+  margin-left: -1px;
+  pointer-events: none;
+  filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.7));
+}
+
+.live-cover b {
+  position: absolute;
+  bottom: calc(100% - 1px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: 9px;
+  line-height: 14px;
+  white-space: nowrap;
+  color: #000;
+  background: #fff;
+}
+
+.live-length {
+  flex: none;
+  font-size: 12px;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.stack-strip-action.primary {
+  color: #000;
+  background: #ffd60a;
+}
+
+.stack-strip-action.primary:hover:not(:disabled) {
+  background: #ffe04a;
+}
+
+.viewer.with-info .live-editor {
+  width: min(calc(100vw - var(--info-width) - 24px), 860px);
+}
+
+@media (max-width: 700px) {
+  .live-length {
+    display: none;
+  }
+}

@@ -142,6 +142,8 @@ fn image(state: &AppState, uri: &tauri::http::Uri) -> Result<Vec<u8>, String> {
             Err(Error::NoPreview) if formats::is_raw(&path) => developed(state, &path),
             other => other,
         },
+        // The movie of a Live Photo, whole: the page plays it from memory.
+        "live" if path.extension().is_some_and(|x| x.eq_ignore_ascii_case("mov")) => std::fs::read(&path).map_err(Error::from),
         "dev" => developed(state, &path),
         "orig" => original(state, &path),
         "look" => look_jpeg(state, &path, &query(uri, "l").ok_or("missing look")?, edge.min(MAX_LOOK_EDGE)),
