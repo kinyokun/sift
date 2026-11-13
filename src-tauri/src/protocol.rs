@@ -21,7 +21,19 @@ fn query(uri: &tauri::http::Uri, key: &str) -> Option<String> {
 
 /// A full-resolution development of a RAW that keeps the camera's look, cached on disk.
 pub fn developed(state: &AppState, path: &Path) -> sift_core::Result<Vec<u8>> {
-    cached(&cache_file(&state.cache_dir, "dev", path, 0), || render::matched(path, DEVELOP_QUALITY).map_err(render::explain))
+    cached(&cache_file(&state.cache_dir, "dev2", path, 0), || render::matched(path, DEVELOP_QUALITY).map_err(render::explain))
+}
+
+/// A scaled rendition of `path`. RAW files whose previews are not JPEG (Canon
+/// writes HEVC ones in HDR PQ mode) are developed once and scaled from that.
+fn scaled(state: &AppState, path: &Path, edge: u32, quality: u8) -> sift_core::Result<Vec<u8>> {
+    match preview::scaled(path, edge, quality) {
+        Err(Error::NoPreview) if formats::is_raw(path) => {
+            let img = preview::decode_upright_at(&developed(state, path)?, edge)?;
+            preview::encode_jpeg(&preview::fit(img, edge), quality)
+        }
+        other => other,
+    }
 }
 
 /// The RAW rendered without the in-camera look, cached on disk.
@@ -126,7 +138,7 @@ fn image(state: &AppState, uri: &tauri::http::Uri) -> Result<Vec<u8>, String> {
     let out = match kind {
         "thumb" => {
             let edge = edge.clamp(64, 1024);
-            cached(&cache_file(&state.cache_dir, "thumb", &path, edge), || preview::scaled(&path, edge, THUMB_QUALITY))
+            cached(&cache_file(&state.cache_dir, "thumb", &path, edge), || scaled(state, &path, edge, THUMB_QUALITY))
         }
         "screen" => {
             let edge = edge.clamp(512, 4096);
@@ -134,7 +146,7 @@ fn image(state: &AppState, uri: &tauri::http::Uri) -> Result<Vec<u8>, String> {
             // it is sent as is. Only files without one are scaled (and cached).
             match preview::embedded_screen(&path, edge) {
                 Ok(Some(data)) => Ok(data),
-                _ => cached(&cache_file(&state.cache_dir, "screen", &path, edge), || preview::scaled(&path, edge, SCREEN_QUALITY)),
+                _ => cached(&cache_file(&state.cache_dir, "screen", &path, edge), || scaled(state, &path, edge, SCREEN_QUALITY)),
             }
         }
         "full" => match preview::full(&path) {

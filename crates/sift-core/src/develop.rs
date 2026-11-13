@@ -97,7 +97,8 @@ pub fn develop(path: &Path) -> Result<RgbImage> {
             }
             (0..3).map(|c| match_lut(&src_hist[c], &ref_hist[c])).collect()
         }
-        None => vec![neutral_lut(1.0); 3],
+        // Nothing to match (the previews are not JPEG): a plain rendering at a normal exposure.
+        None => vec![neutral_lut(exposure_gain(&data)); 3],
     };
     RgbImage::from_raw(w, h, apply(&data, &luts)).ok_or(Error::Malformed)
 }
@@ -122,7 +123,11 @@ fn neutral_lut(gain: f32) -> Vec<f32> {
 /// colour matrix and one plain tone curve. The result is in sensor orientation.
 pub fn neutral(path: &Path) -> Result<RgbImage> {
     let (w, h, data) = linear(path)?;
-    // Normalise exposure so the brightest pixels just reach white.
+    RgbImage::from_raw(w, h, apply(&data, &vec![neutral_lut(exposure_gain(&data)); 3])).ok_or(Error::Malformed)
+}
+
+/// The gain that normalises exposure: the brightest pixels just reach white.
+fn exposure_gain(data: &[u16]) -> f32 {
     let mut hist = vec![0u64; BINS];
     for px in data.as_chunks::<3>().0.iter().step_by(7) {
         hist[bin(px[0].max(px[1]).max(px[2]))] += 1;
@@ -133,8 +138,7 @@ pub fn neutral(path: &Path) -> Result<RgbImage> {
         above += hist[b];
         above as f64 > total as f64 * CLIP_SHARE
     });
-    let gain = white.map_or(1.0, |b| ((BINS - 1) as f32 / b.max(1) as f32).clamp(1.0, 4.0));
-    RgbImage::from_raw(w, h, apply(&data, &vec![neutral_lut(gain); 3])).ok_or(Error::Malformed)
+    white.map_or(1.0, |b| ((BINS - 1) as f32 / b.max(1) as f32).clamp(1.0, 4.0))
 }
 
 fn reference(path: &Path) -> Option<RgbImage> {

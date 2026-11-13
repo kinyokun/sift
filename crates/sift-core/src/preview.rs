@@ -129,7 +129,8 @@ pub fn encode_jpeg(img: &RgbImage, quality: u8) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-fn fit(img: RgbImage, edge: u32) -> RgbImage {
+/// Scales `img` down so that its long edge is at most `edge`.
+pub fn fit(img: RgbImage, edge: u32) -> RgbImage {
     let long = img.width().max(img.height());
     if long <= edge {
         return img;
