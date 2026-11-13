@@ -127,10 +127,7 @@ From [Releases](https://github.com/kinyokun/sift/releases/latest):
 - macOS (universal, Apple silicon and Intel): `Sift_<version>_universal.dmg`
 - Windows 10 / 11 (64-bit): `Sift_<version>_x64-setup.exe`
 
-The installers are not yet notarized by Apple or signed for Windows:
-
-- On macOS, if the first launch says the developer cannot be verified, open System Settings → Privacy & Security and click "Open Anyway" at the bottom
-- On Windows, if SmartScreen appears, click "More info → Run anyway"
+The macOS installer is signed and notarized by Apple and opens normally. The Windows installer is not yet signed: if SmartScreen appears, click "More info → Run anyway".
 
 Every release includes `SHA256SUMS.txt` for checking the files. iOS and Android builds currently have to be built yourself; see [AGENTS.md](AGENTS.md).
 

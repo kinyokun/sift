@@ -127,10 +127,7 @@ RAW 直接用相机写在文件里的预览图，所以按一下就是下一张�
 - macOS（Apple 芯片和 Intel 通用）：`Sift_<版本>_universal.dmg`
 - Windows 10 / 11（64 位）：`Sift_<版本>_x64-setup.exe`
 
-安装包目前没有经过 Apple 公证 / 微软签名：
-
-- macOS 首次打开若提示无法验证开发者，到 “系统设置 → 隐私与安全性” 底部点 “仍要打开”
-- Windows 若出现 SmartScreen 提示，点 “更多信息 → 仍要运行”
+macOS 安装包经过 Apple 签名和公证，双击即可打开。Windows 安装包目前没有微软签名，若出现 SmartScreen 提示，点 “更多信息 → 仍要运行”。
 
 每个 Release 附有 `SHA256SUMS.txt` 可校验文件。iOS 和 Android 版目前需要自己构建，见 [AGENTS.md](AGENTS.md)。
 
