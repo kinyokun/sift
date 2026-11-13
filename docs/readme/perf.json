@@ -1,0 +1,22 @@
+{
+  "zh": {
+    "title": "翻页不等解码",
+    "subtitle": "Apple M4 · 16 GB · release 构建 · 32 个相机 RAW 样张的中位数，文件已在系统缓存中（对数刻度）",
+    "rows": [
+      { "label": "从 RAW 取出内嵌全尺寸预览", "note": "Sift 显示用的就是它", "value": 0.2, "text": "0.2 ms", "accent": true },
+      { "label": "生成一张缩略图", "note": "长边 480 px", "value": 5.3, "text": "5 ms", "accent": true },
+      { "label": "按 → 换到下一张", "note": "界面里实测，前后几张已预取", "value": 8, "text": "≈ 10 ms", "accent": true },
+      { "label": "完整解码一张 RAW", "note": "对照：传统做法，8 款机身", "value": 810, "text": "0.5 – 2 s", "accent": false }
+    ]
+  },
+  "en": {
+    "title": "No waiting for RAW decoding",
+    "subtitle": "Apple M4 · 16 GB · release build · median over 32 camera RAW samples, files in the OS cache (log scale)",
+    "rows": [
+      { "label": "Pull the embedded full-size preview", "note": "what Sift puts on screen", "value": 0.2, "text": "0.2 ms", "accent": true },
+      { "label": "Make a thumbnail", "note": "480 px long edge", "value": 5.3, "text": "5 ms", "accent": true },
+      { "label": "Press → for the next photo", "note": "measured in the UI, neighbours prefetched", "value": 8, "text": "≈ 10 ms", "accent": true },
+      { "label": "Fully decode one RAW", "note": "for comparison, 8 bodies", "value": 810, "text": "0.5 – 2 s", "accent": false }
+    ]
+  }
+}

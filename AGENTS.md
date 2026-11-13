@@ -33,6 +33,8 @@ Where a window cannot be screenshotted (agents, CI), the UI is exercised in head
     ONLY=animals node scripts/shots.mjs /path/to/pet-and-bird-photos   # eye close-up on animals
     ONLY=trackpad,touch node scripts/shots.mjs /path/to/photos   # gesture checks, results printed
 
+The README images are made the same way (`scripts/readme-shots.mjs`, `readme-anim.mjs`, `readme-art.mjs`, from public sample photos only); the commands and photo credits are in `docs/readme/README.md`.
+
 `src/dev/mock.ts` is loaded only in dev when the URL has `?bridge=`. Debug builds also honour `SIFT_OPEN=<folder>` and `SIFT_VIEW=<index>` to open a folder/photo at launch (on the simulator: `SIMCTL_CHILD_SIFT_OPEN=demo xcrun simctl launch ...`, relative to the app's Documents).
 
 ## Rules that are easy to break
