@@ -23,7 +23,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' sift: http://sift.localhost data: blob:; style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost"
+      "csp": "default-src 'self'; img-src 'self' sift: http://sift.localhost data: blob:; style-src 'self' 'unsafe-inline'; media-src 'self' blob:; connect-src 'self' ipc: http://ipc.localhost sift: http://sift.localhost"
     }
   },
   "bundle": {
