@@ -4,7 +4,8 @@
 //! everywhere. Writing one needs an H.264 encoder, the system's: on Apple
 //! platforms AVFoundation, which writes both files itself (`writer`); on
 //! Windows Media Foundation (`mf`), whose movie is then made into the pair
-//! here (`mov`, `still`), in code that runs on every platform.
+//! here (`mov`, `still`, and `heic` for a HEIC still), in code that runs on
+//! every platform.
 //! A pair is either two files side by side (what Sift writes) or one Live
 //! Photo bundle (`.pvt`, what AirDrop between Macs sometimes leaves).
 
@@ -13,6 +14,7 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
+mod heic;
 #[cfg(windows)]
 mod mf;
 mod mov;
@@ -48,8 +50,8 @@ pub const MIN_FRAMES: usize = 3;
 pub const MAX_FRAMES: usize = 600;
 /// Whether [`export`] can make a Live Photo here: it needs the system's H.264 encoder.
 pub const EXPORT: bool = cfg!(any(target_vendor = "apple", windows));
-/// Whether the still can be a HEIC ([`Still::Heic`]): only Apple's encoder writes one.
-pub const HEIC_STILL: bool = cfg!(target_vendor = "apple");
+/// Whether [`export`] can write the still as a HEIC ([`Still::Heic`]).
+pub const HEIC_STILL: bool = EXPORT;
 
 /// The file a Live Photo's still is written as.
 #[derive(Clone, Copy, Debug, PartialEq)]

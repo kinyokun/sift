@@ -180,7 +180,7 @@ fn fresh(orientation: Option<u16>, note: &[u8]) -> Vec<u8> {
 }
 
 /// The orientation a TIFF block records.
-fn orientation(block: &[u8]) -> Option<u16> {
+pub fn orientation(block: &[u8]) -> Option<u16> {
     let le = block.get(..2)? == b"II";
     let ifd0 = Dir::read(block, u32_at(block, 4, le)? as usize, le)?;
     u16_at(&ifd0.entries[ifd0.find(T_ORIENTATION, le)?], 8, le).filter(|o| (1..=8).contains(o))
@@ -210,16 +210,16 @@ fn exif_segment(jpeg: &[u8]) -> (Option<Range<usize>>, usize) {
     (None, insert)
 }
 
-/// A copy of `jpeg` that carries `identifier` in an Apple maker note, which
-/// makes it the still of the Live Photo whose movie has the same identifier.
-/// The picture and everything else the file records are kept as they are.
-pub fn tagged(jpeg: &[u8], identifier: &str) -> Result<Vec<u8>> {
+/// The EXIF block (TIFF) a still of `jpeg` carries, with `identifier` in an
+/// Apple maker note, and where in the JPEG its segment goes: over the one
+/// there is, or after the header when there is none.
+fn block(jpeg: &[u8], identifier: &str) -> Result<(Vec<u8>, Range<usize>)> {
     if !jpeg.starts_with(&[0xFF, 0xD8]) {
         return Err(Error::Malformed);
     }
     let note = maker_note(identifier);
     let (segment, insert) = exif_segment(jpeg);
-    let (block, place) = match segment {
+    Ok(match segment {
         Some(segment) => {
             let old = &jpeg[segment.start + 4 + EXIF_HEADER.len()..segment.end];
             // A block that cannot be read, or has no room left, is replaced by a
@@ -228,7 +228,21 @@ pub fn tagged(jpeg: &[u8], identifier: &str) -> Result<Vec<u8>> {
             (block, segment)
         }
         None => (fresh(None, &note), insert..insert),
-    };
+    })
+}
+
+/// What [`tagged`] puts in the JPEG, on its own: the EXIF block of a still
+/// that is written as another kind of file (`heic`).
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub fn exif(jpeg: &[u8], identifier: &str) -> Result<Vec<u8>> {
+    block(jpeg, identifier).map(|(block, _)| block)
+}
+
+/// A copy of `jpeg` that carries `identifier` in an Apple maker note, which
+/// makes it the still of the Live Photo whose movie has the same identifier.
+/// The picture and everything else the file records are kept as they are.
+pub fn tagged(jpeg: &[u8], identifier: &str) -> Result<Vec<u8>> {
+    let (block, place) = block(jpeg, identifier)?;
     let mut out = Vec::with_capacity(jpeg.len() + block.len() + 16);
     out.extend_from_slice(&jpeg[..place.start]);
     out.extend_from_slice(&[0xFF, 0xE1]);

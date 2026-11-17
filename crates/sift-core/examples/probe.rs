@@ -131,16 +131,19 @@ fn main() {
         return;
     }
     if args.first().map(String::as_str) == Some("--live-portable") {
-        // probe --live-portable <dir> <movie> <cover> <seconds> [identifier]
+        // probe --live-portable <dir> <jpg|heic> <movie> <cover> <seconds> [identifier]
         // A Live Photo of a movie that is already encoded (H.264), made without the system.
+        use sift_core::live::Still;
         let dir = PathBuf::from(&args[1]);
         std::fs::create_dir_all(&dir).unwrap();
-        let (movie, cover) = (PathBuf::from(&args[2]), PathBuf::from(&args[3]));
-        let moment: f64 = args[4].parse().expect("seconds");
-        let id = args.get(5).cloned().unwrap_or_else(|| sift_core::live::identifier(&cover));
+        let format = if args[2].eq_ignore_ascii_case("heic") { Still::Heic } else { Still::Jpeg };
+        let (movie, cover) = (PathBuf::from(&args[3]), PathBuf::from(&args[4]));
+        let moment: f64 = args[5].parse().expect("seconds");
+        let id = args.get(6).cloned().unwrap_or_else(|| sift_core::live::identifier(&cover));
         let stem = format!("{}_live", cover.file_stem().unwrap().to_string_lossy());
-        match sift_core::live::from_movie(&movie, &cover, &id, moment, &dir, &stem) {
-            Ok((still, movie)) => println!("{} + {} ({id}), read back as a pair: {}", still.display(), movie.display(), sift_core::live::movie_of(&still, &movie).is_some()),
+        let t = Instant::now();
+        match sift_core::live::from_movie(&movie, &cover, &id, moment, format, &dir, &stem) {
+            Ok((still, movie)) => println!("{} + {} ({id}) in {:.2}s, read back as a pair: {}", still.display(), movie.display(), t.elapsed().as_secs_f64(), sift_core::live::movie_of(&still, &movie).is_some()),
             Err(e) => println!("ERROR {e}"),
         }
         return;

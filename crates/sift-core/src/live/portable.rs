@@ -1,10 +1,10 @@
 //! A Live Photo made of a movie that is already encoded: the frames are
 //! copied into a QuickTime movie (`mov`) and a JPEG becomes the still
-//! (`still`), both marked as one Live Photo. None of this needs the system,
-//! so it is the same on every platform; on Windows the movie comes from Media
-//! Foundation (`mf`).
+//! (`still`, or `heic` when it is to be a HEIC), both marked as one Live
+//! Photo. None of this needs the system, so it is the same on every platform;
+//! on Windows the movie comes from Media Foundation (`mf`).
 
-use super::{mov, staged, still, Still};
+use super::{heic, mov, staged, still, Still};
 use crate::{preview, Error, Result};
 use std::path::{Path, PathBuf};
 
@@ -19,66 +19,85 @@ fn cover(frame: &Path) -> Result<Vec<u8>> {
     preview::encode_jpeg(&image::load_from_memory(&shown)?.to_rgb8(), 95)
 }
 
-/// Makes a Live Photo of a movie that already exists: `<stem>.JPG` and
-/// `<stem>.MOV` in `dest`, both carrying `identifier` (a UUID, see
-/// [`identifier`](super::identifier)). The frames of `movie` (H.264 in an
-/// MP4 or QuickTime file) are copied, not encoded again, and `cover` is the
-/// picture the still shows, the frame `moment` seconds into the movie; a JPEG
-/// is copied with all it records, its own maker note excepted. Returns the
-/// paths of the still and the movie; existing files are never replaced.
-pub fn from_movie(movie: &Path, cover: &Path, identifier: &str, moment: f64, dest: &Path, stem: &str) -> Result<(PathBuf, PathBuf)> {
+/// The still of the pair, from the JPEG of its picture: that JPEG with the
+/// identifier added, which keeps the picture and all the file records (its
+/// own maker note excepted), or a HEIC of it, which encodes the picture again.
+fn pictured(cover: &[u8], identifier: &str, format: Still) -> Result<Vec<u8>> {
+    match format {
+        Still::Jpeg => still::tagged(cover, identifier),
+        Still::Heic => heic::encode(cover, identifier),
+    }
+}
+
+/// Makes a Live Photo of a movie that already exists: `<stem>.JPG` (or
+/// `.HEIC`, as `format` says) and `<stem>.MOV` in `dest`, both carrying
+/// `identifier` (a UUID, see [`identifier`](super::identifier)). The frames
+/// of `movie` (H.264 in an MP4 or QuickTime file) are copied, not encoded
+/// again, and `cover` is the picture the still shows, the frame `moment`
+/// seconds into the movie. Returns the paths of the still and the movie;
+/// existing files are never replaced.
+pub fn from_movie(movie: &Path, cover: &Path, identifier: &str, moment: f64, format: Still, dest: &Path, stem: &str) -> Result<(PathBuf, PathBuf)> {
     let shaped = |b: (usize, u8)| if matches!(b.0, 8 | 13 | 18 | 23) { b.1 == b'-' } else { b.1.is_ascii_hexdigit() };
     if identifier.len() != 36 || !identifier.bytes().enumerate().all(shaped) {
         return Err(Error::Unsupported("the identifier of a Live Photo is a UUID"));
     }
-    staged(dest, stem, Still::Jpeg, |still_path, movie_path| {
+    staged(dest, stem, format, |still_path, movie_path| {
         mov::remux(movie, movie_path, identifier, moment, None)?;
-        Ok(std::fs::write(still_path, still::tagged(&self::cover(cover)?, identifier)?)?)
+        Ok(std::fs::write(still_path, pictured(&self::cover(cover)?, identifier, format)?)?)
     })
 }
 
 /// Writes `frames` (one displayable file per shot, in shooting order) as
-/// `<stem>.JPG` and `<stem>.MOV` in `dest`. `key` is the frame that becomes
-/// the still. Returns the paths of the still and the movie; nothing is left
-/// behind on failure, and existing files of those names are never replaced.
-/// The still is the frame's own JPEG with the identifier added, not a new
-/// encoding; a HEIC still ([`Still::Heic`]) cannot be written here.
+/// `<stem>.JPG` (or `.HEIC`, as `format` says) and `<stem>.MOV` in `dest`.
+/// `key` is the frame that becomes the still. Returns the paths of the still
+/// and the movie; nothing is left behind on failure, and existing files of
+/// those names are never replaced. A JPEG still is the frame's own JPEG with
+/// the identifier added, not a new encoding.
 #[cfg(windows)]
 #[allow(clippy::too_many_arguments)]
 pub fn export(frames: &[PathBuf], taken: &[Option<i64>], key: usize, format: Still, dest: &Path, stem: &str, cancel: &std::sync::atomic::AtomicBool, mut on_frame: impl FnMut(usize)) -> Result<(PathBuf, PathBuf)> {
     use super::{enough, frame, identifier, mf, timeline};
     use std::sync::atomic::Ordering;
     enough(frames)?;
-    if format == Still::Heic {
-        return Err(Error::Unsupported("a HEIC still can only be written on Apple platforms"));
-    }
     let key = key.min(frames.len() - 1);
     staged(dest, stem, format, |still_path, movie_path| {
         let id = identifier(&frames[key]);
+        let cover = cover(&frames[key])?;
         let (times, duration) = timeline(taken);
         let step = duration / frames.len() as f64;
-        // Media Foundation writes to a local file of its own; the destination
-        // may be a network share or a path it does not take.
-        let encoded = Scratch(std::env::temp_dir().join(format!("sift-live-{}-{id}.mp4", std::process::id())));
-        let first = frame(&frames[0], None)?;
-        let size = first.dimensions();
-        let mut encoder = mf::Encoder::new(&encoded.0, size, step)?;
-        let mut first = Some(first);
-        for (i, path) in frames.iter().enumerate() {
-            if cancel.load(Ordering::Relaxed) {
-                return Err(Error::Cancelled);
+        let mut encode = || {
+            // Media Foundation writes to a local file of its own; the destination
+            // may be a network share or a path it does not take.
+            let encoded = Scratch(std::env::temp_dir().join(format!("sift-live-{}-{id}.mp4", std::process::id())));
+            let first = frame(&frames[0], None)?;
+            let size = first.dimensions();
+            let mut encoder = mf::Encoder::new(&encoded.0, size, step)?;
+            let mut first = Some(first);
+            for (i, path) in frames.iter().enumerate() {
+                if cancel.load(Ordering::Relaxed) {
+                    return Err(Error::Cancelled);
+                }
+                on_frame(i);
+                let pixels = match first.take() {
+                    Some(pixels) => pixels,
+                    None => frame(path, Some(size))?,
+                };
+                encoder.write(&nv12(&pixels), times[i])?;
             }
-            on_frame(i);
-            let pixels = match first.take() {
-                Some(pixels) => pixels,
-                None => frame(path, Some(size))?,
-            };
-            encoder.write(&nv12(&pixels), times[i])?;
-        }
-        encoder.finish()?;
-        // The still's moment is the middle of the time its frame is shown.
-        mov::remux(&encoded.0, movie_path, &id, times[key] + step / 2.0, Some(mov::BT709))?;
-        Ok(std::fs::write(still_path, still::tagged(&cover(&frames[key])?, &id)?)?)
+            encoder.finish()?;
+            // The still's moment is the middle of the time its frame is shown.
+            mov::remux(&encoded.0, movie_path, &id, times[key] + step / 2.0, Some(mov::BT709))
+        };
+        // A HEIC of a large picture takes seconds, so the still is made while
+        // the movie is; a cancelled movie waits for it.
+        let (still, movie) = std::thread::scope(|scope| {
+            let still = scope.spawn(|| pictured(&cover, &id, format));
+            let movie = encode();
+            (still.join(), movie)
+        });
+        movie?;
+        let still = still.map_err(|_| Error::Decode("the still could not be written".into()))??;
+        Ok(std::fs::write(still_path, still)?)
     })
 }
 
@@ -148,7 +167,7 @@ mod tests {
         let camera = still::tests::with_exif(&still::tests::picture(), &still::tests::camera(true, Some(&[b'N'; 120])));
         std::fs::write(&picture, &camera).unwrap();
 
-        let (still, movie) = from_movie(&source, &picture, ID, 0.1, &dir, "DSC_0001_live").unwrap();
+        let (still, movie) = from_movie(&source, &picture, ID, 0.1, Still::Jpeg, &dir, "DSC_0001_live").unwrap();
         assert_eq!((still.clone(), movie.clone()), (dir.join("DSC_0001_live.JPG"), dir.join("DSC_0001_live.MOV")));
         // The reader takes the two for a Live Photo, and the cover for none.
         assert_eq!(movie_identifier(&movie).unwrap().as_deref(), Some(ID));
@@ -159,18 +178,27 @@ mod tests {
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 4);
 
         // Never over an existing pair, and not with something that is no identifier.
-        assert!(from_movie(&source, &picture, ID, 0.1, &dir, "DSC_0001_live").is_err());
-        assert!(from_movie(&source, &picture, "not-an-identifier", 0.1, &dir, "other").is_err());
+        assert!(from_movie(&source, &picture, ID, 0.1, Still::Jpeg, &dir, "DSC_0001_live").is_err());
+        assert!(from_movie(&source, &picture, "not-an-identifier", 0.1, Still::Jpeg, &dir, "other").is_err());
         // A failure leaves nothing behind.
-        assert!(from_movie(&picture, &picture, ID, 0.1, &dir, "other").is_err());
+        assert!(from_movie(&picture, &picture, ID, 0.1, Still::Jpeg, &dir, "other").is_err());
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 4);
 
         // A picture that is no JPEG is made one.
         let png = dir.join("drawing.png");
         image::RgbImage::from_pixel(8, 8, image::Rgb([200, 100, 50])).save(&png).unwrap();
-        let (still, movie) = from_movie(&source, &png, ID, 0.0, &dir, "drawing_live").unwrap();
+        let (still, movie) = from_movie(&source, &png, ID, 0.0, Still::Jpeg, &dir, "drawing_live").unwrap();
         assert_eq!(movie_of(&still, &movie), Some(movie));
         assert_eq!(image::open(&still).unwrap().to_rgb8().dimensions(), (8, 8));
+
+        // The still as a HEIC: the same pair under the other name.
+        #[cfg(not(any(target_os = "ios", target_os = "android")))]
+        {
+            let (still, movie) = from_movie(&source, &picture, ID, 0.1, Still::Heic, &dir, "DSC_0001_small").unwrap();
+            assert_eq!((still.clone(), movie.clone()), (dir.join("DSC_0001_small.HEIC"), dir.join("DSC_0001_small.MOV")));
+            assert_eq!(movie_of(&still, &movie), Some(movie));
+            assert_eq!(crate::heif::decode(&still, u32::MAX).unwrap().dimensions(), (16, 16));
+        }
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -218,12 +246,15 @@ mod tests {
         let going = AtomicBool::new(false);
 
         // The sizes and paces of real bursts: the movie's full size at 20 frames
-        // a second, and an upright one at the fastest pace there is.
-        for (name, size, count, gap) in [("WIDE", (1920, 1280), 12u32, 50i64), ("TALL", (1280, 1920), 12, 8)] {
+        // a second, and an upright one at the fastest pace there is, its still a HEIC.
+        for (name, size, count, gap, format) in [("WIDE", (1920, 1280), 12u32, 50i64, Still::Jpeg), ("TALL", (1280, 1920), 12, 8, Still::Heic)] {
             let frames = burst(name, size, count);
             let taken: Vec<Option<i64>> = (0..count as i64).map(|i| Some(i * gap)).collect();
-            let (still, movie) = export(&frames, &taken, 5, Still::Jpeg, &dir, &format!("{name}_live"), &going, |_| {}).unwrap();
+            let (still, movie) = export(&frames, &taken, 5, format, &dir, &format!("{name}_live"), &going, |_| {}).unwrap();
+            assert_eq!(still.extension().unwrap().to_str(), Some(format.ext()));
             assert_eq!(movie_of(&still, &movie), Some(movie.clone()));
+            // What the encoder wrote, the decoder here reads back.
+            assert_eq!(preview::pixels(&still, u32::MAX).unwrap().dimensions(), size);
             let (frames_written, seconds) = mov::tests::length(&movie);
             assert_eq!(frames_written, count as usize);
             let expected = super::super::timeline(&taken).1;
@@ -250,9 +281,8 @@ mod tests {
         assert!((seconds - 0.5).abs() < 0.02, "{seconds}");
         keep([&still, &movie]);
 
-        // No HEIC here, no pair over another, and stopping leaves nothing.
+        // No pair over another, and stopping leaves nothing.
         let listed = || std::fs::read_dir(&dir).unwrap().count();
-        assert!(matches!(export(&frames, &taken, 2, Still::Heic, &dir, "other", &going, |_| {}), Err(Error::Unsupported(_))));
         assert!(export(&frames, &taken, 2, Still::Jpeg, &dir, "DSC_0002_live", &going, |_| {}).is_err());
         going.store(true, std::sync::atomic::Ordering::Relaxed);
         assert!(matches!(export(&frames, &taken, 2, Still::Jpeg, &dir, "other", &going, |_| {}), Err(Error::Cancelled)));
