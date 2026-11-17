@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-11-18
+
 ### 新增
 
 - 标签：选片时可以随时新建标签（起个名字，比如一场活动里每个人一个），并立即打在照片上；一张照片可以带多个标签。入口在列表工具栏、多选时底部的操作栏和查看页底部的工具栏，快捷键 `T`；前 9 个标签可以用 `Shift+1`～`Shift+9` 直接打上或去掉（可在“设置 → 快捷键”里改）。列表的格子和查看页的标题旁会显示照片带的标签，信息栏里也有。标签可以改名、换颜色、删除（删除时会从照片上一起去掉）。标签和选中、排除一样随文件夹的选片进度保存，RAW+JPG 一对共用；用过的标签名会记住，在别的文件夹里新建标签时可以直接点选
@@ -127,7 +129,8 @@
 - 导出（复制 / 重命名 / 找回 RAW / 参数相框）、局域网传输、自定义快捷键
 - 中文 / 英文界面
 
-[Unreleased]: https://github.com/kinyokun/sift/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/kinyokun/sift/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/kinyokun/sift/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/kinyokun/sift/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/kinyokun/sift/compare/v0.3.4...v0.4.0
 [0.3.4]: https://github.com/kinyokun/sift/compare/v0.3.3...v0.3.4
