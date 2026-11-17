@@ -6,7 +6,7 @@
 
 **Fast photo culling. No waiting for RAW decoding.**
 
-Open a folder, flip through, flag, rate, try looks and export. JPEG and RAW from every major maker.<br>
+Open a folder, flip through, flag, rate, try looks and export. JPEG, HEIF and RAW from every major maker.<br>
 For RAW files Sift shows the preview the camera wrote into the file, so the next photo is one key press away.
 
 [![Latest release](https://img.shields.io/github/v/release/kinyokun/sift?color=30d158)](https://github.com/kinyokun/sift/releases/latest)
@@ -56,7 +56,7 @@ Press `F` to show the AF points that Nikon, Canon, Sony and Fujifilm bodies reco
 
 Bursts and pixel-shift series fold into one grid cell with a frame count; rating, flagging and exporting it covers the whole stack. In the viewer a filmstrip shows every frame of the stack, and `↑` / `↓` jump to the previous or next stack. Nikon bodies are grouped exactly by the series number they write into the file; other makers by drive mode and the time between frames.
 
-On macOS a burst can become a Live Photo: drag the ends of the timeline to choose frames, click one as the cover, and it plays at the burst's real rate (up to 120 frames a second). It is saved as a JPG and a MOV of the same name, as an iPhone exports an unmodified original: drop both into Photos and it is a Live Photo, and cloud drives, chat apps and LAN transfer keep the pair together on the way to a phone. On an iPhone, open them in Sift and tap Save to Photos to add them to Photos as a Live Photo. Live Photos in a folder (a JPG/HEIC and MOV of the same name, or a `.pvt` left by AirDrop) open, play and cull in Sift too.
+On macOS a burst can become a Live Photo: drag the ends of the timeline to choose frames, click one as the cover, and it plays at the burst's real rate (up to 120 frames a second). It is saved as a photo (JPG or HEIF, your choice) and a MOV of the same name, as an iPhone exports an unmodified original: drop both into Photos and it is a Live Photo, and cloud drives, chat apps and LAN transfer keep the pair together on the way to a phone. On an iPhone, open them in Sift and tap Save to Photos to add them to Photos as a Live Photo. Live Photos in a folder (a JPG/HEIC and MOV of the same name, or a `.pvt` left by AirDrop) open, play and cull in Sift too.
 
 <table>
 <tr>
@@ -131,13 +131,17 @@ The macOS installer is signed and notarized by Apple and opens normally. The Win
 
 After that there is no need to come back here: the official installers check for a new version at launch (this can be turned off under Settings → Updates) and download and install it from within the app. The check and the download go through GitHub accelerators that are reachable from mainland China first, and every update package is verified against its signature. Versions up to 0.3.4 have no updater, so they need one more manual install. The `.app.tar.gz` and `latest.json` in a release are for the updater, not for downloading by hand.
 
-Every release includes `SHA256SUMS.txt` for checking the files. iOS and Android builds currently have to be built yourself; see [AGENTS.md](AGENTS.md).
+Every release includes `SHA256SUMS.txt` for checking the files. An installer that will not open (macOS reports an input/output error or a damaged disk image) is usually an incomplete download: if `shasum -a 256 <file>` (`certutil -hashfile <file> SHA256` on Windows) gives a value that is not the one in `SHA256SUMS.txt`, download it again.
+
+iOS and Android builds currently have to be built yourself; see [AGENTS.md](AGENTS.md).
 
 ## All features
 
 **Culling**
 
 - Grid and full-screen viewer; RAW+JPEG pairs show as one photo. Sort by file name, capture time, rating or file size
+- Subfolders: a folder with no photos of its own (a card's `DCIM`, say) lists the photos in the folders inside it, at every level; a setting does the same for any folder, and the grid can be narrowed to one of them
+- Copy photos into the open folder or delete some, and the grid follows within seconds, keeping flags, selection and your place; `⌘R` / `Ctrl+R` refreshes by hand
 - Bursts and pixel-shift series fold into one stack you can step through in the viewer; Live Photos show as one photo and play, and on macOS a burst can be made into one
 - Selection: click the circle at a photo's top left, drag a box, Shift for a range, ⌘/Ctrl to add; with several selected, a bar at the bottom rates, flags or applies a look to all of them. On phones, a long press starts selecting
 - Pick / reject / 0–5 stars; ratings are written into the XMP inside the file (or a `.xmp` sidecar when that is not possible), and RAW files are never rewritten
@@ -180,6 +184,7 @@ Every release includes `SHA256SUMS.txt` for checking the files. iOS and Android 
 - `Tab`: next pane in compare
 - `R`: crop preview
 - `I`: info panel
+- `⌘R`: refresh the folder (Ctrl on Windows)
 - `Space`: hide the interface
 - `` ` ``: all shortcuts
 
@@ -189,12 +194,14 @@ Every release includes `SHA256SUMS.txt` for checking the files. iOS and Android 
 
 | Kind | Formats |
 | --- | --- |
-| Images | JPEG, PNG, WebP, BMP, GIF, TIFF |
+| Images | JPEG, HEIF (`.heic`, `.heif`, `.hif`), PNG, WebP, BMP, GIF, TIFF |
 | RAW | CR3, CR2, NEF, NRW, ARW, SR2, SRF, DNG, RAF, ORF, RW2, PEF, 3FR, IIQ, ERF, SRW |
 | AF points | Nikon, Canon, Sony, Fujifilm |
 | Looks | `.cube`, `.3dl`, HaldCLUT `.png`, Nikon `.NP3` |
 
 For Nikon High Efficiency (HE / HE\*) NEF files, "Original (no look)" uses the system decoder on Apple platforms; the decoders on Windows and Android cannot read them, but you can still cull them from the embedded previews.
+
+HEIF (HEIC from phones, HIF from cameras) is decoded by the system on Apple platforms and by a bundled decoder on Windows and Android (not yet tried on a real device). Wide-gamut photos are shown converted to sRGB, HDR photos brought into the range of an ordinary screen.
 
 ## Build
 
@@ -237,7 +244,7 @@ Layout:
 - `src-tauri`: commands, the `sift://` image protocol, LAN transfer
 - `src`: the interface. State is in `lib/store.ts`, text in `lib/i18n.ts` (Chinese / English)
 
-How to inspect a single file, check the UI with headless screenshots, and the pitfalls to avoid are in [AGENTS.md](AGENTS.md). How the images on this page are made is in [docs/readme](docs/readme/README.md). To contribute, see [CONTRIBUTING.md](CONTRIBUTING.md); report security issues privately as described in [SECURITY.md](SECURITY.md).
+How to inspect a single file, check the UI with headless screenshots, and the pitfalls to avoid are in [AGENTS.md](AGENTS.md). How the images on this page are made is in [docs/readme](docs/readme/README.md); what is planned next is in [docs/roadmap.md](docs/roadmap.md) (in Chinese). To contribute, see [CONTRIBUTING.md](CONTRIBUTING.md); report security issues privately as described in [SECURITY.md](SECURITY.md).
 
 ## Credits
 
@@ -245,6 +252,7 @@ Sift grew out of [Anicrop Studio](https://github.com/R4ksh4/AnicropStudio) (R4ks
 
 - [Anicrop Studio](https://github.com/R4ksh4/AnicropStudio): where Sift started, by R4ksh4 and contributors (Apache-2.0)
 - [rawler / dnglab](https://github.com/dnglab/dnglab): RAW development (LGPL-2.1)
+- [heic-decoder](https://github.com/Multipad-cyber/heic-decoder-rust): decodes HEIF on Windows and Android (MIT / Apache-2.0)
 - [tract](https://github.com/sonos/tract): runs the detection models locally
 - [Tauri](https://tauri.app), [React](https://react.dev), [zustand](https://github.com/pmndrs/zustand)
 - [raw.pixls.us](https://raw.pixls.us): sample files for testing

@@ -6,7 +6,7 @@
 
 **快速选片，翻页不等解码。**
 
-打开一个文件夹，翻看、标记、打星、套滤镜、导出。JPEG 和各家 RAW 都行，<br>
+打开一个文件夹，翻看、标记、打星、套滤镜、导出。JPEG、HEIF 和各家 RAW 都行，<br>
 RAW 直接用相机写在文件里的预览图，所以按一下就是下一张。
 
 [![最新版本](https://img.shields.io/github/v/release/kinyokun/sift?label=%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC&color=30d158)](https://github.com/kinyokun/sift/releases/latest)
@@ -56,7 +56,7 @@ RAW 直接用相机写在文件里的预览图，所以按一下就是下一张�
 
 连拍和像素偏移的一组在列表里叠成一格，标出张数；打星、标记、导出时算整组。查看页下方的胶片条显示组内每一张，`↑` / `↓` 跳到上一组 / 下一组。尼康机身按它写进文件的连拍编号精确分组，其他品牌按驱动模式和拍摄间隔判断。
 
-在 macOS 上，一组连拍可以直接做成实况照片：在时间条上拖两端选帧、点一帧当封面，按连拍的实际速度播放（最高 120 张/秒）。保存下来是同名的 JPG 和 MOV 两个文件，和 iPhone 导出未修改原片时一样：两个一起拖进“照片”就是一张实况照片，用网盘、聊天软件或局域网传输发到手机也不会拆散。在 iPhone 上用 Sift 打开，点“存入相册”，就作为实况照片存进“照片”。文件夹里的实况照片（同名 JPG/HEIC + MOV，或隔空投送留下的 `.pvt`）都能直接打开挑选和播放。
+在 macOS 上，一组连拍可以直接做成实况照片：在时间条上拖两端选帧、点一帧当封面，按连拍的实际速度播放（最高 120 张/秒）。保存下来是同名的照片和 MOV 两个文件（照片可以选 JPG 或 HEIF），和 iPhone 导出未修改原片时一样：两个一起拖进“照片”就是一张实况照片，用网盘、聊天软件或局域网传输发到手机也不会拆散。在 iPhone 上用 Sift 打开，点“存入相册”，就作为实况照片存进“照片”。文件夹里的实况照片（同名 JPG/HEIC + MOV，或隔空投送留下的 `.pvt`）都能直接打开挑选和播放。
 
 <table>
 <tr>
@@ -131,13 +131,17 @@ macOS 安装包经过 Apple 签名和公证，双击即可打开。Windows 安�
 
 装好以后不用再来这里下载：官方安装包启动时会自动检查新版本（可以在“设置 → 软件更新”里关掉），在应用内下载并安装。检查和下载优先走国内能直接访问的 GitHub 加速站，更新包经过签名校验。0.3.4 及更早的版本没有这个功能，需要手动装一次新版。Release 里的 `.app.tar.gz` 和 `latest.json` 是应用内更新用的，不用手动下载。
 
-每个 Release 附有 `SHA256SUMS.txt` 可校验文件。iOS 和 Android 版目前需要自己构建，见 [AGENTS.md](AGENTS.md)。
+每个 Release 附有 `SHA256SUMS.txt` 可校验文件。安装包打不开（macOS 提示“输入/输出错误”或磁盘映像已损坏）多半是下载不完整：用 `shasum -a 256 <文件>`（Windows 上是 `certutil -hashfile <文件> SHA256`）算出的值和 `SHA256SUMS.txt` 里的对不上，就重新下载一次。
+
+iOS 和 Android 版目前需要自己构建，见 [AGENTS.md](AGENTS.md)。
 
 ## 全部功能
 
 **选片**
 
 - 网格浏览与全屏查看，RAW+JPEG 自动配对成一张；可按文件名、拍摄时间、星级、文件大小排序
+- 子文件夹：打开的文件夹本身没有照片时（比如存储卡的 `DCIM`），自动列出各级子文件夹里的照片；也可以在设置里让任何文件夹都这样显示，并只看其中一个子文件夹
+- 打开文件夹之后往里拷贝或删除照片，列表几秒内自动跟上，标记、选择和正在看的位置都保留；`⌘R` / `Ctrl+R` 手动刷新
 - 连拍和像素偏移拍摄的照片自动叠成一组，查看页里可在组内逐张挑；实况照片显示成一张并可播放，macOS 上可以用连拍做实况照片
 - 多选：点照片左上角的圆圈逐张勾选，按住鼠标拖动框选，Shift 选一段，⌘/Ctrl 点选；选中多张后底部出现操作栏，可一次打星、标记、套滤镜。手机上长按照片进入多选
 - 选中 / 排除 / 0–5 星；星级写入文件内的 XMP（写不进去时写 `.xmp` 旁车文件），RAW 文件本身从不改写
@@ -180,6 +184,7 @@ macOS 安装包经过 Apple 签名和公证，双击即可打开。Windows 安�
 - `Tab`：对比时切换到下一格
 - `R`：裁剪预览
 - `I`：信息栏
+- `⌘R`：刷新文件夹（Windows 为 Ctrl）
 - `空格`：隐藏界面
 - `` ` ``：全部快捷键
 
@@ -189,12 +194,14 @@ macOS 安装包经过 Apple 签名和公证，双击即可打开。Windows 安�
 
 | 类型 | 格式 |
 | --- | --- |
-| 图片 | JPEG、PNG、WebP、BMP、GIF、TIFF |
+| 图片 | JPEG、HEIF（`.heic`、`.heif`、`.hif`）、PNG、WebP、BMP、GIF、TIFF |
 | RAW | CR3、CR2、NEF、NRW、ARW、SR2、SRF、DNG、RAF、ORF、RW2、PEF、3FR、IIQ、ERF、SRW |
 | 对焦点 | 尼康、佳能、索尼、富士 |
 | 滤镜 | `.cube`、`.3dl`、HaldCLUT `.png`、尼康 `.NP3` |
 
 尼康 High Efficiency（HE / HE\*）NEF 的“无滤镜原片”在 Apple 平台用系统解码器；Windows 和 Android 自带的解码器读不了这种文件，仍可用内嵌预览选片。
+
+HEIF（手机的 HEIC、相机的 HIF）在 Apple 平台用系统解码，Windows 和 Android 用内置的解码器（还没有在实机上测试过）。广色域照片转成 sRGB 显示，HDR 照片压到普通屏幕的亮度范围。
 
 ## 构建
 
@@ -237,7 +244,7 @@ pnpm typecheck
 - `src-tauri`：命令、`sift://` 图片协议、局域网传输
 - `src`：界面。状态在 `lib/store.ts`，文案在 `lib/i18n.ts`（中 / 英）
 
-检查单个文件、无窗口截图检查界面的方法，以及容易踩的坑，都写在 [AGENTS.md](AGENTS.md)。这页的截图和动图怎么生成见 [docs/readme](docs/readme/README.md)。参与贡献请看 [CONTRIBUTING.md](CONTRIBUTING.md)，安全问题请按 [SECURITY.md](SECURITY.md) 私下报告。
+检查单个文件、无窗口截图检查界面的方法，以及容易踩的坑，都写在 [AGENTS.md](AGENTS.md)。这页的截图和动图怎么生成见 [docs/readme](docs/readme/README.md)，接下来打算做的功能记在 [docs/roadmap.md](docs/roadmap.md)。参与贡献请看 [CONTRIBUTING.md](CONTRIBUTING.md)，安全问题请按 [SECURITY.md](SECURITY.md) 私下报告。
 
 ## 致谢
 
@@ -245,6 +252,7 @@ Sift 起源于 [Anicrop Studio](https://github.com/R4ksh4/AnicropStudio)（R4ksh
 
 - [Anicrop Studio](https://github.com/R4ksh4/AnicropStudio)：Sift 的起点，作者 R4ksh4 及其贡献者（Apache-2.0）
 - [rawler / dnglab](https://github.com/dnglab/dnglab)：RAW 显影（LGPL-2.1）
+- [heic-decoder](https://github.com/Multipad-cyber/heic-decoder-rust)：在 Windows 和 Android 上解码 HEIF（MIT / Apache-2.0）
 - [tract](https://github.com/sonos/tract)：在本机运行识别模型
 - [Tauri](https://tauri.app)、[React](https://react.dev)、[zustand](https://github.com/pmndrs/zustand)
 - [raw.pixls.us](https://raw.pixls.us)：测试用样张
