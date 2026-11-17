@@ -188,6 +188,18 @@ const zh = {
   pairRaw: "合并同名的 RAW 与 JPG",
   preferRaw: "RAW+JPG 优先显示 RAW 预览",
   preferRawHint: "关闭时显示相机直出的 JPG",
+  subfolders: "包含子文件夹里的照片",
+  subfoldersHint: "关闭时，只有文件夹本身没有照片才会显示子文件夹里的",
+  subfoldersShown: (n: number) => `这个文件夹本身没有照片，已显示子文件夹里的 ${n} 张`,
+  allFolders: "全部文件夹",
+  subfolderPick: "只看其中一个文件夹",
+  refresh: "刷新",
+  refreshed: (added: number, removed: number) => {
+    const parts = [added ? `新增 ${added} 张` : "", removed ? `移除 ${removed} 张` : ""].filter(Boolean);
+    return parts.length ? `已刷新：${parts.join("，")}` : "已刷新";
+  },
+  refreshedSame: "已刷新，照片没有变化",
+  photoGone: "正在看的照片已被移走或删除",
   stackPhotos: "连拍与像素偏移聚合成一格",
   stackPhotosHint: "对聚合的一格评级、选中或排除，会作用于组内每一张；在查看页里只作用于当前这张",
   burst: "连拍",
@@ -296,6 +308,7 @@ const zh = {
     link: "对比时同步缩放",
     info: "信息栏",
     immersive: "隐藏界面",
+    refresh: "刷新文件夹",
     help: "显示 / 隐藏快捷键",
   },
   fixedKeys: {
@@ -496,6 +509,18 @@ const en: Dict = {
   pairRaw: "Combine RAW and JPEG with the same name",
   preferRaw: "Show the RAW preview for RAW+JPEG pairs",
   preferRawHint: "When off, the camera's JPEG is shown",
+  subfolders: "Include photos in subfolders",
+  subfoldersHint: "When off, subfolders are shown only for a folder with no photos of its own",
+  subfoldersShown: (n) => `No photos in this folder itself. Showing ${n} from its subfolders`,
+  allFolders: "All folders",
+  subfolderPick: "Show one folder only",
+  refresh: "Refresh",
+  refreshed: (added, removed) => {
+    const parts = [added ? `${added} added` : "", removed ? `${removed} removed` : ""].filter(Boolean);
+    return parts.length ? `Refreshed: ${parts.join(", ")}` : "Refreshed";
+  },
+  refreshedSame: "Refreshed. The photos are the same",
+  photoGone: "The photo on screen was moved or deleted",
   stackPhotos: "Stack bursts and pixel-shift series",
   stackPhotosHint: "Rating, picking or rejecting a stack applies to every frame in it; in the viewer only to the frame on screen",
   burst: "Burst",
@@ -603,6 +628,7 @@ const en: Dict = {
     link: "Link zoom in compare",
     info: "Info sidebar",
     immersive: "Hide controls",
+    refresh: "Refresh the folder",
     help: "Show / hide shortcuts",
   },
   fixedKeys: {

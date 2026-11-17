@@ -106,6 +106,17 @@ export function SettingsSheet({ onClose }: { onClose: () => void }) {
               }}
             />
           </Row>
+          {!mobile && (
+            <Row label={t.subfolders} hint={t.subfoldersHint}>
+              <Toggle
+                checked={settings.subfolders}
+                onChange={(subfolders) => {
+                  setSettings({ subfolders });
+                  useStore.getState().reload();
+                }}
+              />
+            </Row>
+          )}
           <Row label={t.stackPhotos} hint={t.stackPhotosHint}>
             <Toggle checked={settings.stacks} onChange={(stacks) => setSettings({ stacks })} />
           </Row>

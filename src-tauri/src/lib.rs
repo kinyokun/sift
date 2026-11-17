@@ -70,6 +70,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::scan_folder,
+            commands::folder_changes,
             commands::read_meta,
             commands::read_briefs,
             commands::group_shots,

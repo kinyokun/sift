@@ -215,6 +215,9 @@ export function Library() {
       sortBy: st.settings.sortBy,
       sortDesc: st.settings.sortDesc,
       viewing: !!st.viewer,
+      deep: st.deep,
+      subfolder: st.subfolder,
+      subfolders: st.settings.subfolders,
     })),
   );
   const act = useStore.getState();
@@ -222,7 +225,7 @@ export function Library() {
   const items: Entry[] = useMemo(
     () => visibleEntries({ ...s, settings: { sortBy: s.sortBy, sortDesc: s.sortDesc, stacks: s.stacking } }),
     // Capture times only matter when sorting by them.
-    [s.items, s.filter, s.minStars, s.flags, s.ratings, s.sortBy, s.sortDesc, s.sortBy === "time" ? s.dates : null, s.stacks, s.expanded, s.stacking],
+    [s.items, s.subfolder, s.filter, s.minStars, s.flags, s.ratings, s.sortBy, s.sortDesc, s.sortBy === "time" ? s.dates : null, s.stacks, s.expanded, s.stacking],
   );
   const photoCount = useMemo(() => items.reduce((n, e) => n + e.members.length, 0), [items]);
   /** The photos an action on these cells reaches: every frame of a folded stack. */
@@ -280,7 +283,7 @@ export function Library() {
   // A new folder, filter or order starts ranges afresh.
   useEffect(() => {
     anchor.current = { id: null, base: [] };
-  }, [s.folder, s.filter, s.minStars]);
+  }, [s.folder, s.subfolder, s.filter, s.minStars]);
   useEffect(() => setSelecting(false), [s.folder]);
   /** The cell under a point of the window, and how far down it the point is. */
   const cellAt = (at: { clientX: number; clientY: number }) => {
@@ -560,12 +563,26 @@ export function Library() {
     let picked = 0;
     let rejected = 0;
     for (const it of s.items) {
+      if (s.subfolder != null && it.dir !== s.subfolder) continue;
       const f = flagOf(s.flags, it);
       if (f === 1) picked++;
       else if (f === -1) rejected++;
     }
     return { picked, rejected };
-  }, [s.items, s.flags]);
+  }, [s.items, s.flags, s.subfolder]);
+
+  // The folders the photos are in, for showing one of them alone.
+  const folders = useMemo(() => {
+    const count = new Map<string, number>();
+    for (const it of s.items) count.set(it.dir, (count.get(it.dir) ?? 0) + 1);
+    return [...count];
+  }, [s.items]);
+  const here = s.folder ? folderName(s.folder) : "";
+  const folderItems: MenuItem[] = [
+    { label: `${t.allFolders} · ${s.items.length}`, checked: s.subfolder == null, onSelect: () => act.setSubfolder(null) },
+    "divider",
+    ...folders.map(([dir, n]) => ({ label: `${dir || here} · ${n}`, checked: s.subfolder === dir, onSelect: () => act.setSubfolder(dir) })),
+  ];
 
   const filters: { value: FlagFilter; label: React.ReactNode }[] = [
     { value: "all", label: t.filterAll },
@@ -623,8 +640,11 @@ export function Library() {
     { label: mobile ? t.importPhotos : t.openFolder, icon: mobile ? "plus" : "folder", onSelect: switchFolder },
     ...(mobile ? [{ label: t.selectPhotos, icon: "check", onSelect: () => setSelecting(true) } as MenuItem] : []),
     ...(mobile ? [] : [{ label: t.findRaw, icon: "raw", onSelect: () => act.setSheet("findraw") } as MenuItem]),
+    { label: t.refresh, icon: "refresh", onSelect: () => void act.refresh(true) },
     "divider",
-    ...(s.stacks.length ? [{ label: t.stackPhotos, checked: s.stacking, onSelect: () => act.setSettings({ stacks: !s.stacking }) } as MenuItem, "divider" as const] : []),
+    ...(mobile ? [] : [{ label: t.subfolders, checked: s.subfolders, onSelect: () => (act.setSettings({ subfolders: !s.subfolders }), void act.reload()) } as MenuItem]),
+    ...(s.stacks.length ? [{ label: t.stackPhotos, checked: s.stacking, onSelect: () => act.setSettings({ stacks: !s.stacking }) } as MenuItem] : []),
+    ...(!mobile || s.stacks.length ? ["divider" as const] : []),
     { label: t.settings, icon: "gear", onSelect: () => act.setSheet("settings") },
     { label: t.help, icon: "help", onSelect: () => act.setSheet("help") },
   ];
@@ -645,9 +665,10 @@ export function Library() {
         <div className="toolbar-side">
           <IconButton icon="back" label={t.back} onClick={act.closeFolder} />
           <div className="toolbar-title" data-tauri-drag-region>
-            <strong>{s.folder ? folderName(s.folder) : ""}</strong>
-            <span>{s.loading ? t.readingFolder : t.photos(photoCount)}</span>
+            <strong>{here}</strong>
+            <span>{s.loading ? t.readingFolder : `${s.subfolder ? `${s.subfolder} · ` : ""}${t.photos(photoCount)}`}</span>
           </div>
+          {s.deep && folders.length > 1 && <Menu label={t.subfolderPick} align="left" items={folderItems} button={<Icon name="tree" />} className={s.subfolder != null ? "on" : ""} />}
         </div>
         <Segmented className="toolbar-filter" value={s.filter} options={filters} onChange={act.setFilter} />
         <div className="toolbar-side end">

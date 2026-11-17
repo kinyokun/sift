@@ -41,8 +41,9 @@ fn run(state: &AppState, cmd: &str, args: &Value) -> Result<Response, String> {
                 return Err(format!("not a folder: {}", dir.display()));
             }
             state.allow(&dir);
-            json(&commands::scan(&dir, arg(args, "pair")?, arg(args, "preferRaw")?)?)
+            json(&commands::scan(&dir, arg(args, "pair")?, arg(args, "preferRaw")?, arg::<Option<bool>>(args, "deep")?.unwrap_or(false))?)
         }
+        "folder_changes" => json(&commands::folder_stamp(&state.check(&arg::<String>(args, "path")?)?, arg(args, "deep")?)?),
         "read_meta" => json(&sift_core::meta::read(&state.check(&arg::<String>(args, "path")?)?).map_err(|e| e.to_string())?),
         "read_briefs" => json(&commands::briefs_of(state, &arg::<Vec<String>>(args, "paths")?)),
         "group_shots" => json(&commands::stacks_of(state, &arg::<Vec<String>>(args, "paths")?)),

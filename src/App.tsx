@@ -35,6 +35,10 @@ function Toast() {
     photosDenied: t.photosDenied,
     photosFailed: `${t.photosFailed}${detail ? ` · ${detail}` : ""}`,
     shortcutClash: t.shortcutClash(t.actions[detail as keyof typeof t.actions] ?? detail ?? ""),
+    refreshed: (([added, removed]) => t.refreshed(Number(added) || 0, Number(removed) || 0))((detail ?? "").split(",")),
+    refreshedSame: t.refreshedSame,
+    photoGone: t.photoGone,
+    subfoldersShown: t.subfoldersShown(Number(detail) || 0),
   };
   return (
     <div className="toast glass" role="status" key={toast.id}>
@@ -63,11 +67,19 @@ export function App() {
     return () => void off.then((f) => f?.());
   }, []);
 
-  // The help key works on every screen and closes the sheet again.
+  // The help key works on every screen and closes the sheet again; so does refreshing, wherever a folder is open.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const st = useStore.getState();
-      if (isTyping(e) || actionFor(st.settings.keys, e) !== "help") return;
+      if (isTyping(e)) return;
+      const action = actionFor(st.settings.keys, e);
+      if (action === "refresh" && !st.sheet) {
+        // Also keeps the webview from reloading the whole page on Ctrl+R.
+        e.preventDefault();
+        if (st.folder) st.refresh(true);
+        return;
+      }
+      if (action !== "help") return;
       if (st.sheet && st.sheet !== "help") return;
       e.preventDefault();
       st.setSheet(st.sheet === "help" ? null : "help");

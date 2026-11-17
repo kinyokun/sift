@@ -2,7 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { create } from "zustand";
 import {
   api,
-  fileName,
+  shotKey,
   type AppInfo,
   type CropBox,
   type Item,
@@ -34,6 +34,8 @@ export type Settings = {
   pair: boolean;
   /** For RAW+JPEG pairs, show the RAW's embedded preview instead of the JPEG. */
   preferRaw: boolean;
+  /** Also list the photos in the folders inside the one that is opened. */
+  subfolders: boolean;
   /** Show a burst or a pixel-shift series as one cell in the grid. */
   stacks: boolean;
   autoDevelop: boolean;
@@ -63,7 +65,12 @@ export type Settings = {
 
 const SETTINGS_KEY = "sift.settings";
 const MAX_RECENTS = 6;
-const KEYS_VERSION = 5;
+const KEYS_VERSION = 6;
+/** The folder is listed again this often to see whether photos came or went; a slow
+ * listing (a network share) is repeated less often, so it takes a twentieth of the time at most. */
+const WATCH_MS = 4000;
+/** A file written less than this long ago is looked at again, in case it was still being copied. */
+const UNSETTLED_MS = 15000;
 /** Progress is written this long after the last change. */
 const SAVE_DELAY_MS = 250;
 /** The update check waits this long after launch, so reopening the last folder goes first. */
@@ -74,6 +81,7 @@ const defaults: Settings = {
   lang: "auto",
   pair: true,
   preferRaw: false,
+  subfolders: false,
   stacks: true,
   autoDevelop: true,
   autoAdvance: false,
@@ -96,8 +104,8 @@ function loadSettings(): Settings {
   try {
     const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
     let keys = { ...DEFAULT_KEYS };
-    // Versions 4 and 5 only added actions; bindings saved since version 3 carry over.
-    if (saved.keysVersion === KEYS_VERSION || saved.keysVersion === 4 || saved.keysVersion === 3) keys = resolveKeys(saved.keys || {});
+    // Versions 4 to 6 only added actions; bindings saved since version 3 carry over.
+    if (saved.keysVersion >= 3 && saved.keysVersion <= KEYS_VERSION) keys = resolveKeys(saved.keys || {});
     else if (saved.keysVersion === 2) {
       // Version 2 put "original" on the letter O, which reads like the 0 of
       // "clear rating". Move it unless the user had already changed it; every
@@ -117,12 +125,16 @@ type State = {
   info: AppInfo | null;
   settings: Settings;
   folder: string | null;
+  /** The photos of the folders inside `folder` are listed too: the setting, or a folder with none of its own. */
+  deep: boolean;
+  /** Only the photos of this folder inside `folder` are shown ("" is `folder` itself); `null` shows all. */
+  subfolder: string | null;
   items: Item[];
   loading: boolean;
   ratings: Record<string, number>;
   /** Capture time of each photo ("YYYY-MM-DD HH:MM:SS"), where the file records one. */
   dates: Record<string, string>;
-  /** File name -> 1 picked, -1 rejected. Every file of a shot carries the flag. */
+  /** File name (below a subfolder: its path from the opened folder) -> 1 picked, -1 rejected. Every file of a shot carries the flag. */
   flags: Record<string, number>;
   metas: Record<string, Meta>;
   /** File name -> look chosen for that photo; saved with the folder's progress. */
@@ -154,8 +166,10 @@ type State = {
   openFolder: (path: string) => Promise<void>;
   closeFolder: () => void;
   reload: () => Promise<void>;
-  /** Picks up files that appeared in the folder, leaving everything on screen as it is. */
-  rescan: () => Promise<void>;
+  /** Lists the folder again: photos that appeared are added, ones that are gone leave the grid and the
+   * viewer, and everything else on screen stays as it is. `manual` says what was found even when nothing changed. */
+  refresh: (manual?: boolean) => Promise<void>;
+  setSubfolder: (subfolder: string | null) => void;
   setFilter: (filter: FlagFilter) => void;
   setMinStars: (n: number) => void;
   select: (ids: string[], cursor?: string | null) => void;
@@ -194,7 +208,7 @@ export function folderName(path: string): string {
 /** The confirmed crop of a shot, if any. */
 export function cropOf(crops: Record<string, CropBox>, item: Item): CropBox | null {
   for (const p of item.paths) {
-    const c = crops[fileName(p)];
+    const c = crops[shotKey(item.dir, p)];
     if (c) return c;
   }
   return null;
@@ -203,7 +217,7 @@ export function cropOf(crops: Record<string, CropBox>, item: Item): CropBox | nu
 /** The look chosen for a shot, if any. */
 export function lookOf(looks: Record<string, string>, item: Item): string | null {
   for (const p of item.paths) {
-    const l = looks[fileName(p)];
+    const l = looks[shotKey(item.dir, p)];
     if (l) return l;
   }
   return null;
@@ -212,7 +226,7 @@ export function lookOf(looks: Record<string, string>, item: Item): string | null
 /** The flag of a shot: any of its files may carry it. */
 export function flagOf(flags: Record<string, number>, item: Item): number {
   for (const p of item.paths) {
-    const f = flags[fileName(p)];
+    const f = flags[shotKey(item.dir, p)];
     if (f) return f;
   }
   return 0;
@@ -242,6 +256,7 @@ export type Entry = {
 };
 
 type Shown = Pick<State, "items" | "filter" | "minStars" | "flags" | "ratings" | "dates" | "stacks" | "stackOf" | "expanded"> & {
+  subfolder?: string | null;
   settings: Pick<Settings, "sortBy" | "sortDesc" | "stacks">;
 };
 
@@ -257,6 +272,7 @@ function coverOf(members: Item[], s: Pick<State, "flags" | "ratings">): Item {
 /** The cells of the grid: the photos that pass the filters, stacks folded, in the chosen order. */
 export function visibleEntries(s: Shown): Entry[] {
   const shown = s.items.filter((it) => {
+    if (s.subfolder != null && it.dir !== s.subfolder) return false;
     const flag = flagOf(s.flags, it);
     if (s.filter === "picked" && flag !== 1) return false;
     if (s.filter === "rejected" && flag !== -1) return false;
@@ -324,20 +340,68 @@ let saveTimer: ReturnType<typeof setTimeout> | undefined;
 /** An update was found while another sheet was open; it is offered when that one closes. */
 let offerWaiting = false;
 const pendingMeta = new Map<string, Promise<Meta | null>>();
+/** The first reading of the folder that is open, while it runs. */
+let reading: Promise<void> | null = null;
+/** What the listing of the open folder looked like when its photos were last read. `unsettled`: a file
+ * was written moments before, so it may still be growing (a copy in progress) and is looked at again. */
+let seen: { folder: string; deep: boolean; stamp: string; unsettled: boolean } | null = null;
+let nextWatch = 0;
+let watching = false;
+/** Refreshes run one after the other: the second finds what the first has already picked up. */
+let refreshing: Promise<void> = Promise.resolve();
+/** A file changed this recently may not be whole yet. A share's clock can run ahead, hence both ways. */
+const unsettled = (items: Item[]) => items.some((it) => Math.abs(Date.now() - it.mtime) < UNSETTLED_MS);
 
 export const useStore = create<State>((set, get) => {
-  /** The photo being looked at, as a file name that survives re-scans. */
+  /** The photo being looked at, by the name its flags are kept under, which survives re-scans. */
   const position = (): string | null => {
     const { viewer, cursor, items } = get();
     const id = viewer ? viewer.ids[viewer.index] : cursor;
-    return items.find((it) => it.id === id)?.name ?? null;
+    const item = items.find((it) => it.id === id);
+    return item ? shotKey(item.dir, item.id) : null;
+  };
+
+  /** Lists `folder` the way the settings say. A folder with no photos of its own shows the ones in the folders inside it. */
+  const scanFolder = async (folder: string): Promise<{ items: Item[]; deep: boolean; found: boolean }> => {
+    const { pair, preferRaw, subfolders } = get().settings;
+    // On phones the folders inside the library are the albums, each opened on its own.
+    const tries = get().info?.mobile ? [false] : subfolders ? [true] : [false, true];
+    let items: Item[] = [];
+    for (const deep of tries) {
+      items = await api.scanFolder(folder, pair, preferRaw, deep);
+      // A folder can only be asked about once it has been listed. What changes in between is a file
+      // that is new this moment, which `unsettled` has the folder read again for.
+      const stamp = await api.folderChanges(folder, deep).catch(() => "");
+      seen = { folder, deep, stamp, unsettled: unsettled(items) };
+      if (items.length) return { items, deep, found: deep && !subfolders };
+    }
+    // An empty folder is watched all the way down, wherever its first photos turn up.
+    return { items, deep: tries[tries.length - 1], found: false };
+  };
+
+  /** Looks whether photos came or went, and picks the changes up. */
+  const watch = async () => {
+    const { folder, deep, loading } = get();
+    if (!folder || loading || watching || document.hidden || Date.now() < nextWatch) return;
+    watching = true;
+    try {
+      const began = Date.now();
+      const stamp = await api.folderChanges(folder, deep);
+      nextWatch = Date.now() + Math.max(WATCH_MS, (Date.now() - began) * 20);
+      const known = seen && seen.folder === folder && seen.deep === deep ? seen.stamp : null;
+      if (get().folder === folder && (stamp !== known || seen?.unsettled)) await get().refresh();
+    } catch {
+      nextWatch = Date.now() + WATCH_MS;
+    } finally {
+      watching = false;
+    }
   };
 
   const saveNow = () => {
     clearTimeout(saveTimer);
-    const { folder, flags, looks, crops, viewer, filter, minStars, loading } = get();
+    const { folder, flags, looks, crops, viewer, filter, minStars, loading, subfolder } = get();
     if (!folder || loading) return;
-    const session: Session = { flags, looks, crops, cursor: position(), viewer: !!viewer, filter, minStars };
+    const session: Session = { flags, looks, crops, cursor: position(), viewer: !!viewer, filter, minStars, subfolder };
     api.saveSession(folder, session).catch(() => {});
   };
 
@@ -363,6 +427,11 @@ export const useStore = create<State>((set, get) => {
       set({ ratings, dates });
     }
     // Every file has been read by now, so the stacks cost no second pass.
+    await group(path, items);
+  };
+
+  /** Finds the bursts and pixel-shift series among `items`. */
+  const group = async (path: string, items: Item[]) => {
     // A Live Photo made from a burst is a photo of its own, not one more frame of it.
     const stacks = await api.groupShots(items.filter((it) => !it.live).map((it) => it.id)).catch(() => []);
     if (get().folder !== path) return;
@@ -370,6 +439,83 @@ export const useStore = create<State>((set, get) => {
     stacks.forEach((st, k) => st.ids.forEach((id, i) => (stackOf[id] = [k, i])));
     set({ stacks, stackOf });
     settle();
+  };
+
+  /** Reads ratings, capture times and stacks of a folder that has just been listed. */
+  const read = (path: string, items: Item[]) => {
+    const run = readRatings(path, items).finally(() => reading === run && (reading = null));
+    reading = run;
+    return run;
+  };
+
+  /** Lists the open folder again and takes over what is different. */
+  const relist = async (manual: boolean) => {
+    const folder = get().folder;
+    if (!folder || get().loading) return;
+    // The first reading of the folder ends with stacks made from its own list of photos.
+    await reading;
+    if (get().folder !== folder) return;
+    const { settings, deep } = get();
+    let items: Item[];
+    let stamp: string;
+    try {
+      stamp = await api.folderChanges(folder, deep);
+      items = await api.scanFolder(folder, settings.pair, settings.preferRaw, deep);
+      if (get().folder !== folder) return;
+    } catch (e) {
+      // A share that dropped off for a moment says nothing about the photos.
+      if (manual) get().notify(String(e));
+      return;
+    }
+    const old = get().items;
+    const before = new Map(old.map((it) => [it.id, it]));
+    const now = new Set(items.map((it) => it.id));
+    const added = items.filter((it) => !before.has(it.id));
+    const removed = old.filter((it) => !now.has(it.id));
+    // Saved again by another program, or its RAW or movie came or went.
+    const changed = items.filter((it) => {
+      const was = before.get(it.id);
+      return was && (was.mtime !== it.mtime || was.size !== it.size || was.paths.length !== it.paths.length || (was.live ?? null) !== (it.live ?? null));
+    });
+    seen = { folder, deep, stamp, unsettled: unsettled([...added, ...changed]) };
+    if (!added.length && !removed.length && !changed.length) {
+      if (manual) get().notify("refreshedSame");
+      return;
+    }
+    const stale = new Set([...removed, ...changed].map((it) => it.id));
+    const fresh = <T,>(known: Record<string, T>) => Object.fromEntries(Object.entries(known).filter(([id]) => !stale.has(id)));
+    // A photo that is gone hands its place to the next one that is still there, else the one before.
+    const heir = (id: string, order: string[]) => {
+      const i = order.indexOf(id);
+      return now.has(id) ? id : (order.slice(i + 1).find((x) => now.has(x)) ?? order.slice(0, Math.max(i, 0)).reverse().find((x) => now.has(x)) ?? null);
+    };
+    const { viewer, selection, cursor, ratings, dates, metas } = get();
+    const order = visibleEntries(get()).map((e) => e.id);
+    const at = cursor && heir(cursor, order);
+    const kept = selection.filter((id) => now.has(id));
+    let shown = viewer;
+    if (viewer) {
+      const current = heir(viewer.ids[viewer.index], viewer.ids);
+      const ids = viewer.ids.filter((id) => now.has(id));
+      const compare = viewer.compare?.filter((id) => now.has(id));
+      shown = current ? { ids, index: ids.indexOf(current), ...(compare && compare.length > 1 ? { compare } : {}) } : null;
+    }
+    const subfolder = get().subfolder;
+    const narrowed = subfolder != null && items.some((it) => it.dir === subfolder) ? subfolder : null;
+    set({ items, subfolder: narrowed, ratings: fresh(ratings), dates: fresh(dates), metas: fresh(metas), viewer: shown, selection: kept.length ? kept : at ? [at] : [], cursor: at });
+    // Photos arriving from a card come in over many looks at the folder; only a refresh that was asked for reports.
+    if (manual) get().notify(`refreshed:${added.length},${removed.length}`);
+    else if (viewer && !now.has(viewer.ids[viewer.index])) get().notify("photoGone");
+    const reread = [...added, ...changed];
+    const briefs = await api.readBriefs(reread.map((it) => it.id)).catch(() => []);
+    if (get().folder !== folder) return;
+    const next = { ratings: { ...get().ratings }, dates: { ...get().dates } };
+    reread.forEach((it, k) => {
+      if (briefs[k]?.rating) next.ratings[it.id] = briefs[k].rating;
+      if (briefs[k]?.date) next.dates[it.id] = briefs[k].date!;
+    });
+    set(next);
+    await group(folder, get().items);
   };
 
   /** The grid cell a photo is in. */
@@ -388,6 +534,8 @@ export const useStore = create<State>((set, get) => {
     info: null,
     settings: loadSettings(),
     folder: null,
+    deep: false,
+    subfolder: null,
     items: [],
     loading: false,
     ratings: {},
@@ -418,6 +566,11 @@ export const useStore = create<State>((set, get) => {
       api.listLooks().then((library) => set({ library })).catch(() => {});
       window.addEventListener("pagehide", saveNow);
       document.addEventListener("visibilitychange", () => document.hidden && saveNow());
+      // Coming back to the window is when photos have most likely been copied in or deleted.
+      const look = () => ((nextWatch = 0), void watch());
+      window.addEventListener("focus", look);
+      document.addEventListener("visibilitychange", () => !document.hidden && look());
+      setInterval(watch, 1000);
       if (info.dev_open) {
         await get().openFolder(info.dev_open);
         const item = get().items[info.dev_view ?? -1];
@@ -441,14 +594,16 @@ export const useStore = create<State>((set, get) => {
 
     openFolder: async (path) => {
       saveNow();
-      set({ loading: true, folder: path, items: [], ratings: {}, dates: {}, flags: {}, looks: {}, crops: {}, metas: {}, stacks: [], stackOf: {}, expanded: [], selection: [], cursor: null, viewer: null });
+      set({ loading: true, folder: path, deep: false, subfolder: null, items: [], ratings: {}, dates: {}, flags: {}, looks: {}, crops: {}, metas: {}, stacks: [], stackOf: {}, expanded: [], selection: [], cursor: null, viewer: null });
       try {
-        const { pair, preferRaw } = get().settings;
-        const [items, saved] = await Promise.all([api.scanFolder(path, pair, preferRaw), api.loadSession(path)]);
+        const [{ items, deep, found }, saved] = await Promise.all([scanFolder(path), api.loadSession(path)]);
         if (get().folder !== path) return;
-        const at = items.find((it) => it.paths.some((p) => fileName(p) === saved?.cursor));
+        const at = items.find((it) => it.paths.some((p) => shotKey(it.dir, p) === saved?.cursor));
+        const subfolder = saved?.subfolder != null && items.some((it) => it.dir === saved.subfolder) ? saved.subfolder : null;
         set({
           items,
+          deep,
+          subfolder,
           flags: saved?.flags ?? {},
           looks: saved?.looks ?? {},
           crops: saved?.crops ?? {},
@@ -465,7 +620,8 @@ export const useStore = create<State>((set, get) => {
         const recents = [path, ...get().settings.recents.filter((r) => r !== path)].slice(0, MAX_RECENTS);
         get().setSettings({ recents });
         save();
-        await readRatings(path, items);
+        if (found) get().notify(`subfoldersShown:${items.length}`);
+        await read(path, items);
       } catch (e) {
         set({ loading: false, folder: null });
         get().notify(String(e));
@@ -475,37 +631,32 @@ export const useStore = create<State>((set, get) => {
     closeFolder: () => {
       saveNow();
       api.clearLastSession().catch(() => {});
-      set({ folder: null, items: [], stacks: [], stackOf: {}, expanded: [], viewer: null, selection: [], cursor: null });
+      set({ folder: null, deep: false, subfolder: null, items: [], stacks: [], stackOf: {}, expanded: [], viewer: null, selection: [], cursor: null });
     },
 
     reload: async () => {
-      const { folder, settings } = get();
+      const { folder } = get();
       if (!folder) return;
       const at = position();
-      const items = await api.scanFolder(folder, settings.pair, settings.preferRaw);
+      const { items, deep } = await scanFolder(folder);
       if (get().folder !== folder) return;
-      const keep = items.find((it) => it.paths.some((p) => fileName(p) === at));
-      set({ items, metas: {}, dates: {}, stacks: [], stackOf: {}, viewer: null, selection: keep ? [keep.id] : [], cursor: keep?.id ?? null });
-      await readRatings(folder, items);
+      const keep = items.find((it) => it.paths.some((p) => shotKey(it.dir, p) === at));
+      const subfolder = deep ? get().subfolder : null;
+      set({ items, deep, subfolder, metas: {}, dates: {}, stacks: [], stackOf: {}, viewer: null, selection: keep ? [keep.id] : [], cursor: keep?.id ?? null });
+      await read(folder, items);
     },
 
-    rescan: async () => {
-      const { folder, settings } = get();
-      if (!folder) return;
-      const items = await api.scanFolder(folder, settings.pair, settings.preferRaw);
-      if (get().folder !== folder) return;
-      const known = new Set(get().items.map((it) => it.id));
-      const fresh = items.filter((it) => !known.has(it.id));
-      set({ items });
-      const briefs = await api.readBriefs(fresh.map((it) => it.id)).catch(() => []);
-      if (get().folder !== folder) return;
-      const ratings = { ...get().ratings };
-      const dates = { ...get().dates };
-      fresh.forEach((it, k) => {
-        if (briefs[k]?.rating) ratings[it.id] = briefs[k].rating;
-        if (briefs[k]?.date) dates[it.id] = briefs[k].date!;
-      });
-      set({ ratings, dates });
+    refresh: (manual = false) => {
+      const run = refreshing.then(() => relist(manual));
+      refreshing = run.catch(() => {});
+      return run;
+    },
+
+    setSubfolder: (subfolder) => {
+      set({ subfolder, selection: [], cursor: null });
+      const first = visibleEntries(get())[0];
+      if (first) set({ selection: [first.id], cursor: first.id });
+      save();
     },
 
     setFilter: (filter) => {
@@ -574,8 +725,8 @@ export const useStore = create<State>((set, get) => {
       for (const id of ids) {
         const item = items.find((it) => it.id === id);
         for (const p of item?.paths ?? []) {
-          if (value === 0) delete next[fileName(p)];
-          else next[fileName(p)] = value;
+          if (value === 0) delete next[shotKey(item!.dir, p)];
+          else next[shotKey(item!.dir, p)] = value;
         }
       }
       set({ flags: next });
@@ -588,8 +739,8 @@ export const useStore = create<State>((set, get) => {
       for (const id of ids) {
         const item = items.find((it) => it.id === id);
         for (const p of item?.paths ?? []) {
-          if (look) next[fileName(p)] = look;
-          else delete next[fileName(p)];
+          if (look) next[shotKey(item!.dir, p)] = look;
+          else delete next[shotKey(item!.dir, p)];
         }
       }
       set({ looks: next });
@@ -603,8 +754,8 @@ export const useStore = create<State>((set, get) => {
       for (const id of ids) {
         const item = items.find((it) => it.id === id);
         for (const p of item?.paths ?? []) {
-          if (crop) next[fileName(p)] = crop;
-          else delete next[fileName(p)];
+          if (crop) next[shotKey(item!.dir, p)] = crop;
+          else delete next[shotKey(item!.dir, p)];
         }
       }
       set({ crops: next });

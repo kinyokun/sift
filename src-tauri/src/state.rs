@@ -114,7 +114,7 @@ impl AppState {
     }
 }
 
-fn fnv1a(parts: &[&[u8]]) -> u64 {
+pub fn fnv1a(parts: &[&[u8]]) -> u64 {
     let mut h = 0xcbf29ce484222325u64;
     for part in parts {
         for &b in *part {

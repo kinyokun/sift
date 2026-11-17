@@ -136,6 +136,17 @@ export function Viewer() {
   const [link, setLink] = useState(true);
   const [active, setActive] = useState(0);
   const [picking, setPicking] = useState<number | null>(null);
+  // A refresh of the folder can take photos out of the viewer: the other panes follow their photos, not their places.
+  const [paneIds, setPaneIds] = useState(viewer.ids);
+  if (paneIds !== viewer.ids) {
+    setPaneIds(viewer.ids);
+    const moved = extra.map((i) => viewer.ids.indexOf(paneIds[i])).filter((i) => i >= 0);
+    if (moved.length !== extra.length || moved.some((i, k) => i !== extra[k])) {
+      setExtra(moved);
+      setActive((a) => Math.min(a, moved.length));
+      setPicking(null);
+    }
+  }
   const [statuses, setStatuses] = useState<PaneStatus[]>([]);
   const [stageSize, setStageSize] = useState({ w: 0, h: 0 });
   const [floatingInfo, setFloatingInfo] = useState(false);
@@ -346,7 +357,7 @@ export function Viewer() {
       const saved = await api.saveLivePhoto(liveFrames.map((f) => f.id), live.cover - live.start);
       endLive();
       useStore.getState().notify(`livePhotoSaved:${fileName(saved)}`);
-      useStore.getState().rescan();
+      useStore.getState().refresh();
     } catch (e) {
       useStore.getState().notify(`livePhotoFailed:${e}`);
     } finally {
@@ -847,6 +858,7 @@ export function Viewer() {
           <strong>{current.name}</strong>
           <span>
             {position + 1} / {viewer.ids.length}
+            {current.dir && ` · ${current.dir}`}
             {current.raw && <em>{current.paired ? "RAW+JPG" : "RAW"}</em>}
             {current.live && <em>LIVE</em>}
             {look?.custom && <em className="recipe">{look.name}</em>}

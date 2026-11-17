@@ -35,6 +35,9 @@ pub struct Item {
     pub paths: Vec<String>,
     pub raw: bool,
     pub paired: bool,
+    /// The folder the shot is in below the opened one, `/` between the
+    /// names; empty for the opened folder itself.
+    pub dir: String,
     /// The movie of a Live Photo, when the displayed file has one. It is not
     /// among `paths`: ratings are never written to it.
     pub live: Option<String>,
@@ -94,43 +97,96 @@ fn shot_key(path: &Path) -> String {
     path.with_extension("").to_string_lossy().to_ascii_lowercase()
 }
 
-pub fn scan(dir: &Path, pair: bool, prefer_raw: bool) -> CmdResult<Vec<Item>> {
-    // Movies are not listed; one named like a photo may be its Live Photo half.
-    let mut movies: HashMap<String, PathBuf> = HashMap::new();
-    let mut bundles: Vec<PathBuf> = Vec::new();
-    let mut files: Vec<PathBuf> = fs::read_dir(dir)
-        .map_err(err)?
-        .flatten()
-        .filter_map(|e| {
+/// How far below the opened folder photos are looked for.
+const MAX_DEPTH: usize = 8;
+
+/// Folders that hold no photos of the user's: packages of other programs
+/// and what systems keep on a volume for themselves.
+fn passed_over(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    let package = [".photoslibrary", ".lrdata", ".lrcat-data", ".cocatalog", ".app", ".bundle", ".fcpbundle", ".imovielibrary"];
+    package.iter().any(|ext| lower.ends_with(ext)) || matches!(lower.as_str(), "$recycle.bin" | "system volume information" | "@eadir" | "#recycle" | "lost+found")
+}
+
+/// What a folder holds that matters here.
+#[derive(Default)]
+struct Listing {
+    photos: Vec<PathBuf>,
+    /// Movies are not listed; one named like a photo may be its Live Photo half.
+    movies: HashMap<String, PathBuf>,
+    /// Live Photo bundles.
+    bundles: Vec<PathBuf>,
+}
+
+impl Listing {
+    /// Reads `dir`, and the folders in it down to `depth` levels. Only the
+    /// folder asked for has to be readable.
+    fn read(&mut self, dir: &Path, depth: usize) -> std::io::Result<()> {
+        for e in fs::read_dir(dir)?.flatten() {
             let p = e.path();
-            let hidden = p.file_name().and_then(|n| n.to_str()).is_none_or(|n| n.starts_with('.'));
-            if !hidden && is_movie(&p) {
-                movies.insert(shot_key(&p), p);
-                return None;
+            if p.file_name().and_then(|n| n.to_str()).is_none_or(|n| n.starts_with('.')) {
+                continue;
             }
-            if !hidden && sift_core::live::is_bundle(&p) {
-                bundles.push(p);
-                return None;
+            if is_movie(&p) {
+                self.movies.insert(shot_key(&p), p);
+            } else if sift_core::live::is_bundle(&p) {
+                self.bundles.push(p);
+            } else if formats::is_supported(&p) {
+                // The directory listing usually knows the type already; asking again
+                // costs a round trip per file on a network share. Links are followed.
+                let file = match e.file_type() {
+                    Ok(t) if t.is_file() => true,
+                    Ok(t) if t.is_dir() => false,
+                    _ => p.is_file(),
+                };
+                if file {
+                    self.photos.push(p);
+                }
+            } else if depth > 0 && e.file_type().is_ok_and(|t| t.is_dir()) && !passed_over(&e.file_name().to_string_lossy()) {
+                // Links to folders are not followed: they can lead back up.
+                let _ = self.read(&p, depth - 1);
             }
-            if hidden || !formats::is_supported(&p) {
-                return None;
-            }
-            // The directory listing usually knows the type already; asking again
-            // costs a round trip per file on a network share. Links are followed.
-            let file = match e.file_type() {
-                Ok(t) if t.is_file() => true,
-                Ok(t) if t.is_dir() => false,
-                _ => p.is_file(),
-            };
-            file.then_some(p)
-        })
-        .collect();
+        }
+        Ok(())
+    }
+}
+
+/// Changes when a photo, a movie or a Live Photo bundle appears in `dir` or
+/// goes away (with `deep`, anywhere below it): a listing, no file is read.
+pub fn folder_stamp(dir: &Path, deep: bool) -> CmdResult<String> {
+    let mut found = Listing::default();
+    found.read(dir, if deep { MAX_DEPTH } else { 0 }).map_err(err)?;
+    let mut names: Vec<String> = found.photos.iter().chain(found.movies.values()).chain(&found.bundles).map(|p| p.to_string_lossy().into_owned()).collect();
+    names.sort_unstable();
+    let parts: Vec<&[u8]> = names.iter().map(|n| n.as_bytes()).collect();
+    Ok(format!("{:016x}", crate::state::fnv1a(&parts)))
+}
+
+/// The folders between `root` and a file in it, outermost first.
+fn folders_of<'a>(root: &Path, file: &'a Path) -> Vec<std::borrow::Cow<'a, str>> {
+    // The still of a Live Photo bundle counts as being where the bundle is.
+    let dir = file.parent().map(|dir| dir.parent().filter(|_| sift_core::live::is_bundle(dir)).unwrap_or(dir));
+    let inside = dir.and_then(|dir| dir.strip_prefix(root).ok());
+    inside.map(|dir| dir.components().map(|c| c.as_os_str().to_string_lossy()).collect()).unwrap_or_default()
+}
+
+/// The shots in `dir`, in name order; with `deep` also those in the folders
+/// inside it, each folder's after the one it is in.
+pub fn scan(dir: &Path, pair: bool, prefer_raw: bool, deep: bool) -> CmdResult<Vec<Item>> {
+    let mut found = Listing::default();
+    found.read(dir, if deep { MAX_DEPTH } else { 0 }).map_err(err)?;
+    let Listing { photos: mut files, mut movies, bundles } = found;
     // A Live Photo bundle is listed as its still, with its movie attached like a loose one's.
     for (still, movie) in bundles.iter().filter_map(|b| sift_core::live::bundle_members(b)) {
         movies.insert(shot_key(&movie), movie);
         files.push(still);
     }
-    files.sort_by(|a, b| natural_cmp(&a.to_string_lossy(), &b.to_string_lossy()));
+    let name_of = |p: &Path| p.file_name().unwrap_or_default().to_string_lossy().into_owned();
+    files.sort_by(|a, b| {
+        let (x, y) = (folders_of(dir, a), folders_of(dir, b));
+        let folders = x.iter().zip(&y).map(|(x, y)| natural_cmp(x, y)).find(|o| o.is_ne()).unwrap_or(x.len().cmp(&y.len()));
+        folders.then_with(|| natural_cmp(&name_of(a), &name_of(b)))
+    });
 
     let mut groups: Vec<Vec<PathBuf>> = Vec::new();
     let mut by_stem: HashMap<String, usize> = HashMap::new();
@@ -156,6 +212,7 @@ pub fn scan(dir: &Path, pair: bool, prefer_raw: bool) -> CmdResult<Vec<Item>> {
                 name: primary.file_name().unwrap_or_default().to_string_lossy().into_owned(),
                 raw: g.iter().any(|p| formats::is_raw(p)),
                 paired: g.len() > 1,
+                dir: folders_of(dir, primary).join("/"),
                 live: movies.get(&shot_key(primary)).and_then(|m| sift_core::live::movie_of(primary, m)).map(|m| m.to_string_lossy().into_owned()),
                 paths: g.iter().map(|p| p.to_string_lossy().into_owned()).collect(),
                 size,
@@ -166,16 +223,21 @@ pub fn scan(dir: &Path, pair: bool, prefer_raw: bool) -> CmdResult<Vec<Item>> {
 }
 
 #[tauri::command]
-pub async fn scan_folder(app: AppHandle, path: String, pair: bool, prefer_raw: bool) -> CmdResult<Vec<Item>> {
+pub async fn scan_folder(app: AppHandle, path: String, pair: bool, prefer_raw: bool, deep: bool) -> CmdResult<Vec<Item>> {
     blocking(move || {
         let dir = PathBuf::from(&path);
         if !dir.is_dir() {
             return Err(format!("not a folder: {path}"));
         }
         app.state::<AppState>().allow(&dir);
-        scan(&dir, pair, prefer_raw)
+        scan(&dir, pair, prefer_raw, deep)
     })
     .await
+}
+
+#[tauri::command]
+pub async fn folder_changes(app: AppHandle, path: String, deep: bool) -> CmdResult<String> {
+    blocking(move || folder_stamp(&app.state::<AppState>().check(&path)?, deep)).await
 }
 
 #[tauri::command]
@@ -923,7 +985,7 @@ pub async fn list_albums(app: AppHandle) -> CmdResult<Vec<Album>> {
         dirs.insert(0, root.clone());
         let mut albums = Vec::new();
         for dir in dirs {
-            let items = scan(&dir, true, false).unwrap_or_default();
+            let items = scan(&dir, true, false, false).unwrap_or_default();
             if items.is_empty() {
                 continue;
             }
@@ -1016,4 +1078,43 @@ pub async fn import_files(app: AppHandle, sources: Vec<String>, album: String) -
         Ok(dir.to_string_lossy().into_owned())
     })
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn touch(root: &Path, names: &[&str]) {
+        for name in names {
+            let file = root.join(name);
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            fs::write(file, b"x").unwrap();
+        }
+    }
+
+    #[test]
+    fn folders_inside_are_listed_only_when_asked_for() {
+        let root = std::env::temp_dir().join(format!("sift-scan-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        touch(&root, &["b.jpg", "a/IMG_10.JPG", "a/IMG_9.JPG", "a/IMG_9.CR3", "a/deep/x.png", "a 2/y.jpg", ".hidden/z.jpg", "Photos.photoslibrary/m.jpg", "notes.txt"]);
+        let names = |deep| -> Vec<String> {
+            let shots = scan(&root, true, false, deep).unwrap();
+            shots.into_iter().map(|i| if i.dir.is_empty() { i.name } else { format!("{}/{}", i.dir, i.name) }).collect()
+        };
+        assert_eq!(names(false), ["b.jpg"]);
+        // The opened folder first, then each folder with the ones inside it after its own files.
+        assert_eq!(names(true), ["b.jpg", "a/IMG_9.JPG", "a/IMG_10.JPG", "a/deep/x.png", "a 2/y.jpg"]);
+        let pair = scan(&root, true, false, true).unwrap().remove(1);
+        assert!(pair.paired && pair.raw && pair.paths.len() == 2);
+        let inside = root.join("a").join("IMG_1.pvt").join("IMG_1.JPG");
+        assert_eq!(folders_of(&root, &inside), ["a"], "a bundle is not a folder of photos");
+
+        let (flat, deep) = (folder_stamp(&root, false).unwrap(), folder_stamp(&root, true).unwrap());
+        touch(&root, &["a/new.jpg", "more.txt"]);
+        assert_eq!(folder_stamp(&root, false).unwrap(), flat, "nothing new in the folder itself");
+        assert_ne!(folder_stamp(&root, true).unwrap(), deep);
+        fs::remove_file(root.join("b.jpg")).unwrap();
+        assert_ne!(folder_stamp(&root, false).unwrap(), flat);
+        fs::remove_dir_all(&root).unwrap();
+    }
 }

@@ -244,6 +244,8 @@ p {
   box-shadow: var(--shadow);
   z-index: 40;
   animation: pop 0.12s ease-out;
+  max-height: min(70vh, 560px);
+  overflow-y: auto;
 }
 
 .menu.left {
@@ -1470,6 +1472,9 @@ button.primary.large {
   font-size: 11px;
   color: var(--text-2);
   font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .viewer-title em {

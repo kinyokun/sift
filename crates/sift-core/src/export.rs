@@ -131,7 +131,21 @@ fn stem_of(path: &Path) -> String {
 /// that belong together, such as a RAW and its JPEG). Stems are unique.
 pub fn stems(shots: &[Vec<PathBuf>], rename: Option<&Rename>) -> Vec<String> {
     let Some(rule) = rename.filter(|r| !r.template.trim().is_empty()) else {
-        return shots.iter().map(|s| s.first().map(|p| stem_of(p)).unwrap_or_default()).collect();
+        // Shots from different folders may be named alike. A name belongs to
+        // the folder that used it first (a rendered JPEG may join the copies,
+        // so the file type does not tell them apart); later ones get a number.
+        let mut owners: HashMap<String, Option<&Path>> = HashMap::new();
+        return shots
+            .iter()
+            .map(|shot| {
+                let first = shot.first();
+                let (stem, dir) = (first.map(|p| stem_of(p)).unwrap_or_default(), first.and_then(|p| p.parent()));
+                let free = |s: &String| owners.get(&s.to_lowercase()).is_none_or(|owner| *owner == dir);
+                let stem = (1..).map(|n| if n == 1 { stem.clone() } else { format!("{stem}_{n}") }).find(free).unwrap_or(stem);
+                owners.insert(stem.to_lowercase(), dir);
+                stem
+            })
+            .collect();
     };
     let last = rule.start as usize + shots.len().saturating_sub(1);
     let digits = last.to_string().len().max(3);
@@ -272,6 +286,13 @@ mod tests {
         let rule = Rename { template: "Trip_{seq}".into(), start: 9 };
         assert_eq!(stems(&list, Some(&rule)), ["Trip_009", "Trip_010"]);
         assert_eq!(stems(&list, None), ["DSC_0001", "DSC_0002"]);
+    }
+
+    #[test]
+    fn shots_named_alike_in_different_folders_do_not_overwrite_each_other() {
+        let list = shots(&[&["/a/DSC_0001.JPG", "/a/DSC_0001.NEF"], &["/b/dsc_0001.jpg"], &["/c/DSC_0001.NEF"], &["/b/DSC_0002.JPG"], &["/c/DSC_0001.PNG"]]);
+        // Within one folder nothing changes: files named alike there stay named alike.
+        assert_eq!(stems(&list, None), ["DSC_0001", "dsc_0001_2", "DSC_0001_3", "DSC_0002", "DSC_0001_3"]);
     }
 
     #[test]

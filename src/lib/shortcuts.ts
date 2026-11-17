@@ -31,6 +31,7 @@ export const ACTIONS = [
   "link",
   "info",
   "immersive",
+  "refresh",
   "help",
 ] as const;
 export type Action = (typeof ACTIONS)[number];
@@ -71,6 +72,7 @@ export const DEFAULT_KEYS: Record<Action, string> = {
   link: "L",
   info: "I",
   immersive: "Space",
+  refresh: "Mod+R",
   help: "`",
 };
 

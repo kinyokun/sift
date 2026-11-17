@@ -6,6 +6,8 @@ export type Item = {
   paths: string[];
   raw: boolean;
   paired: boolean;
+  /** The folder the shot is in below the opened one ("2026/day 1"); empty for the opened folder itself. */
+  dir: string;
   /** The movie of a Live Photo, when this photo has one. */
   live?: string | null;
   size: number;
@@ -128,7 +130,7 @@ export type Rename = { template: string; start: number };
 
 /** Culling progress of one folder, saved continuously. */
 export type Session = {
-  /** File name -> 1 picked, -1 rejected. */
+  /** File name ([shotKey]) -> 1 picked, -1 rejected. */
   flags: Record<string, number>;
   /** File name of the photo last looked at. */
   cursor: string | null;
@@ -139,11 +141,16 @@ export type Session = {
   looks?: Record<string, string>;
   /** File name -> confirmed crop as normalised [x, y, width, height]. */
   crops?: Record<string, CropBox>;
+  /** The folder inside the opened one the grid was narrowed to. */
+  subfolder?: string | null;
 };
 
 const RAW_EXT = /\.(cr3|cr2|nef|nefx|nrw|arw|sr2|srf|dng|raf|orf|rw2|pef|3fr|iiq|erf|srw)$/i;
 export const isRawPath = (path: string) => RAW_EXT.test(path);
 export const fileName = (path: string) => path.split(/[\\/]/).pop() ?? path;
+/** What a file's flag, look and crop are saved under: its name, and below a subfolder (`dir` of its [Item]) its
+ * path from the opened folder, since two folders may each have a DSC_0001. */
+export const shotKey = (dir: string | undefined, path: string) => (dir ? `${dir}/${fileName(path)}` : fileName(path));
 
 /** URL of a rendition served by the app's `sift://` protocol. */
 export function imageUrl(kind: ImageKind, path: string, version: number, edge = 0, look?: string): string {
@@ -153,7 +160,10 @@ export function imageUrl(kind: ImageKind, path: string, version: number, edge = 
 
 export const api = {
   appInfo: () => invoke<AppInfo>("app_info"),
-  scanFolder: (path: string, pair: boolean, preferRaw: boolean) => invoke<Item[]>("scan_folder", { path, pair, preferRaw }),
+  /** The shots in a folder; with `deep` also those in the folders inside it. */
+  scanFolder: (path: string, pair: boolean, preferRaw: boolean, deep: boolean) => invoke<Item[]>("scan_folder", { path, pair, preferRaw, deep }),
+  /** A value that changes when a photo or movie appears in the folder or goes away. */
+  folderChanges: (path: string, deep: boolean) => invoke<string>("folder_changes", { path, deep }),
   readMeta: (path: string) => invoke<Meta>("read_meta", { path }),
   readBriefs: (paths: string[]) => invoke<{ rating: number; date: string | null }[]>("read_briefs", { paths }),
   /** Bursts and pixel-shift series among the displayed files of a folder. */

@@ -8,7 +8,9 @@
 //
 // BRIDGE and DEV name the two servers when they are not on their usual ports.
 import { chromium } from "playwright-core";
-import { mkdirSync } from "node:fs";
+import { copyFileSync, mkdirSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 
 const folder = process.argv[2];
 const out = process.argv[3] ?? "/tmp/sift-shots";
@@ -18,11 +20,12 @@ mkdirSync(out, { recursive: true });
 const only = process.env.ONLY?.split(",");
 const lookFiles = (process.env.LOOKS ?? "").split(",").filter(Boolean);
 const bridge = process.env.BRIDGE ?? "http://127.0.0.1:4777";
-const base = `${process.env.DEV ?? "http://localhost:1420"}/?bridge=${bridge}&pick=${encodeURIComponent(folder)}${lookFiles.map((l) => `&look=${encodeURIComponent(l)}`).join("")}`;
+const baseFor = (dir) => `${process.env.DEV ?? "http://localhost:1420"}/?bridge=${bridge}&pick=${encodeURIComponent(dir)}${lookFiles.map((l) => `&look=${encodeURIComponent(l)}`).join("")}`;
+const base = baseFor(folder);
 const reset = () => fetch(`${bridge}/invoke/dev_reset`, { method: "POST", body: "{}" });
 const browser = await chromium.launch({ channel: process.env.CHANNEL ?? "chrome" });
 
-async function session(name, { width, height, mobile = false, scheme = "dark", lang = "zh-CN", platform = "macos", query = "" }, steps) {
+async function session(name, { width, height, mobile = false, scheme = "dark", lang = "zh-CN", platform = "macos", query = "", pick }, steps) {
   if (only && !only.includes(name)) return;
   // A closing page still saves its progress; let that land before wiping it.
   await new Promise((r) => setTimeout(r, 500));
@@ -39,7 +42,7 @@ async function session(name, { width, height, mobile = false, scheme = "dark", l
   page.on("pageerror", (e) => console.log(`[${name}] page error: ${e.message}`));
   page.on("response", (r) => r.status() >= 400 && console.log(`[${name}] ${r.status()} ${decodeURIComponent(r.url()).slice(0, 160)}`));
   await page.addInitScript(() => localStorage.setItem("sift.settings", JSON.stringify({ onboarded: true })));
-  await page.goto(`${base}&platform=${platform}${mobile ? "&mobile" : ""}${query}`);
+  await page.goto(`${pick ? baseFor(pick) : base}&platform=${platform}${mobile ? "&mobile" : ""}${query}`);
   let n = 0;
   const shot = async (label) => {
     await page.waitForTimeout(350);
@@ -839,6 +842,91 @@ for (const [name, query, view] of [
     }
     console.log(`[${name}] prompt at launch: ${prompted}, section in Settings: ${shown}, check now: ${result || "-"}`);
   });
+}
+// Photos in folders inside the opened one, and a folder whose photos come and
+// go while it is open. The session builds its own folder from the first JPEGs
+// of the one given:
+//   <tmp>/day 1/{a,b,c}   <tmp>/day 2/{d,e, a again}   <tmp>/day 2/more/{f}
+if (!only || only.includes("folders")) {
+  const jpegs = readdirSync(folder).filter((f) => /\.jpe?g$/i.test(f)).sort();
+  if (jpegs.length < 10) console.log("[folders] skipped: needs a folder with 10 JPEGs");
+  else {
+    const root = join(tmpdir(), `sift-folders-${process.pid}`);
+    rmSync(root, { recursive: true, force: true });
+    const put = (n, to) => (mkdirSync(dirname(join(root, to)), { recursive: true }), copyFileSync(join(folder, jpegs[n]), join(root, to)));
+    [[0, "day 1/a.jpg"], [1, "day 1/b.jpg"], [2, "day 1/c.jpg"], [3, "day 2/d.jpg"], [4, "day 2/e.jpg"], [6, "day 2/a.jpg"], [5, "day 2/more/f.jpg"]].forEach(([n, to]) => put(n, to));
+    await session("folders", { ...desktop, pick: root }, async (page, shot) => {
+      // Photos, not cells: frames shot in one burst fold into one cell.
+      const cells = async () => Number((await page.locator(".toolbar-title span").textContent()).match(/(\d+) 张/)?.[1] ?? -1);
+      const until = async (want) => {
+        const t0 = Date.now();
+        while ((await cells()) !== want && Date.now() - t0 < 9000) await page.waitForTimeout(200);
+        return `${await cells()} after ${((Date.now() - t0) / 1000).toFixed(1)} s`;
+      };
+      const toast = async () => ((await page.locator(".toast").count()) ? await page.locator(".toast").textContent() : "(none)");
+      const subtitle = () => page.locator(".toolbar-title span").textContent();
+      await openLibrary(page);
+      console.log(`[folders] a folder with no photos of its own: ${await cells()} photos (want 7), "${await toast()}"`);
+      await page.locator(".cell").nth(0).click();
+      await page.keyboard.press("P");
+      console.log(`[folders] picking day 1/a.jpg leaves day 2/a.jpg alone: ${await page.locator(".cell-flag.pick").count()} picked (want 1)`);
+      await shot("all");
+      await page.locator('[aria-label="只看其中一个文件夹"]').click();
+      console.log(`[folders] folders offered: ${JSON.stringify(await page.getByRole("menuitem").allTextContents())}`);
+      await page.getByRole("menuitem", { name: "day 2 · 3" }).click();
+      console.log(`[folders] day 2 alone: ${await cells()} photos (want 3), "${await subtitle()}"`);
+      await shot("one");
+      await page.locator('[aria-label="只看其中一个文件夹"]').click();
+      await page.getByRole("menuitem", { name: /^全部文件夹/ }).click();
+
+      put(7, "day 1/new.jpg");
+      console.log(`[folders] a photo copied in: ${await until(8)} (want 8, on its own), toast "${await toast()}"`);
+      rmSync(join(root, "day 2/d.jpg"));
+      console.log(`[folders] a photo deleted: ${await until(7)} (want 7), toast "${await toast()}"`);
+
+      // The photo on screen goes away.
+      await page.locator(".cell").last().dblclick();
+      await page.locator(".tier.full.ready").waitFor({ timeout: 20000 });
+      const title = () => page.locator(".viewer-title strong").textContent();
+      const first = `${await title()} ${await page.locator(".viewer-title span").textContent()}`;
+      rmSync(join(root, "day 2/more/f.jpg"));
+      const t0 = Date.now();
+      while ((await title()) === "f.jpg" && Date.now() - t0 < 9000) await page.waitForTimeout(200);
+      console.log(`[folders] viewer on "${first}", file deleted: now "${await title()}" "${await page.locator(".viewer-title span").textContent()}", toast "${await toast()}"`);
+      await shot("viewer-moved-on");
+      await page.keyboard.press("Escape");
+      console.log(`[folders] back in the grid: ${await cells()} photos (want 6), ${await page.locator(".cell.selected").count()} selected (want 1)`);
+
+      await page.keyboard.press("Meta+R");
+      await page.locator(".toast", { hasText: "已刷新" }).waitFor({ timeout: 5000 }).catch(() => {});
+      console.log(`[folders] refresh with nothing new: "${await toast()}"`);
+      await page.waitForTimeout(300);
+      put(8, "day 2/late.jpg");
+      rmSync(join(root, "day 1/b.jpg"));
+      await page.keyboard.press("Meta+R");
+      await page.locator(".toast", { hasText: "新增" }).waitFor({ timeout: 5000 }).catch(() => {});
+      console.log(`[folders] refresh after one came and one went: "${await toast()}", ${await cells()} photos (want 6)`);
+
+      // A photo in the folder itself: next time only that one shows, until subfolders are asked for.
+      put(9, "top.jpg");
+      console.log(`[folders] a photo in the folder itself: ${await until(7)} (want 7)`);
+      await page.waitForTimeout(600);
+      await page.reload();
+      await page.locator(".cell img").first().waitFor();
+      console.log(`[folders] reopened: ${await cells()} photos (want 1), folder button: ${await page.locator('[aria-label="只看其中一个文件夹"]').count()} (want 0)`);
+      await page.locator('[aria-label="更多"]').click();
+      await page.getByRole("menuitem", { name: "包含子文件夹里的照片" }).click();
+      console.log(`[folders] subfolders switched on: ${await until(7)} (want 7), picked kept: ${await page.locator(".cell-flag.pick").count()} (want 1)`);
+      await page.locator('[aria-label="只看其中一个文件夹"]').click();
+      console.log(`[folders] folders offered: ${JSON.stringify(await page.getByRole("menuitem").allTextContents())}`);
+      await shot("with-subfolders");
+      await page.keyboard.press("Escape");
+      await page.locator('[aria-label="更多"]').click();
+      await page.getByRole("menuitem", { name: "设置" }).click();
+      await shot("settings");
+    });
+    rmSync(root, { recursive: true, force: true });
+  }
 }
 await browser.close();
 console.log(`screenshots in ${out}`);
