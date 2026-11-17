@@ -24,6 +24,7 @@ These files live in `crates/sift-core/assets` and are compiled into the app.
 Most crates are MIT and/or Apache-2.0. Those under other licences:
 
 - **rawler** (RAW decoding, [dnglab](https://github.com/dnglab/dnglab)): LGPL-2.1, which may be combined into a GPL-3.0 program.
+- **still265** (HEVC still-picture encoder, [bpg-rs](https://github.com/LegeApp/bpg-rs), with code translated from [x265](https://www.x265.org)): GPL-2.0-or-later, used here under the terms of version 3. It is in the macOS and Windows builds; only the Windows one calls it, for the HEIC still of a Live Photo.
 - **cssparser**, **selectors**, **dtoa-short**, **option-ext** (pulled in by Tauri): MPL-2.0 (GPL-compatible), used unmodified; their source is on [crates.io](https://crates.io).
 - Others under BSD-2/3-Clause, ISC, Zlib, Unicode-3.0, BSL-1.0, CC0, Unlicense or BlueOak alternatives; see `THIRD-PARTY-LICENSES.html`.
 

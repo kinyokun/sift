@@ -70,7 +70,7 @@ export type AppInfo = {
   /** Nikon's renderer exists for this platform / is part of this build. */
   nikon_supported?: boolean;
   nikon_sdk?: boolean;
-  /** Bursts can be exported as Live Photos (Apple platforms). */
+  /** Bursts can be saved as Live Photos (macOS and Windows). */
   live_photo?: boolean;
   /** Photos can be saved to the system photo library, Live Photos as Live Photos (iOS). */
   save_to_photos?: boolean;

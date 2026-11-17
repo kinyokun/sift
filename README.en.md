@@ -56,7 +56,7 @@ Press `F` to show the AF points that Nikon, Canon, Sony and Fujifilm bodies reco
 
 Bursts and pixel-shift series fold into one grid cell with a frame count; rating, flagging and exporting it covers the whole stack. In the viewer a filmstrip shows every frame of the stack, and `↑` / `↓` jump to the previous or next stack. Nikon bodies are grouped exactly by the series number they write into the file; other makers by drive mode and the time between frames.
 
-On macOS a burst can become a Live Photo: drag the ends of the timeline to choose frames, click one as the cover, and it plays at the burst's real rate (up to 120 frames a second). It is saved as a photo (JPG or HEIF, your choice) and a MOV of the same name, as an iPhone exports an unmodified original: drop both into Photos and it is a Live Photo, and cloud drives, chat apps and LAN transfer keep the pair together on the way to a phone. On an iPhone, open them in Sift and tap Save to Photos to add them to Photos as a Live Photo. Live Photos in a folder (a JPG/HEIC and MOV of the same name, or a `.pvt` left by AirDrop) open, play and cull in Sift too.
+On macOS and Windows a burst can become a Live Photo: drag the ends of the timeline to choose frames, click one as the cover, and it plays at the burst's real rate (up to 120 frames a second). It is saved as a photo (JPG or HEIF, your choice) and a MOV of the same name, as an iPhone exports an unmodified original: drop both into Photos on a Mac and it is a Live Photo, and cloud drives, chat apps and LAN transfer keep the pair together on the way to a phone. On Windows the movie is encoded by the system's own encoder (the N editions need the Media Feature Pack first); Windows' Photos app does not know Live Photos and shows a photo and a video. On an iPhone, open them in Sift and tap Save to Photos to add them to Photos as a Live Photo. Live Photos in a folder (a JPG/HEIC and MOV of the same name, or a `.pvt` left by AirDrop) open, play and cull in Sift too.
 
 <table>
 <tr>
@@ -142,9 +142,10 @@ iOS and Android builds currently have to be built yourself; see [AGENTS.md](AGEN
 - Grid and full-screen viewer; RAW+JPEG pairs show as one photo. Sort by file name, capture time, rating or file size
 - Subfolders: a folder with no photos of its own (a card's `DCIM`, say) lists the photos in the folders inside it, at every level; a setting does the same for any folder, and the grid can be narrowed to one of them
 - Copy photos into the open folder or delete some, and the grid follows within seconds, keeping flags, selection and your place; `⌘R` / `Ctrl+R` refreshes by hand
-- Bursts and pixel-shift series fold into one stack you can step through in the viewer; Live Photos show as one photo and play, and on macOS a burst can be made into one
-- Selection: click the circle at a photo's top left, drag a box, Shift for a range, ⌘/Ctrl to add; with several selected, a bar at the bottom rates, flags or applies a look to all of them. On phones, a long press starts selecting
+- Bursts and pixel-shift series fold into one stack you can step through in the viewer; Live Photos show as one photo and play, and on macOS and Windows a burst can be made into one
+- Selection: click the circle at a photo's top left, drag a box, Shift for a range, ⌘/Ctrl to add; with several selected, a bar at the bottom rates, flags, tags or applies a look to all of them. On phones, a long press starts selecting
 - Pick / reject / 0–5 stars; ratings are written into the XMP inside the file (or a `.xmp` sidecar when that is not possible), and RAW files are never rewritten
+- Tags: make a tag at any point while culling (one per person at an event, say) and put it on photos; a photo can carry several. Show only the photos with certain tags; on export every tag gets its own folder, with the files named after the tag, and a photo with several tags is in each of their folders
 - 100% view, eye close-up (people, and the eyes of cats, dogs, birds, horses, sheep, cows and other animals), AF points (Nikon, Canon, Sony, Fujifilm)
 - Compare 2, 3 or 4 photos side by side; each pane picks and steps its own photo, burst frames included; zoom and pan can be synced; compare a grid selection directly
 - Composition guides and crop preview (applied on export once confirmed)
@@ -160,7 +161,7 @@ iOS and Android builds currently have to be built yourself; see [AGENTS.md](AGEN
 
 **More**
 
-- Export: copy / rename, find RAW files by name, info frames
+- Export: copy / rename, a folder for each tag, find RAW files by name, info frames
 - LAN transfer: download originals to a phone by QR code, or send photos back to the computer
 - Every shortcut can be changed (Settings → Shortcuts)
 - In-app updates: the official macOS / Windows installers check for new versions and install them from within the app
@@ -172,6 +173,7 @@ iOS and Android builds currently have to be built yourself; see [AGENTS.md](AGEN
 - `↑` / `↓`: previous / next stack (bursts, pixel shift)
 - `P` / `X` / `U`: pick / reject / unflag
 - `0`–`5`: rating
+- `T`: tags; `Shift+1`–`Shift+9`: put on / take off tags 1–9
 - `Z`: 100% / fit
 - `E`: eye close-up
 - `F`: AF points
@@ -253,6 +255,7 @@ Sift grew out of [Anicrop Studio](https://github.com/R4ksh4/AnicropStudio) (R4ks
 - [Anicrop Studio](https://github.com/R4ksh4/AnicropStudio): where Sift started, by R4ksh4 and contributors (Apache-2.0)
 - [rawler / dnglab](https://github.com/dnglab/dnglab): RAW development (LGPL-2.1)
 - [heic-decoder](https://github.com/Multipad-cyber/heic-decoder-rust): decodes HEIF on Windows and Android (MIT / Apache-2.0)
+- [still265](https://github.com/LegeApp/bpg-rs): encodes the HEIF still of a Live Photo on Windows (GPL-2.0-or-later, with code translated from x265)
 - [tract](https://github.com/sonos/tract): runs the detection models locally
 - [Tauri](https://tauri.app), [React](https://react.dev), [zustand](https://github.com/pmndrs/zustand)
 - [raw.pixls.us](https://raw.pixls.us): sample files for testing

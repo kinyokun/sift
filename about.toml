@@ -16,6 +16,7 @@ accepted = [
     "0BSD",
     "MPL-2.0",
     "LGPL-2.1",
+    "GPL-2.0-or-later",
     "GPL-3.0-or-later",
 ]
 # Only what ships in the desktop and mobile apps.

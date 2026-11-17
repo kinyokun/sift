@@ -374,7 +374,7 @@ export function Viewer() {
     try {
       const saved = await api.saveLivePhoto(liveFrames.map((f) => f.id), live.cover - live.start, settings.liveHeif);
       endLive();
-      useStore.getState().notify(`livePhotoSaved:${fileName(saved)}`);
+      useStore.getState().notify(`${info?.platform === "macos" ? "livePhotoSaved" : "livePhotoSavedElsewhere"}:${fileName(saved)}`);
       useStore.getState().refresh();
     } catch (e) {
       useStore.getState().notify(`livePhotoFailed:${e}`);

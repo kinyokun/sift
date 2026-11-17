@@ -111,6 +111,43 @@ fn main() {
         }
         return;
     }
+    if args.first().map(String::as_str) == Some("--live") {
+        // probe --live <dir> <jpg|heic> <key> frames...
+        // A Live Photo of the frames, encoded by the system (macOS, Windows).
+        use sift_core::live::Still;
+        let dir = PathBuf::from(&args[1]);
+        std::fs::create_dir_all(&dir).unwrap();
+        let format = if args[2].eq_ignore_ascii_case("heic") { Still::Heic } else { Still::Jpeg };
+        let key: usize = args[3].parse().expect("key");
+        let frames: Vec<PathBuf> = args[4..].iter().map(PathBuf::from).collect();
+        let taken: Vec<Option<i64>> = frames.iter().map(|f| sift_core::stack::read(f).ok().and_then(|h| h.time_ms)).collect();
+        let stem = format!("{}_live", frames[key.min(frames.len() - 1)].file_stem().unwrap().to_string_lossy());
+        let t = Instant::now();
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        match sift_core::live::export(&frames, &taken, key, format, &dir, &stem, &cancel, |_| {}) {
+            Ok((still, movie)) => println!("{} + {} in {:.2}s", still.display(), movie.display(), t.elapsed().as_secs_f64()),
+            Err(e) => println!("ERROR {e}"),
+        }
+        return;
+    }
+    if args.first().map(String::as_str) == Some("--live-portable") {
+        // probe --live-portable <dir> <jpg|heic> <movie> <cover> <seconds> [identifier]
+        // A Live Photo of a movie that is already encoded (H.264), made without the system.
+        use sift_core::live::Still;
+        let dir = PathBuf::from(&args[1]);
+        std::fs::create_dir_all(&dir).unwrap();
+        let format = if args[2].eq_ignore_ascii_case("heic") { Still::Heic } else { Still::Jpeg };
+        let (movie, cover) = (PathBuf::from(&args[3]), PathBuf::from(&args[4]));
+        let moment: f64 = args[5].parse().expect("seconds");
+        let id = args.get(6).cloned().unwrap_or_else(|| sift_core::live::identifier(&cover));
+        let stem = format!("{}_live", cover.file_stem().unwrap().to_string_lossy());
+        let t = Instant::now();
+        match sift_core::live::from_movie(&movie, &cover, &id, moment, format, &dir, &stem) {
+            Ok((still, movie)) => println!("{} + {} ({id}) in {:.2}s, read back as a pair: {}", still.display(), movie.display(), t.elapsed().as_secs_f64(), sift_core::live::movie_of(&still, &movie).is_some()),
+            Err(e) => println!("ERROR {e}"),
+        }
+        return;
+    }
     if args.first().map(String::as_str) == Some("--stacks") {
         // Bursts and pixel-shift series among the given files.
         let files = &args[1..];
