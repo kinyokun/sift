@@ -41,6 +41,9 @@ pub enum Base {
     Portrait,
     Landscape,
     FlexibleColor,
+    /// The camera's Auto: Standard with contrast, saturation and sharpening
+    /// chosen for each picture.
+    Auto,
 }
 
 impl Base {
@@ -55,6 +58,7 @@ impl Base {
             Base::Portrait => "portrait",
             Base::Landscape => "landscape",
             Base::FlexibleColor => "flexible-color",
+            Base::Auto => "auto",
         }
     }
 }
@@ -362,6 +366,7 @@ pub fn record_look(nef: &mut [u8], np3: &[u8]) -> Result<()> {
         0x064d => b"MONOCHROME",
         0x0486 => b"PORTRAIT",
         0x04c7 => b"LANDSCAPE",
+        0x02cf => b"AUTO",
         _ => return Err(bad("unknown base Picture Control")),
     };
 

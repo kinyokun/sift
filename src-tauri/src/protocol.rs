@@ -38,11 +38,11 @@ fn scaled(state: &AppState, path: &Path, edge: u32, quality: u8) -> sift_core::R
 
 /// The RAW rendered without the in-camera look, cached on disk.
 pub fn original(state: &AppState, path: &Path) -> sift_core::Result<Vec<u8>> {
-    cached(&cache_file(&state.cache_dir, "orig", path, 0), || render::original(path, DEVELOP_QUALITY).map_err(render::explain))
+    cached(&cache_file(&state.cache_dir, "orig2", path, 0), || render::original(path, DEVELOP_QUALITY).map_err(render::explain))
 }
 
 /// Part of the cache key of rendered looks; bump when look rendering changes.
-const LOOK_RENDER_VERSION: u32 = 6;
+const LOOK_RENDER_VERSION: u32 = 9;
 
 /// Develops a NEF with Nikon's own renderer: the camera's Standard Picture
 /// Control for "no look" and `.cube` looks, the Picture Control itself for

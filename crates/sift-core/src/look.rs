@@ -454,6 +454,7 @@ impl Np3 {
             0x064d => Base::Monochrome,
             0x0486 => Base::Portrait,
             0x04c7 => Base::Landscape,
+            0x02cf => Base::Auto,
             _ => Base::Standard,
         };
         let mut recipe = Recipe::base(base);
