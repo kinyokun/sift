@@ -39,6 +39,8 @@ pub fn full(path: &Path) -> Result<Vec<u8>> {
     let p = container::parse(&src);
     match p.format {
         Format::Jpeg => Ok(std::fs::read(path)?),
+        // No webview shows HEIF everywhere, so it is handed over as a JPEG.
+        Format::Heif => encode_jpeg(&crate::heif::decode(path, u32::MAX)?, 92),
         Format::Other => match formats::ext_of(path).as_str() {
             "png" | "webp" | "bmp" | "gif" => Ok(std::fs::read(path)?),
             _ => encode_jpeg(&image::open(path)?.to_rgb8(), 92),
@@ -147,6 +149,9 @@ pub fn pixels(path: &Path, edge: u32) -> Result<RgbImage> {
     let src = Src::open(path)?;
     let p = container::parse(&src);
     let (img, orientation) = match p.preview_for(edge) {
+        // The JPEG a camera puts in a HEIF is a small one: good for the sizes it covers only.
+        Some(j) if p.format == Format::Heif && j.width.max(j.height) < edge => return crate::heif::decode(path, edge),
+        None if p.format == Format::Heif => return crate::heif::decode(path, edge),
         Some(j) => {
             let data = src.read(j.offset, j.len as usize).ok_or(Error::Malformed)?;
             (decode_jpeg(&data, edge)?, exif::orientation(&p))

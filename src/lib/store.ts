@@ -38,6 +38,8 @@ export type Settings = {
   subfolders: boolean;
   /** Show a burst or a pixel-shift series as one cell in the grid. */
   stacks: boolean;
+  /** Write the still of a Live Photo as HEIC instead of JPEG. */
+  liveHeif: boolean;
   autoDevelop: boolean;
   /** Move to the next photo after rating or flagging in the viewer. */
   autoAdvance: boolean;
@@ -83,6 +85,7 @@ const defaults: Settings = {
   preferRaw: false,
   subfolders: false,
   stacks: true,
+  liveHeif: false,
   autoDevelop: true,
   autoAdvance: false,
   infoPinned: true,

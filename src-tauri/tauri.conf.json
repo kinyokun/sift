@@ -33,7 +33,7 @@
     "license": "GPL-3.0-or-later",
     "copyright": "Copyright 2026 kinyokun and the Sift contributors",
     "homepage": "https://github.com/kinyokun/sift",
-    "shortDescription": "Fast photo culling for JPEG and RAW",
+    "shortDescription": "Fast photo culling for JPEG, HEIF and RAW",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

@@ -7,6 +7,7 @@
 
 use crate::{Error, Result};
 use core_foundation::base::TCFType;
+use core_foundation::boolean::CFBoolean;
 use core_foundation::dictionary::CFDictionary;
 use core_foundation::number::CFNumber;
 use core_foundation::string::CFString;
@@ -23,6 +24,10 @@ use std::ptr;
 extern "C" {
     static kCGImageDestinationLossyCompressionQuality: CFStringRef;
     static kCGImagePropertyOrientation: CFStringRef;
+    static kCGImageSourceCreateThumbnailFromImageAlways: CFStringRef;
+    static kCGImageSourceCreateThumbnailWithTransform: CFStringRef;
+    static kCGImageSourceThumbnailMaxPixelSize: CFStringRef;
+    fn CGImageSourceCreateThumbnailAtIndex(source: CFTypeRef, index: usize, options: CFDictionaryRef) -> CFTypeRef;
     fn CGImageSourceCreateWithURL(url: CFURLRef, options: CFDictionaryRef) -> CFTypeRef;
     fn CGImageSourceCreateImageAtIndex(source: CFTypeRef, index: usize, options: CFDictionaryRef) -> CFTypeRef;
     fn CGImageDestinationCreateWithData(data: CFMutableDataRef, kind: CFStringRef, count: usize, options: CFDictionaryRef) -> CFTypeRef;
@@ -106,5 +111,35 @@ pub fn render_jpeg(path: &Path, orientation: u8, quality: f32) -> Result<Vec<u8>
         }
         let bytes = std::slice::from_raw_parts(CFDataGetBytePtr(data as _), CFDataGetLength(data as _) as usize).to_vec();
         Ok(bytes)
+    }
+}
+
+/// Upright sRGB pixels of a picture the system can decode (HEIF), with a
+/// long edge of at most `edge`. The system turns the picture as the file
+/// asks, converts its colours (phones record Display P3) and brings HDR into
+/// the range of an ordinary screen.
+pub fn pixels(path: &Path, edge: u32) -> Result<image::RgbImage> {
+    let url = CFURL::from_path(path, false).ok_or(Error::Malformed)?;
+    // SAFETY: every pointer passed below is a live Core Foundation object owned
+    // by this function, each created object is released by `Owned`, and the
+    // canvas draws into `rgbx`, which holds width x height x 4 bytes and outlives it.
+    unsafe {
+        let source = Owned::new(CGImageSourceCreateWithURL(url.as_concrete_TypeRef(), ptr::null()), "cannot open file")?;
+        let key = |k: CFStringRef| CFString::wrap_under_get_rule(k);
+        let yes = || CFBoolean::true_value().as_CFType();
+        let mut options = vec![(key(kCGImageSourceCreateThumbnailFromImageAlways), yes()), (key(kCGImageSourceCreateThumbnailWithTransform), yes())];
+        if let Ok(edge) = i32::try_from(edge) {
+            options.push((key(kCGImageSourceThumbnailMaxPixelSize), CFNumber::from(edge).as_CFType()));
+        }
+        let options = CFDictionary::from_CFType_pairs(&options);
+        let decoded = Owned::new(CGImageSourceCreateThumbnailAtIndex(source.0, 0, options.as_concrete_TypeRef()), "format not supported")?;
+        let (width, height) = (CGImageGetWidth(decoded.0), CGImageGetHeight(decoded.0));
+        let mut rgbx = vec![0u8; width * height * 4];
+        let srgb = Owned::new(CGColorSpaceCreateWithName(kCGColorSpaceSRGB), "no sRGB colour space")?;
+        let canvas = Owned::new(CGBitmapContextCreate(rgbx.as_mut_ptr().cast(), width, height, 8, width * 4, srgb.0, RGBX), "out of memory")?;
+        CGContextDrawImage(canvas.0, CGRect { x: 0.0, y: 0.0, width: width as f64, height: height as f64 }, decoded.0);
+        drop(canvas);
+        let rgb: Vec<u8> = rgbx.as_chunks::<4>().0.iter().flat_map(|p| [p[0], p[1], p[2]]).collect();
+        image::RgbImage::from_raw(width as u32, height as u32, rgb).ok_or(Error::Malformed)
     }
 }

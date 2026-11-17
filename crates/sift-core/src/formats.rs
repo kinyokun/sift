@@ -3,7 +3,9 @@ use std::path::Path;
 pub const RAW_EXTS: &[&str] = &[
     "cr3", "cr2", "nef", "nefx", "nrw", "arw", "sr2", "srf", "dng", "raf", "orf", "rw2", "pef", "3fr", "iiq", "erf", "srw",
 ];
-pub const IMAGE_EXTS: &[&str] = &["jpg", "jpeg", "png", "webp", "bmp", "gif", "tif", "tiff"];
+/// HEIF pictures: `.heic` from phones, `.hif` from cameras.
+pub const HEIF_EXTS: &[&str] = &["heic", "heif", "hif"];
+pub const IMAGE_EXTS: &[&str] = &["jpg", "jpeg", "png", "webp", "bmp", "gif", "tif", "tiff", "heic", "heif", "hif"];
 
 pub fn ext_of(path: &Path) -> String {
     path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase()
@@ -15,6 +17,10 @@ pub fn is_raw(path: &Path) -> bool {
 
 pub fn is_jpeg(path: &Path) -> bool {
     matches!(ext_of(path).as_str(), "jpg" | "jpeg")
+}
+
+pub fn is_heif(path: &Path) -> bool {
+    HEIF_EXTS.contains(&ext_of(path).as_str())
 }
 
 pub fn is_supported(path: &Path) -> bool {
@@ -52,6 +58,7 @@ pub fn sniff_ext(path: &Path) -> Option<&'static str> {
         Format::Jpeg => "jpg",
         Format::Cr3 => "cr3",
         Format::Raf => "raf",
+        Format::Heif => "heic",
         Format::Tiff => {
             let make = crate::exif::read(&p).make.unwrap_or_default().to_ascii_uppercase();
             match make.split_whitespace().next().unwrap_or("") {

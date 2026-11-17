@@ -124,7 +124,16 @@ pub fn movie_identifier(path: &Path) -> Result<Option<String>> {
 pub fn still_has(path: &Path, identifier: &str) -> Result<bool> {
     let mut head = Vec::new();
     File::open(path)?.take(STILL_HEAD).read_to_end(&mut head)?;
-    Ok(find(&head, identifier.as_bytes()).is_some())
+    if find(&head, identifier.as_bytes()).is_some() {
+        return Ok(true);
+    }
+    if (head.len() as u64) < STILL_HEAD {
+        return Ok(false);
+    }
+    // A HEIF may keep its EXIF block anywhere, after the picture too: its index says where.
+    let src = crate::io::Src::open(path)?;
+    let note = crate::container::parse(&src).maker.and_then(|note| src.read(note.pos, note.len));
+    Ok(note.is_some_and(|note| find(&note, identifier.as_bytes()).is_some()))
 }
 
 /// The movie that makes `still` a Live Photo: the file of the same name
@@ -188,6 +197,12 @@ mod tests {
         // A clip that merely shares the name is not part of the photo.
         assert_eq!(movie_identifier(&plain).unwrap(), None);
         assert_eq!(movie_of(&still, &plain), None);
+        // A HEIC still, its EXIF block behind two megabytes of picture.
+        let heic = dir.join("a.heic");
+        std::fs::write(&heic, crate::container::tests::heif(&[], format!("Apple iOS\0{id}").as_bytes(), 2 << 20)).unwrap();
+        assert_eq!(movie_of(&heic, &mov), Some(mov.clone()));
+        std::fs::write(&heic, crate::container::tests::heif(&[], b"Apple iOS\0none", 2 << 20)).unwrap();
+        assert_eq!(movie_of(&heic, &mov), None);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

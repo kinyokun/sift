@@ -6,9 +6,12 @@ license.workspace = true
 description = "Photo culling core: container parsing, embedded previews, AF points, ratings"
 
 [features]
-default = ["face", "develop"]
+default = ["face", "develop", "heif"]
 face = ["dep:tract-onnx"]
 develop = ["dep:rawler"]
+# The bundled HEIF decoder. Apple platforms decode HEIF with the system and
+# only fall back on it.
+heif = ["dep:heic-decoder"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -19,6 +22,7 @@ filetime = "0.2"
 ab_glyph = { version = "0.2", features = ["variable-fonts"] }
 tract-onnx = { version = "=0.23.9", optional = true }
 rawler = { version = "0.8", optional = true }
+heic-decoder = { version = "=0.1.1", optional = true }
 
 [build-dependencies]
 cc = "1"

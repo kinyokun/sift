@@ -48,7 +48,7 @@ fn run(state: &AppState, cmd: &str, args: &Value) -> Result<Response, String> {
         "read_briefs" => json(&commands::briefs_of(state, &arg::<Vec<String>>(args, "paths")?)),
         "group_shots" => json(&commands::stacks_of(state, &arg::<Vec<String>>(args, "paths")?)),
         "live_photo_pace" => json(&commands::live_pace(state, &arg::<Vec<String>>(args, "frames")?)),
-        "save_live_photo" => json(&commands::live_photo(state, &arg::<Vec<String>>(args, "frames")?, arg(args, "key")?, |_| {})?),
+        "save_live_photo" => json(&commands::live_photo(state, &arg::<Vec<String>>(args, "frames")?, arg(args, "key")?, arg::<Option<bool>>(args, "heif")?.unwrap_or(false), |_| {})?),
         "set_rating" => json(&commands::rate(state, &arg::<Vec<String>>(args, "paths")?, arg(args, "rating")?)?),
         "locate_eyes" => json(&commands::eyes_of(state, arg(args, "path")?, &arg::<Vec<sift_core::af::AfBox>>(args, "af")?)?),
         "load_session" => ok(commands::session_of(state, &arg::<String>(args, "folder")?)),

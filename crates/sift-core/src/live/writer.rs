@@ -1,13 +1,14 @@
-//! A burst written out as a Live Photo: a JPEG still and a QuickTime movie of
-//! the frames, with the same content identifier in both; the movie also marks
-//! the moment the still shows. The two are saved side by side under one name,
-//! the form every way of moving files keeps and Photos imports as one picture.
+//! A burst written out as a Live Photo: a still (JPEG or HEIC) and a
+//! QuickTime movie of the frames, with the same content identifier in both;
+//! the movie also marks the moment the still shows. The two are saved side by
+//! side under one name, the form every way of moving files keeps and Photos
+//! imports as one picture.
 //!
 //! The movie is encoded by the operating system (AVFoundation, `live.m`), so
 //! this exists on Apple platforms only.
 
 use super::timeline;
-use crate::{preview, Error, Result};
+use crate::{formats, preview, Error, Result};
 use image::{imageops, RgbImage};
 use std::ffi::{c_char, c_int, c_long, c_void, CStr, CString};
 use std::path::{Path, PathBuf};
@@ -24,7 +25,7 @@ extern "C" {
     fn sift_live_frame(handle: *mut c_void, bgra: *const u8, seconds: f64, err: *mut c_char, cap: c_int) -> c_int;
     fn sift_live_finish(handle: *mut c_void, still: f64, duration: f64, err: *mut c_char, cap: c_int) -> c_int;
     fn sift_live_abort(handle: *mut c_void);
-    fn sift_live_still(jpeg: *const u8, length: c_long, path: *const c_char, identifier: *const c_char, err: *mut c_char, cap: c_int) -> c_int;
+    fn sift_live_still(picture: *const u8, length: c_long, heic: c_int, path: *const c_char, identifier: *const c_char, err: *mut c_char, cap: c_int) -> c_int;
 }
 
 /// Room for the system's error message.
@@ -83,11 +84,31 @@ fn movie_frame(path: &Path, size: Option<(u32, u32)>) -> Result<(RgbImage, Vec<u
     Ok((img, bgra))
 }
 
+/// The file a Live Photo's still is written as.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Still {
+    /// Opens everywhere.
+    Jpeg,
+    /// What iPhones write (HEVC in HEIF): about half the size.
+    Heic,
+}
+
+impl Still {
+    /// Every extension a still may have been written with.
+    pub const EXTS: [&'static str; 2] = ["JPG", "HEIC"];
+
+    pub fn ext(self) -> &'static str {
+        Self::EXTS[self as usize]
+    }
+}
+
 /// Writes `frames` (one displayable file per shot, in shooting order) as
-/// `<stem>.JPG` and `<stem>.MOV` in `dest`. `key` is the frame that becomes
-/// the still. Returns the paths of the still and the movie; nothing is left
-/// behind on failure, and existing files of those names are never replaced.
-pub fn export(frames: &[PathBuf], taken: &[Option<i64>], key: usize, dest: &Path, stem: &str, cancel: &AtomicBool, mut on_frame: impl FnMut(usize)) -> Result<(PathBuf, PathBuf)> {
+/// `<stem>.JPG` (or `.HEIC`, as `still` says) and `<stem>.MOV` in `dest`.
+/// `key` is the frame that becomes the still. Returns the paths of the still
+/// and the movie; nothing is left behind on failure, and existing files of
+/// those names are never replaced.
+#[allow(clippy::too_many_arguments)]
+pub fn export(frames: &[PathBuf], taken: &[Option<i64>], key: usize, format: Still, dest: &Path, stem: &str, cancel: &AtomicBool, mut on_frame: impl FnMut(usize)) -> Result<(PathBuf, PathBuf)> {
     if frames.len() < MIN_FRAMES {
         return Err(Error::Unsupported("a Live Photo needs a burst of at least three frames"));
     }
@@ -95,7 +116,7 @@ pub fn export(frames: &[PathBuf], taken: &[Option<i64>], key: usize, dest: &Path
         return Err(Error::Unsupported("too many frames for one Live Photo"));
     }
     let key = key.min(frames.len() - 1);
-    let (still, movie) = (dest.join(format!("{stem}.JPG")), dest.join(format!("{stem}.MOV")));
+    let (still, movie) = (dest.join(format!("{stem}.{}", format.ext())), dest.join(format!("{stem}.MOV")));
     if still.exists() || movie.exists() {
         return Err(Error::Unsupported("a Live Photo of that name already exists"));
     }
@@ -104,7 +125,7 @@ pub fn export(frames: &[PathBuf], taken: &[Option<i64>], key: usize, dest: &Path
     let staging = dest.join(format!(".{stem}.live.partial"));
     let _ = std::fs::remove_dir_all(&staging);
     std::fs::create_dir(&staging)?;
-    let (still_path, movie_path) = (staging.join(format!("{stem}.JPG")), staging.join(format!("{stem}.MOV")));
+    let (still_path, movie_path) = (staging.join(format!("{stem}.{}", format.ext())), staging.join(format!("{stem}.MOV")));
     let id = CString::new(identifier(&frames[key])).map_err(|_| Error::Malformed)?;
     let (times, duration) = timeline(taken);
     let mut message = Message::new();
@@ -143,8 +164,11 @@ pub fn export(frames: &[PathBuf], taken: &[Option<i64>], key: usize, dest: &Path
             if sift_live_finish(handle, moment, duration, message.ptr(), 512) == 0 {
                 return Err(message.error());
             }
-            let jpeg = preview::full(&frames[key])?;
-            if sift_live_still(jpeg.as_ptr(), jpeg.len() as c_long, c_path(&still_path)?.as_ptr(), id.as_ptr(), message.ptr(), 512) == 0 {
+            // A HEIF goes to the system as it is, which reads it with everything it
+            // records; of other files, the JPEG that is shown.
+            let picture = if formats::is_heif(&frames[key]) { std::fs::read(&frames[key])? } else { preview::full(&frames[key])? };
+            let heic = (format == Still::Heic) as c_int;
+            if sift_live_still(picture.as_ptr(), picture.len() as c_long, heic, c_path(&still_path)?.as_ptr(), id.as_ptr(), message.ptr(), 512) == 0 {
                 return Err(message.error());
             }
         }

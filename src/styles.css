@@ -2760,6 +2760,15 @@ input.text {
   white-space: nowrap;
 }
 
+.live-format {
+  flex: none;
+}
+
+.live-format .segmented button {
+  padding: 4px 9px;
+  font-size: 12px;
+}
+
 .stack-strip-action.primary {
   color: #000;
   background: #ffd60a;
@@ -2776,5 +2785,17 @@ input.text {
 @media (max-width: 700px) {
   .live-length {
     display: none;
+  }
+}
+
+@media (max-width: 840px) {
+  /* Beside the info panel the bar is too narrow for one row: the timeline gets its own. */
+  .viewer.with-info .live-editor {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .viewer.with-info .live-track {
+    flex-basis: calc(100% - 66px);
   }
 }

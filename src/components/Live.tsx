@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { imageUrl, type Item } from "../lib/api";
 import { useT } from "../lib/i18n";
+import { Segmented } from "../ui/controls";
 import { Icon } from "../ui/Icon";
 
 /** Rendition the preview plays; the same one the grid shows at its largest, so it is often cached. */
@@ -89,6 +90,9 @@ type EditorProps = {
   /** Frames of the range decoded so far. */
   ready: number;
   saving: boolean;
+  /** Whether the still is saved as HEIC and not as JPEG. */
+  heif: boolean;
+  onHeif: (heif: boolean) => void;
   onChange: (draft: LiveDraft) => void;
   /** A frame to look at while an end of the range is dragged; `null` when the drag ends. */
   onPeek: (index: number | null) => void;
@@ -98,7 +102,7 @@ type EditorProps = {
 };
 
 /** Timeline of a burst for making a Live Photo: drag the ends to choose the frames, click one to make it the still. */
-export function LiveEditor({ frames, draft, step, playing, ready, saving, onChange, onPeek, onPlay, onCancel, onSave }: EditorProps) {
+export function LiveEditor({ frames, draft, step, playing, ready, saving, heif, onHeif, onChange, onPeek, onPlay, onCancel, onSave }: EditorProps) {
   const t = useT();
   const track = useRef<HTMLDivElement>(null);
   const last = frames.length - 1;
@@ -163,6 +167,16 @@ export function LiveEditor({ frames, draft, step, playing, ready, saving, onChan
         </div>
       </div>
       <span className="live-length">{t.liveLength(count, (count * step).toFixed(1))}</span>
+      <div className="live-format" title={t.liveFormatHint}>
+        <Segmented
+          value={heif ? "heif" : "jpg"}
+          options={[
+            { value: "jpg", label: "JPG" },
+            { value: "heif", label: "HEIF" },
+          ]}
+          onChange={(v) => onHeif(v === "heif")}
+        />
+      </div>
       <button className="stack-strip-action" onClick={onCancel} disabled={saving}>
         {t.cancel}
       </button>

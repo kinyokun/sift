@@ -215,6 +215,47 @@ fn main() {
         }
         return;
     }
+    if args.first().map(String::as_str) == Some("--heif") {
+        // probe --heif <dir> files...
+        // What the index of each HEIF says, then the bundled decoder against the system's (Apple platforms).
+        let dir = PathBuf::from(&args[1]);
+        std::fs::create_dir_all(&dir).unwrap();
+        for a in &args[2..] {
+            let path = Path::new(a);
+            let stem = path.file_stem().unwrap().to_string_lossy().to_string();
+            let src = sift_core::io::Src::open(path).unwrap();
+            let p = sift_core::container::parse(&src);
+            let previews: Vec<String> = p.previews.iter().map(|j| format!("{}x{}", j.width, j.height)).collect();
+            println!("{stem}: {:?} {:?} previews {previews:?} xmp {} exif {}", p.format, p.heif, p.xmp.is_some(), p.ifd0.is_some());
+            let t = Instant::now();
+            let ours = sift_core::heif::bundled(path, u32::MAX);
+            let took = t.elapsed().as_secs_f64() * 1000.0;
+            match &ours {
+                Ok(img) => {
+                    println!("  bundled {}x{} in {took:.0}ms", img.width(), img.height());
+                    img.save(dir.join(format!("{stem}.bundled.png"))).unwrap();
+                }
+                Err(e) => println!("  bundled ERROR {e}"),
+            }
+            #[cfg(target_vendor = "apple")]
+            {
+                let t = Instant::now();
+                match sift_core::apple::pixels(path, u32::MAX) {
+                    Ok(theirs) => {
+                        println!("  system {}x{} in {:.0}ms", theirs.width(), theirs.height(), t.elapsed().as_secs_f64() * 1000.0);
+                        theirs.save(dir.join(format!("{stem}.system.png"))).unwrap();
+                        if let Some(ours) = ours.as_ref().ok().filter(|o| o.dimensions() == theirs.dimensions()) {
+                            let squares: f64 = ours.iter().zip(theirs.iter()).map(|(a, b)| (*a as f64 - *b as f64).powi(2)).sum();
+                            let mean: f64 = ours.iter().zip(theirs.iter()).map(|(a, b)| *a as f64 - *b as f64).sum::<f64>() / ours.len() as f64;
+                            println!("  bundled against system: {:.1} dB, mean difference {mean:+.2}", 10.0 * (255.0f64 * 255.0 * ours.len() as f64 / squares.max(1e-9)).log10());
+                        }
+                    }
+                    Err(e) => println!("  system ERROR {e}"),
+                }
+            }
+        }
+        return;
+    }
     if args.first().map(String::as_str) == Some("--preview") {
         out = Some(PathBuf::from(args.remove(1)));
         args.remove(0);

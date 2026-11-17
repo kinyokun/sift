@@ -119,7 +119,11 @@ pub fn read(path: &Path) -> Result<Meta> {
     };
     let raw = formats::is_raw(path);
     let (mut pw, mut ph) = p.largest_preview().map_or((0, 0), |j| (j.width, j.height));
-    if p.previews.is_empty() && !raw {
+    if let Some(heif) = p.heif {
+        (pw, ph) = (heif.width, heif.height);
+        exif.width = Some(pw);
+        exif.height = Some(ph);
+    } else if p.previews.is_empty() && !raw {
         if let Ok((w, h)) = image::image_dimensions(path) {
             (pw, ph) = (w, h);
             exif.width = Some(w);

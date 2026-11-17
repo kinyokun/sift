@@ -355,12 +355,13 @@ pub async fn live_photo_pace(app: AppHandle, frames: Vec<String>) -> CmdResult<f
     blocking(move || Ok(live_pace(&app.state::<AppState>(), &frames))).await
 }
 
-/// Writes a burst as a Live Photo (a JPEG and a movie of the same name that
+/// Writes a burst as a Live Photo (a still and a movie of the same name that
 /// belong together) next to its frames. `frames` are the displayed files in
-/// shooting order and `key` is the one that becomes the still. Returns the
-/// path of the JPEG.
+/// shooting order and `key` is the one that becomes the still, a HEIC with
+/// `heif` and a JPEG without. Returns the path of the still.
 #[cfg(target_vendor = "apple")]
-pub fn live_photo(state: &AppState, frames: &[String], key: usize, on_frame: impl FnMut(usize)) -> CmdResult<String> {
+pub fn live_photo(state: &AppState, frames: &[String], key: usize, heif: bool, on_frame: impl FnMut(usize)) -> CmdResult<String> {
+    use sift_core::live::Still;
     let files = frames.iter().map(|p| state.check(p)).collect::<Result<Vec<_>, _>>()?;
     let key = key.min(files.len().saturating_sub(1));
     let cover = files.get(key).ok_or("no frames")?;
@@ -368,28 +369,29 @@ pub fn live_photo(state: &AppState, frames: &[String], key: usize, on_frame: imp
     let base = cover.file_stem().map_or_else(|| "Live".into(), |s| s.to_string_lossy().into_owned());
     // Never over an existing file: the pair gets a name of its own, also
     // clear of an older Live Photo saved as a `.pvt` bundle.
-    let taken_name = |stem: &str| ["JPG", "MOV", sift_core::live::BUNDLE_EXT].iter().any(|ext| dest.join(format!("{stem}.{ext}")).exists());
+    let taken_name = |stem: &str| Still::EXTS.iter().chain(&["MOV", sift_core::live::BUNDLE_EXT]).any(|ext| dest.join(format!("{stem}.{ext}")).exists());
     let stem = (1..)
         .map(|n| if n == 1 { format!("{base}_live") } else { format!("{base}_live_{n}") })
         .find(|stem| !taken_name(stem))
         .unwrap_or_default();
     let taken = taken_at(state, frames);
     state.cancel.store(false, AtomicOrdering::Relaxed);
-    let (still, _) = sift_core::live::export(&files, &taken, key, dest, &stem, &state.cancel, on_frame).map_err(err)?;
+    let format = if heif { Still::Heic } else { Still::Jpeg };
+    let (still, _) = sift_core::live::export(&files, &taken, key, format, dest, &stem, &state.cancel, on_frame).map_err(err)?;
     Ok(still.to_string_lossy().into_owned())
 }
 
 #[cfg(not(target_vendor = "apple"))]
-pub fn live_photo(_: &AppState, _: &[String], _: usize, _: impl FnMut(usize)) -> CmdResult<String> {
+pub fn live_photo(_: &AppState, _: &[String], _: usize, _: bool, _: impl FnMut(usize)) -> CmdResult<String> {
     Err("Live Photos can only be made on Apple platforms".into())
 }
 
 #[tauri::command]
-pub async fn save_live_photo(app: AppHandle, frames: Vec<String>, key: usize) -> CmdResult<String> {
+pub async fn save_live_photo(app: AppHandle, frames: Vec<String>, key: usize, heif: bool) -> CmdResult<String> {
     blocking(move || {
         let total = frames.len();
         let mut emit = progress(&app);
-        live_photo(&app.state::<AppState>(), &frames, key, |done| emit(Progress { done, total, name: String::new() }))
+        live_photo(&app.state::<AppState>(), &frames, key, heif, |done| emit(Progress { done, total, name: String::new() }))
     })
     .await
 }

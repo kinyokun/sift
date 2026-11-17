@@ -51,7 +51,7 @@
         <a class="btn" id="zip" href="/zip"></a>
         <button class="plain" id="send" type="button"></button>
       </div>
-      <input id="picker" type="file" multiple hidden accept="image/*,.cr3,.cr2,.nef,.arw,.dng,.raf,.orf,.rw2,.mov">
+      <input id="picker" type="file" multiple hidden accept="image/*,.heic,.heif,.hif,.cr3,.cr2,.nef,.arw,.dng,.raf,.orf,.rw2,.mov">
       <progress id="bar" max="1" value="0" hidden></progress>
       <p class="note" id="status"></p>
     </div>
@@ -66,12 +66,12 @@ const T = zh ? {
   pinSub: "输入电脑上显示的 6 位配对码", enter: "继续", wrong: "配对码不正确", locked: "尝试次数过多。请在 Sift 中重新开启传输。",
   count: n => `${n} 张照片 · 点按即可保存原片`, zip: "全部下载", send: "发送到电脑", sending: (i, n, name) => `正在发送 ${i}/${n}：${name}`,
   sent: n => `已发送 ${n} 个文件`, failed: name => `发送失败：${name}`,
-  live: "实况照片会下载成一个压缩包，里面是同名的 JPG 和 MOV。浏览器没法把它们作为一张实况照片存进“照片”；要存成实况照片，请在 Sift App 里打开后点“存入相册”。"
+  live: "实况照片会下载成一个压缩包，里面是同名的照片和 MOV。浏览器没法把它们作为一张实况照片存进“照片”；要存成实况照片，请在 Sift App 里打开后点“存入相册”。"
 } : {
   pinSub: "Enter the 6-digit code shown on your computer", enter: "Continue", wrong: "That code is not right", locked: "Too many attempts. Restart sharing in Sift.",
   count: n => `${n} photos · tap one to save the original`, zip: "Download all", send: "Send to computer", sending: (i, n, name) => `Sending ${i}/${n}: ${name}`,
   sent: n => `Sent ${n} file${n === 1 ? "" : "s"}`, failed: name => `Could not send ${name}`,
-  live: "A Live Photo downloads as a ZIP holding a JPG and a MOV of the same name. A browser cannot save them to Photos as one Live Photo; to do that, open them in the Sift app and tap Save to Photos."
+  live: "A Live Photo downloads as a ZIP holding a photo and a MOV of the same name. A browser cannot save them to Photos as one Live Photo; to do that, open them in the Sift app and tap Save to Photos."
 };
 const $ = id => document.getElementById(id);
 $(mode).hidden = false;

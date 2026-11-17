@@ -178,11 +178,13 @@ void sift_live_abort(void *handle) {
     }
 }
 
-/// Writes `jpeg` to `path` with the content identifier in its Apple maker
-/// note; everything else the picture records (EXIF, orientation) is kept.
-int sift_live_still(const uint8_t *jpeg, long length, const char *path, const char *identifier, char *err, int cap) {
+/// Writes `picture` (the bytes of a JPEG or HEIF file) to `path` with the
+/// content identifier in its Apple maker note, as HEIC when `heic` is set
+/// and as JPEG otherwise; everything else the picture records (EXIF,
+/// orientation, colour profile) is kept.
+int sift_live_still(const uint8_t *picture, long length, int heic, const char *path, const char *identifier, char *err, int cap) {
     @autoreleasepool {
-        NSData *data = [NSData dataWithBytesNoCopy:(void *)jpeg length:(NSUInteger)length freeWhenDone:NO];
+        NSData *data = [NSData dataWithBytesNoCopy:(void *)picture length:(NSUInteger)length freeWhenDone:NO];
         CGImageSourceRef source = CGImageSourceCreateWithData((__bridge CFDataRef)data, NULL);
         if (!source || CGImageSourceGetCount(source) == 0) {
             if (source) {
@@ -193,9 +195,11 @@ int sift_live_still(const uint8_t *jpeg, long length, const char *path, const ch
         }
         NSMutableDictionary *properties = [(__bridge_transfer NSDictionary *)CGImageSourceCopyPropertiesAtIndex(source, 0, NULL) mutableCopy] ?: [NSMutableDictionary new];
         properties[(__bridge NSString *)kCGImagePropertyMakerAppleDictionary] = @{@"17": @(identifier)};
-        properties[(__bridge NSString *)kCGImageDestinationLossyCompressionQuality] = @0.95;
+        // 0.8 is where an iPhone's own HEIC sits (one of its photos written again
+        // at 0.8 comes out at its size), in about half the bytes of the JPEG.
+        properties[(__bridge NSString *)kCGImageDestinationLossyCompressionQuality] = heic ? @0.8 : @0.95;
         NSURL *url = [NSURL fileURLWithPath:@(path)];
-        CGImageDestinationRef destination = CGImageDestinationCreateWithURL((__bridge CFURLRef)url, CFSTR("public.jpeg"), 1, NULL);
+        CGImageDestinationRef destination = CGImageDestinationCreateWithURL((__bridge CFURLRef)url, heic ? CFSTR("public.heic") : CFSTR("public.jpeg"), 1, NULL);
         BOOL ok = NO;
         if (destination) {
             CGImageDestinationAddImageFromSource(destination, source, 0, (__bridge CFDictionaryRef)properties);

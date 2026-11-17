@@ -147,6 +147,7 @@ export type Session = {
 
 const RAW_EXT = /\.(cr3|cr2|nef|nefx|nrw|arw|sr2|srf|dng|raf|orf|rw2|pef|3fr|iiq|erf|srw)$/i;
 export const isRawPath = (path: string) => RAW_EXT.test(path);
+export const isHeifPath = (path: string) => /\.(heic|heif|hif)$/i.test(path);
 export const fileName = (path: string) => path.split(/[\\/]/).pop() ?? path;
 /** What a file's flag, look and crop are saved under: its name, and below a subfolder (`dir` of its [Item]) its
  * path from the opened folder, since two folders may each have a DSC_0001. */
@@ -170,8 +171,8 @@ export const api = {
   groupShots: (paths: string[]) => invoke<Stack[]>("group_shots", { paths }),
   /** Seconds each of `frames` is shown for when they play as a Live Photo. */
   livePhotoPace: (frames: string[]) => invoke<number>("live_photo_pace", { frames }),
-  /** Writes `frames` as a Live Photo next to them (a JPEG and a MOV of the same name), `key` being the still; resolves to the JPEG's path. */
-  saveLivePhoto: (frames: string[], key: number) => invoke<string>("save_live_photo", { frames, key }),
+  /** Writes `frames` as a Live Photo next to them (a still and a MOV of the same name), `key` being the still, a HEIC with `heif` and a JPEG without; resolves to the still's path. */
+  saveLivePhoto: (frames: string[], key: number, heif: boolean) => invoke<string>("save_live_photo", { frames, key, heif }),
   setRating: (paths: string[], rating: number) => invoke<"embedded" | "sidecar">("set_rating", { paths, rating }),
   locateEyes: (path: string, af: AfBox[]) => invoke<EyeTarget | null>("locate_eyes", { path, af }),
   developRaw: (path: string) => invoke<void>("develop_raw", { path }),

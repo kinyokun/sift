@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { NO_LOOK, api, fileName, imageUrl, isRawPath, type CropBox, type Item, type Meta } from "../lib/api";
+import { NO_LOOK, api, fileName, imageUrl, isHeifPath, isRawPath, type CropBox, type Item, type Meta } from "../lib/api";
 import { useT } from "../lib/i18n";
 import { actionFor, isTyping, ratingOf } from "../lib/shortcuts";
 import { cropOf, flagOf, lookOf, useStore } from "../lib/store";
@@ -354,7 +354,7 @@ export function Viewer() {
     setSaving(true);
     setPlaying(false);
     try {
-      const saved = await api.saveLivePhoto(liveFrames.map((f) => f.id), live.cover - live.start);
+      const saved = await api.saveLivePhoto(liveFrames.map((f) => f.id), live.cover - live.start, settings.liveHeif);
       endLive();
       useStore.getState().notify(`livePhotoSaved:${fileName(saved)}`);
       useStore.getState().refresh();
@@ -776,6 +776,8 @@ export function Viewer() {
                   playing={playing}
                   ready={liveReady}
                   saving={saving}
+                  heif={settings.liveHeif}
+                  onHeif={(liveHeif) => useStore.getState().setSettings({ liveHeif })}
                   onChange={changeLive}
                   onPeek={peek}
                   onPlay={() => setPlaying((v) => !v)}
@@ -859,7 +861,7 @@ export function Viewer() {
           <span>
             {position + 1} / {viewer.ids.length}
             {current.dir && ` · ${current.dir}`}
-            {current.raw && <em>{current.paired ? "RAW+JPG" : "RAW"}</em>}
+            {current.raw && <em>{!current.paired ? "RAW" : current.paths.some(isHeifPath) ? "RAW+HEIF" : "RAW+JPG"}</em>}
             {current.live && <em>LIVE</em>}
             {look?.custom && <em className="recipe">{look.name}</em>}
             {savedCrop && <em>{t.cropped}</em>}

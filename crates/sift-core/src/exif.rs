@@ -32,6 +32,10 @@ pub struct Exif {
 }
 
 pub fn orientation(p: &Parsed) -> u8 {
+    // A HEIF's own rotation counts, not the one in its EXIF block.
+    if let Some(heif) = p.heif {
+        return heif.orientation;
+    }
     p.ifd0
         .as_ref()
         .and_then(|(t, i)| i.get(T_ORIENTATION).and_then(|e| t.uint(e)))
