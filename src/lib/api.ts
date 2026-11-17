@@ -127,6 +127,10 @@ export const NO_LOOK = "original";
 export type ExportKind = "all" | "raw" | "jpeg";
 export type CropBox = [number, number, number, number];
 export type Rename = { template: string; start: number };
+/** A label for sorting photos into piles: a person, a client, a use. `color` is a place in the palette. */
+export type Tag = { id: string; name: string; color: number };
+/** One folder of an export sorted by tag: the tag's name, and the shots that carry it, by their place in the list. */
+export type TagFolder = { tag: string; shots: number[] };
 
 /** Culling progress of one folder, saved continuously. */
 export type Session = {
@@ -143,6 +147,12 @@ export type Session = {
   crops?: Record<string, CropBox>;
   /** The folder inside the opened one the grid was narrowed to. */
   subfolder?: string | null;
+  /** The tags of this folder, in the order they were made. */
+  tags?: Tag[];
+  /** File name -> ids of the tags the photo carries. */
+  tagged?: Record<string, string[]>;
+  /** Tags the grid was narrowed to. */
+  tagFilter?: string[];
 };
 
 const RAW_EXT = /\.(cr3|cr2|nef|nefx|nrw|arw|sr2|srf|dng|raf|orf|rw2|pef|3fr|iiq|erf|srw)$/i;
@@ -184,7 +194,8 @@ export const api = {
     rename: Rename | null,
     looks: Record<string, string>,
     crops: Record<string, CropBox>,
-  ) => invoke<CopyReport>("export_files", { shots, dest, plan: { kind, rename, looks, crops } }),
+    folders: TagFolder[] = [],
+  ) => invoke<CopyReport>("export_files", { shots, dest, plan: { kind, rename, looks, crops, folders } }),
   listLooks: () => invoke<LookInfo[]>("list_looks"),
   importLooks: (sources: string[]) => invoke<LookInfo[]>("import_looks", { sources }),
   removeLook: (id: string) => invoke<LookInfo[]>("remove_look", { id }),
@@ -201,7 +212,8 @@ export const api = {
     looks: Record<string, string>,
     sources: Record<string, string>,
     crops: Record<string, CropBox>,
-  ) => invoke<CopyReport>("export_framed", { request: { files, dest, options, max_edge: maxEdge, rename, looks, sources, crops } }),
+    folders: TagFolder[] = [],
+  ) => invoke<CopyReport>("export_framed", { request: { files, dest, options, max_edge: maxEdge, rename, looks, sources, crops, folders } }),
   previewFramed: (path: string, options: FrameOptions) => invoke<ArrayBuffer>("preview_framed", { path, options }),
   findRaws: (picked: string, raws: string, dest: string, loose: boolean) =>
     invoke<CopyReport>("find_raws", { picked, raws, dest, loose }),

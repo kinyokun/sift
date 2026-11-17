@@ -535,6 +535,18 @@ pub struct ExportPlan {
     /// First path of a shot -> normalised `[x, y, width, height]` crop.
     #[serde(default)]
     pub crops: HashMap<String, [f32; 4]>,
+    /// Sorted by tag: one folder for each of these inside the destination.
+    #[serde(default)]
+    pub folders: Vec<export::TagFolder>,
+}
+
+/// Progress of one of several folders as progress of the whole export.
+fn overall(p: Progress, part: usize, parts: usize) -> Progress {
+    const STEPS: usize = 1000;
+    if parts < 2 {
+        return p;
+    }
+    Progress { done: part * STEPS + p.done * STEPS / p.total.max(1), total: parts * STEPS, name: p.name }
 }
 
 /// The file a look is rendered from: the RAW of a shot if it has one.
@@ -547,47 +559,63 @@ fn look_source(shot: &[PathBuf]) -> Option<&PathBuf> {
 /// JPEG rendered that way instead of a copy of the camera's JPEG.
 pub fn export_shots(state: &AppState, shots: &[Vec<String>], dest: &str, plan: &ExportPlan, mut on_progress: impl FnMut(Progress)) -> CmdResult<CopyReport> {
     let ExportPlan { kind, looks, crops, .. } = plan;
-    let (kind, rename) = (*kind, plan.rename.as_ref());
+    let kind = *kind;
     let all = checked_shots(state, shots)?;
     state.cancel.store(false, AtomicOrdering::Relaxed);
-    let stems = export::stems(&all, rename);
-    let dest = Path::new(dest);
-    fs::create_dir_all(dest).map_err(err)?;
+    let parts = export::parts(Path::new(dest), &plan.folders, plan.rename.as_ref(), all.len());
     let mut report = CopyReport::default();
-    // Files that are copied as they are, with the name their shot was given.
-    let (mut plain, mut names) = (Vec::new(), Vec::new());
-    for (i, shot) in all.iter().enumerate() {
-        let look = shots[i].first().and_then(|p| looks.get(p));
-        let crop = shots[i].first().and_then(|p| crops.get(p));
-        if kind == export::Kind::Raw || (look.is_none() && crop.is_none()) {
-            plain.push(shot.clone());
-            names.push(stems[i].clone());
-            continue;
+    // A shot that goes into several folders is rendered once; the others get a copy of that file.
+    let mut rendered: HashMap<usize, PathBuf> = HashMap::new();
+    for (k, part) in parts.iter().enumerate() {
+        let picked: Vec<Vec<PathBuf>> = part.shots.iter().map(|i| all[*i].clone()).collect();
+        let stems = export::stems(&picked, part.rename.as_ref());
+        fs::create_dir_all(&part.dir).map_err(err)?;
+        let mut step = |p: Progress| on_progress(overall(p, k, parts.len()));
+        // Files that are copied as they are, with the name their shot was given.
+        let (mut plain, mut names) = (Vec::new(), Vec::new());
+        for (n, (&i, shot)) in part.shots.iter().zip(&picked).enumerate() {
+            let look = shots[i].first().and_then(|p| looks.get(p));
+            let crop = shots[i].first().and_then(|p| crops.get(p));
+            if kind == export::Kind::Raw || (look.is_none() && crop.is_none()) {
+                plain.push(shot.clone());
+                names.push(stems[n].clone());
+                continue;
+            }
+            if state.cancel.load(AtomicOrdering::Relaxed) {
+                report.cancelled = true;
+                return Ok(report);
+            }
+            step(Progress { done: n, total: picked.len(), name: stems[n].clone() });
+            let target = part.dir.join(format!("{}.jpg", stems[n]));
+            let written = match rendered.get(&i) {
+                Some(first) => export::copy_file(first, &target, &state.cancel).map_err(err),
+                None => styled_pixels(state, shot, look, crop)
+                    .and_then(|img| preview::encode_jpeg(&img, FRAMED_QUALITY).map_err(err))
+                    .and_then(|jpeg| fs::write(&target, jpeg).map_err(err)),
+            };
+            match written {
+                Ok(()) => {
+                    report.copied += 1;
+                    rendered.entry(i).or_insert(target);
+                }
+                Err(e) => report.failed.push(format!("{}: {e}", stems[n])),
+            }
+            // The RAW still travels along unchanged when RAW files are wanted.
+            let raws: Vec<PathBuf> = shot.iter().filter(|p| formats::is_raw(p)).cloned().collect();
+            if kind == export::Kind::All && !raws.is_empty() {
+                plain.push(raws);
+                names.push(stems[n].clone());
+            }
         }
-        if state.cancel.load(AtomicOrdering::Relaxed) {
-            report.cancelled = true;
-            return Ok(report);
-        }
-        on_progress(Progress { done: i, total: all.len(), name: stems[i].clone() });
-        let rendered = styled_pixels(state, shot, look, crop)
-            .and_then(|img| preview::encode_jpeg(&img, FRAMED_QUALITY).map_err(err))
-            .and_then(|jpeg| fs::write(dest.join(format!("{}.jpg", stems[i])), jpeg).map_err(err));
-        match rendered {
-            Ok(()) => report.copied += 1,
-            Err(e) => report.failed.push(format!("{}: {e}", stems[i])),
-        }
-        // The RAW still travels along unchanged when RAW files are wanted.
-        let raws: Vec<PathBuf> = shot.iter().filter(|p| formats::is_raw(p)).cloned().collect();
-        if kind == export::Kind::All && !raws.is_empty() {
-            plain.push(raws);
-            names.push(stems[i].clone());
+        let copied = export::export_named(&plain, &names, &part.dir, kind, &state.cancel, step).map_err(err)?;
+        report.copied += copied.copied;
+        report.skipped += copied.skipped;
+        report.failed.extend(copied.failed);
+        report.cancelled |= copied.cancelled;
+        if report.cancelled {
+            break;
         }
     }
-    let copied = export::export_named(&plain, &names, dest, kind, &state.cancel, on_progress).map_err(err)?;
-    report.copied += copied.copied;
-    report.skipped += copied.skipped;
-    report.failed.extend(copied.failed);
-    report.cancelled |= copied.cancelled;
     Ok(report)
 }
 
@@ -755,6 +783,9 @@ pub struct FramedRequest {
     /// File -> normalised `[x, y, width, height]` crop.
     #[serde(default)]
     crops: HashMap<String, [f32; 4]>,
+    /// Sorted by tag: one folder for each of these inside the destination.
+    #[serde(default)]
+    folders: Vec<export::TagFolder>,
 }
 
 /// Full-resolution upright pixels: the embedded preview, or a development
@@ -769,45 +800,59 @@ fn best_pixels(state: &AppState, path: &Path, m: &meta::Meta) -> sift_core::Resu
 /// Renders every requested photo with its info frame into `request.dest`.
 pub fn frame_files(state: &AppState, request: &FramedRequest, mut on_progress: impl FnMut(Progress)) -> CmdResult<CopyReport> {
     state.cancel.store(false, AtomicOrdering::Relaxed);
-    let dest = PathBuf::from(&request.dest);
-    fs::create_dir_all(&dest).map_err(err)?;
     let mut report = CopyReport::default();
-    let total = request.files.len();
     let shots: Vec<Vec<String>> = request.files.iter().map(|f| vec![f.clone()]).collect();
-    let stems = export::stems(&checked_shots(state, &shots)?, request.rename.as_ref());
-    for (i, f) in request.files.iter().enumerate() {
-        if state.cancel.load(AtomicOrdering::Relaxed) {
-            report.cancelled = true;
-            break;
-        }
-        let path = state.check(f)?;
-        let name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
-        on_progress(Progress { done: i, total, name: name.clone() });
-        let result = (|| -> sift_core::Result<()> {
-            let m = meta::read(&path)?;
-            let mut img = match request.looks.get(f) {
-                Some(look) => {
-                    let source = request.sources.get(f).and_then(|s| state.check(s).ok()).unwrap_or_else(|| path.clone());
-                    protocol::look_pixels(state, &source, look, 0).map_err(sift_core::Error::Decode)?
-                }
-                None => best_pixels(state, &path, &m)?,
+    let all = checked_shots(state, &shots)?;
+    let parts = export::parts(Path::new(&request.dest), &request.folders, request.rename.as_ref(), all.len());
+    let total: usize = parts.iter().map(|part| part.shots.len()).sum();
+    let mut done = 0;
+    // A photo that goes into several folders is framed once; the others get a copy of that file.
+    let mut framed: HashMap<usize, PathBuf> = HashMap::new();
+    'parts: for part in &parts {
+        fs::create_dir_all(&part.dir).map_err(err)?;
+        let picked: Vec<Vec<PathBuf>> = part.shots.iter().map(|i| all[*i].clone()).collect();
+        let stems = export::stems(&picked, part.rename.as_ref());
+        for (n, &i) in part.shots.iter().enumerate() {
+            if state.cancel.load(AtomicOrdering::Relaxed) {
+                report.cancelled = true;
+                break 'parts;
+            }
+            let (f, path) = (&request.files[i], &all[i][0]);
+            let name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
+            on_progress(Progress { done, total, name: name.clone() });
+            done += 1;
+            let target = part.dir.join(if part.rename.is_some() { format!("{}.jpg", stems[n]) } else { format!("{}_framed.jpg", stems[n]) });
+            let result = match framed.get(&i) {
+                Some(first) => export::copy_file(first, &target, &state.cancel),
+                None => (|| -> sift_core::Result<()> {
+                    let m = meta::read(path)?;
+                    let mut img = match request.looks.get(f) {
+                        Some(look) => {
+                            let source = request.sources.get(f).and_then(|s| state.check(s).ok()).unwrap_or_else(|| path.clone());
+                            protocol::look_pixels(state, &source, look, 0).map_err(sift_core::Error::Decode)?
+                        }
+                        None => best_pixels(state, path, &m)?,
+                    };
+                    if let Some(c) = request.crops.get(f) {
+                        img = crop_to(img, c);
+                    }
+                    if request.max_edge > 0 && img.width().max(img.height()) > request.max_edge {
+                        let k = request.max_edge as f32 / img.width().max(img.height()) as f32;
+                        let (w, h) = ((img.width() as f32 * k).round() as u32, (img.height() as f32 * k).round() as u32);
+                        img = image::imageops::resize(&img, w.max(1), h.max(1), image::imageops::FilterType::Lanczos3);
+                    }
+                    let picture = frame::render(&img, &m.exif, &request.options);
+                    fs::write(&target, preview::encode_jpeg(&picture, FRAMED_QUALITY)?)?;
+                    Ok(())
+                })(),
             };
-            if let Some(c) = request.crops.get(f) {
-                img = crop_to(img, c);
+            match result {
+                Ok(()) => {
+                    report.copied += 1;
+                    framed.entry(i).or_insert(target);
+                }
+                Err(e) => report.failed.push(format!("{name}: {e}")),
             }
-            if request.max_edge > 0 && img.width().max(img.height()) > request.max_edge {
-                let k = request.max_edge as f32 / img.width().max(img.height()) as f32;
-                let (w, h) = ((img.width() as f32 * k).round() as u32, (img.height() as f32 * k).round() as u32);
-                img = image::imageops::resize(&img, w.max(1), h.max(1), image::imageops::FilterType::Lanczos3);
-            }
-            let framed = frame::render(&img, &m.exif, &request.options);
-            let name = if request.rename.is_some() { format!("{}.jpg", stems[i]) } else { format!("{}_framed.jpg", stems[i]) };
-            fs::write(dest.join(name), preview::encode_jpeg(&framed, FRAMED_QUALITY)?)?;
-            Ok(())
-        })();
-        match result {
-            Ok(()) => report.copied += 1,
-            Err(e) => report.failed.push(format!("{name}: {e}")),
         }
     }
     on_progress(Progress { done: total, total, name: String::new() });

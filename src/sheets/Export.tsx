@@ -2,14 +2,20 @@ import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, isRawPath, type CropBox, type CopyReport, type ExportKind, type FrameOptions, type FrameStyle, type Item, type Progress, type Rename } from "../lib/api";
+import { api, isRawPath, type CropBox, type CopyReport, type ExportKind, type FrameOptions, type FrameStyle, type Item, type Progress, type Rename, type TagFolder } from "../lib/api";
 import { useT } from "../lib/i18n";
-import { cropOf, flagOf, folderName, framesOf, lookOf, useStore, visibleEntries } from "../lib/store";
+import { cropOf, flagOf, folderName, framesOf, lookOf, tagsOf, useStore, visibleEntries } from "../lib/store";
+import { TagDot } from "../components/Tags";
 import { Row, Segmented, Sheet, Toggle } from "../ui/controls";
 
 const LAST_DEST_KEY = "sift.exportDest";
 const LAST_RENAME_KEY = "sift.exportRename";
 const DEFAULT_TEMPLATE = "{date}_{seq}";
+/** An export sorted by tag has a rule of its own, remembered apart from the plain one. */
+const LAST_TAG_RENAME_KEY = "sift.exportRenameTag";
+const DEFAULT_TAG_TEMPLATE = "{tag}_{seq}";
+/** What stands for "photos without a tag" among the tags to export. */
+const UNTAGGED = "";
 const SIZES = [0, 4096, 2560, 2048];
 
 type Scope = "picked" | "selection" | "shown";
@@ -26,7 +32,7 @@ export function useScopes(): { scopes: Record<Scope, Item[]>; initial: Scope } {
     const selection = chosen.length > 1 ? chosen : [];
     const initial: Scope = picked.length ? "picked" : selection.length ? "selection" : "shown";
     return { scopes: { picked, selection, shown }, initial };
-  }, [s.items, s.flags, s.selection, s.filter, s.minStars, s.ratings, s.stacks, s.expanded, s.settings.stacks, s.settings.sortBy, s.settings.sortDesc]);
+  }, [s.items, s.flags, s.selection, s.filter, s.minStars, s.ratings, s.stacks, s.expanded, s.settings.stacks, s.settings.sortBy, s.settings.sortDesc, s.tagged, s.tagFilter]);
 }
 
 function useProgress(): Progress | null {
@@ -94,7 +100,14 @@ export function ExportSheet({ onClose }: { onClose: () => void }) {
   const [maxEdge, setMaxEdge] = useState(0);
   const [kind, setKind] = useState<ExportKind>("all");
   const [renaming, setRenaming] = useState(false);
-  const [template, setTemplate] = useState(() => localStorage.getItem(LAST_RENAME_KEY) || DEFAULT_TEMPLATE);
+  const [plainTemplate, setPlainTemplate] = useState(() => localStorage.getItem(LAST_RENAME_KEY) || DEFAULT_TEMPLATE);
+  const [tagTemplate, setTagTemplate] = useState(() => localStorage.getItem(LAST_TAG_RENAME_KEY) || DEFAULT_TAG_TEMPLATE);
+  const tags = useStore((s) => s.tags);
+  const tagged = useStore((s) => s.tagged);
+  const [byTag, setByTag] = useState(false);
+  /** Tags that get no folder; photos without a tag only get one when asked for. */
+  const [left, setLeft] = useState<string[]>([UNTAGGED]);
+  const [template, setTemplate] = byTag ? [tagTemplate, setTagTemplate] : [plainTemplate, setPlainTemplate];
   const [start, setStart] = useState(1);
   const [example, setExample] = useState("");
   const [busy, setBusy] = useState(false);
@@ -104,14 +117,21 @@ export function ExportSheet({ onClose }: { onClose: () => void }) {
   const items = scopes[scope];
   const sample = items[0]?.id;
   const rename: Rename | null = renaming && template.trim() ? { template: template.trim(), start: Math.max(0, start) } : null;
-  // Files of each shot that the chosen type keeps.
-  const shots = useMemo(
-    () =>
-      items
-        .map((it) => (mode === "frame" ? [it.id] : it.paths.filter((p) => kind === "all" || (kind === "raw") === isRawPath(p))))
-        .filter((shot) => shot.length > 0),
-    [items, kind, mode],
-  );
+  // The photos that have a file of the chosen type, and those files.
+  const kept = useMemo(() => (mode === "frame" ? items : items.filter((it) => kind === "all" || it.paths.some((p) => (kind === "raw") === isRawPath(p)))), [items, kind, mode]);
+  const shots = useMemo(() => kept.map((it) => (mode === "frame" ? [it.id] : it.paths.filter((p) => kind === "all" || (kind === "raw") === isRawPath(p)))), [kept, kind, mode]);
+  // Sorted by tag: the photos of every tag, by their place in `kept`; a photo with two tags is in both.
+  const groups = useMemo(() => {
+    const of = kept.map((it) => tagsOf(tagged, it));
+    const listed = (carries: (ids: string[]) => boolean) => of.flatMap((ids, i) => (carries(ids) ? [i] : []));
+    return [
+      ...tags.map((tag) => ({ id: tag.id, name: tag.name, color: tag.color as number | null, shots: listed((ids) => ids.includes(tag.id)) })),
+      { id: UNTAGGED, name: t.untagged, color: null, shots: listed((ids) => !ids.some((id) => tags.some((tag) => tag.id === id))) },
+    ].filter((g) => g.shots.length > 0);
+  }, [kept, tags, tagged, t]);
+  const folders: TagFolder[] = byTag ? groups.filter((g) => !left.includes(g.id)).map((g) => ({ tag: g.name, shots: g.shots })) : [];
+  const untaggedLeft = byTag && left.includes(UNTAGGED) ? (groups.find((g) => g.id === UNTAGGED)?.shots.length ?? 0) : 0;
+  const ready = shots.length > 0 && (!byTag || folders.length > 0);
   const hasRaw = items.some((it) => it.paths.some(isRawPath));
   // Looks chosen while culling are applied on export.
   const chosen = useStore((s) => s.looks);
@@ -132,27 +152,28 @@ export function ExportSheet({ onClose }: { onClose: () => void }) {
   }
   // The copy job gets every file of a shot; a look is rendered from its RAW even when only JPEGs are wanted.
   // The movie of a Live Photo goes with its still.
-  const wanted = items
-    .filter((it) => kind === "all" || it.paths.some((p) => (kind === "raw") === isRawPath(p)))
-    .map((it) => (it.live && kind !== "raw" ? [...it.paths, it.live] : it.paths));
+  const wanted = kept.map((it) => (it.live && kind !== "raw" ? [...it.paths, it.live] : it.paths));
 
-  // Show what the first and last file will be called.
+  // Show what the first and last file will be called; sorted by tag, those of the first folder.
+  const first = folders[0];
+  const named = useMemo(() => (first ? first.shots.map((i) => shots[i]) : shots), [first?.tag, first?.shots.join(), shots]);
   useEffect(() => {
-    if (!rename || !shots.length) return setExample("");
+    if (!rename || !named.length) return setExample("");
     let stale = false;
-    const ends = shots.length > 1 ? [shots[0], shots[shots.length - 1]] : [shots[0]];
+    const rule = first ? { ...rename, tag: first.tag } : rename;
+    const ends = named.length > 1 ? [named[0], named[named.length - 1]] : [named[0]];
     const timer = setTimeout(async () => {
-      const names = await api.exportNames(ends, rename).catch(() => []);
+      const names = await api.exportNames(ends, rule).catch(() => []);
       if (stale || !names.length) return;
       // The preview numbers two shots; the real last number depends on the count.
-      const last = shots.length > 1 ? await api.exportNames(shots, rename).then((all) => all[all.length - 1]).catch(() => "") : "";
+      const last = named.length > 1 ? await api.exportNames(named, rule).then((all) => all[all.length - 1]).catch(() => "") : "";
       if (!stale) setExample(last ? `${names[0]}  …  ${last}` : names[0]);
     }, 200);
     return () => {
       stale = true;
       clearTimeout(timer);
     };
-  }, [renaming, template, start, shots]);
+  }, [renaming, template, start, named]);
 
   // Live preview of the frame on the first photo.
   useEffect(() => {
@@ -181,11 +202,11 @@ export function ExportSheet({ onClose }: { onClose: () => void }) {
     setReport(null);
     try {
       if (!mobile) localStorage.setItem(LAST_DEST_KEY, dest);
-      if (rename) localStorage.setItem(LAST_RENAME_KEY, rename.template);
+      if (rename) localStorage.setItem(byTag ? LAST_TAG_RENAME_KEY : LAST_RENAME_KEY, rename.template);
       const result =
         mode === "copy"
-          ? await api.exportFiles(wanted, dest, kind, rename, looks, crops)
-          : await api.exportFramed(shots.map((shot) => shot[0]), dest, options, maxEdge, rename, looks, sources, crops);
+          ? await api.exportFiles(wanted, dest, kind, rename, looks, crops, folders)
+          : await api.exportFramed(shots.map((shot) => shot[0]), dest, options, maxEdge, rename, looks, sources, crops, folders);
       setReport(result);
     } catch (e) {
       useStore.getState().notify(String(e));
@@ -227,7 +248,7 @@ export function ExportSheet({ onClose }: { onClose: () => void }) {
             <span className="spacer" />
             <button onClick={onClose}>{report ? t.done : t.cancel}</button>
             {!report && (
-              <button className="primary" disabled={!shots.length || !dest} onClick={run}>
+              <button className="primary" disabled={!ready || !dest} onClick={run}>
                 {t.start}
               </button>
             )}
@@ -266,7 +287,35 @@ export function ExportSheet({ onClose }: { onClose: () => void }) {
                   />
                 </Row>
               )}
-              <Row label={t.renameFiles} hint={renaming ? example && `${t.renameExample}: ${example}` : undefined}>
+              {tags.length > 0 && (
+                <Row label={t.exportByTag} hint={t.exportByTagHint}>
+                  <Toggle
+                    checked={byTag}
+                    onChange={(on) => {
+                      setByTag(on);
+                      // Files in a tag's folder are named after the tag unless that is turned off again.
+                      if (on) setRenaming(true);
+                    }}
+                  />
+                </Row>
+              )}
+              {byTag && groups.length > 0 && (
+                <div className="row chips tag-folders">
+                  {groups.map((g) => (
+                    <button
+                      key={g.id}
+                      className={left.includes(g.id) ? "" : "on"}
+                      aria-pressed={!left.includes(g.id)}
+                      onClick={() => setLeft(left.includes(g.id) ? left.filter((id) => id !== g.id) : [...left, g.id])}
+                    >
+                      {g.color !== null && <TagDot color={g.color} />}
+                      {g.name}
+                      <i>{g.shots.length}</i>
+                    </button>
+                  ))}
+                </div>
+              )}
+              <Row label={t.renameFiles} hint={renaming ? example && `${t.renameExample}: ${first ? `${first.tag}/` : ""}${example}` : undefined}>
                 <Toggle checked={renaming} onChange={setRenaming} />
               </Row>
               {renaming && (
@@ -319,7 +368,14 @@ export function ExportSheet({ onClose }: { onClose: () => void }) {
                 <input className="text" placeholder={t.caption} value={options.caption} onChange={(e) => set({ caption: e.target.value })} />
               </>
             )}
-            {renaming && <p className="note">{t.renameHint}</p>}
+            {renaming && (
+              <p className="note">
+                {t.renameHint}
+                {byTag && t.renameHintTag}
+              </p>
+            )}
+            {untaggedLeft > 0 && <p className="note">{t.exportUntaggedLeft(untaggedLeft)}</p>}
+            {byTag && shots.length > 0 && !folders.length && <p className="note bad">{t.exportNoTagged}</p>}
             {styled > 0 && kind !== "raw" && <p className="note">{t.lookOnExport}</p>}
             {!items.length && <p className="note">{t.nothingToExport}</p>}
             {items.length > 0 && !shots.length && <p className="note bad">{t.nothingOfKind}</p>}

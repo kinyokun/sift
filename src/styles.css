@@ -774,23 +774,45 @@ button.primary.large {
 }
 
 @media (max-width: 700px) {
+  /* Two rows: what is selected and how to leave, then what to do with it. One row has no room for all of it on a phone. */
   .selection-bar {
     left: 8px;
     right: 8px;
     transform: none;
     max-width: none;
+    flex-wrap: wrap;
     justify-content: space-between;
-    gap: 4px;
-    padding: 6px 6px 6px 12px;
+    gap: 1px 2px;
+    padding: 4px 8px 6px;
+    border-radius: 22px;
     animation: none;
   }
 
-  .selection-bar .stars button {
-    width: 21px;
+  .selection-bar strong {
+    order: -3;
+    margin: 0 auto 0 8px;
   }
 
   .selection-bar .select-all {
-    display: none;
+    order: -2;
+  }
+
+  .selection-bar .text-button.strong {
+    order: -1;
+  }
+
+  .selection-bar::before {
+    content: "";
+    flex: 0 0 100%;
+  }
+
+  .selection-bar .stars button {
+    width: 20px;
+  }
+
+  /* Above the whole bar, not over its first row. */
+  .selection-bar .menu.up {
+    bottom: calc(100% + 48px);
   }
 
   .selection-flags {
@@ -2798,4 +2820,291 @@ input.text {
   .viewer.with-info .live-track {
     flex-basis: calc(100% - 66px);
   }
+}
+
+/* -------------------------------------------------------------------- tags */
+
+.tag-dot {
+  flex: none;
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.18);
+}
+
+.tag-menu {
+  width: 252px;
+}
+
+.tag-menu.up {
+  margin-left: -126px;
+}
+
+.tag-menu > button:disabled {
+  opacity: 0.45;
+}
+
+.tag-menu > button .tag-dot,
+.tag-edit .tag-dot {
+  margin-right: 8px;
+}
+
+.tag-menu .tag-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tag-menu .tag-key {
+  margin-left: 10px;
+  font-size: 11px;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.tag-menu > button:hover .tag-key {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.tag-hint {
+  margin: 6px 8px 8px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-2);
+  white-space: normal;
+}
+
+.tag-new,
+.tag-edit {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px;
+}
+
+.tag-menu input.text {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.tag-new button,
+.tag-edit button {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  justify-content: center;
+  color: var(--text-2);
+}
+
+.tag-edit .tag-color .tag-dot {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+}
+
+.tag-new button:disabled {
+  opacity: 0.35;
+}
+
+.tag-edit button.sure {
+  width: auto;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--red);
+}
+
+.tag-suggest {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 4px 4px;
+}
+
+.tag-suggest small {
+  flex: 1 0 100%;
+  font-size: 11px;
+  color: var(--text-2);
+  padding-left: 4px;
+}
+
+.tag-suggest button {
+  width: auto;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 12px;
+  font-size: 12px;
+  background: var(--fill);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+}
+
+.tag-menu .tag-manage {
+  margin-top: 4px;
+  justify-content: center;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+/* The folder's tags under the toolbar: a click shows only the photos that carry one. */
+.toolbar {
+  flex-wrap: wrap;
+}
+
+.toolbar-side {
+  min-height: var(--bar);
+}
+
+.tag-bar {
+  order: 4;
+  flex: 1 0 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 2px 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tag-bar::-webkit-scrollbar {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  .tag-bar {
+    padding: 6px 0 0;
+  }
+}
+
+.tag-bar button {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px 0 8px;
+  border-radius: 13px;
+  font-size: 12px;
+  background: var(--fill);
+  max-width: 220px;
+  white-space: nowrap;
+}
+
+.tag-bar button.on {
+  background: color-mix(in srgb, var(--tint) 18%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tint) 60%, transparent);
+  font-weight: 600;
+}
+
+.tag-bar i:not(.tag-dot),
+.tag-folders i:not(.tag-dot) {
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.tag-bar button.clear {
+  background: none;
+  color: var(--tint);
+  padding: 0 8px;
+}
+
+.cell-tags {
+  position: absolute;
+  left: 5px;
+  bottom: 26px;
+  max-width: calc(100% - 10px);
+  display: flex;
+  gap: 4px;
+  pointer-events: none;
+}
+
+.cell-tags span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  height: 17px;
+  padding: 0 6px 0 5px;
+  border-radius: 9px;
+  font-size: 10px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.52);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+
+.cell-tags:not(.named) span {
+  gap: 3px;
+  padding: 0 5px;
+}
+
+.cell-tags b {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cell-tags .tag-dot {
+  width: 8px;
+  height: 8px;
+}
+
+.viewer-title em.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0;
+  vertical-align: bottom;
+}
+
+.viewer-title em.tag .tag-dot {
+  width: 7px;
+  height: 7px;
+}
+
+.info-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+
+.info-tags span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.row.tag-folders {
+  padding-top: 0;
+  gap: 6px;
+}
+
+.tag-folders button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px 5px 9px;
+  font-size: 12px;
+}
+
+.tag-folders button:not(.on) {
+  opacity: 0.6;
 }

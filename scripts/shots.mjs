@@ -8,7 +8,7 @@
 //
 // BRIDGE and DEV name the two servers when they are not on their usual ports.
 import { chromium } from "playwright-core";
-import { copyFileSync, mkdirSync, readdirSync, rmSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -926,6 +926,225 @@ if (!only || only.includes("folders")) {
       await shot("settings");
     });
     rmSync(root, { recursive: true, force: true });
+  }
+}
+// Tags: making them while culling, several on one photo, narrowing the grid to
+// some, and an export with a folder for each. The session builds its own
+// folder from the first JPEGs and the first RAW of the one given, and exports
+// next to it.
+if (!only || only.includes("tags") || only.includes("tags-phone")) {
+  const files = readdirSync(folder).sort();
+  const jpegs = files.filter((f) => /\.jpe?g$/i.test(f));
+  const raw = files.find((f) => /\.(nef|arw|cr2|cr3|raf|dng)$/i.test(f));
+  if (jpegs.length < 8) console.log("[tags] skipped: needs a folder with 8 JPEGs");
+  else {
+    const root = join(tmpdir(), `sift-tags-${process.pid}`);
+    const dest = `${root}-out`;
+    rmSync(root, { recursive: true, force: true });
+    rmSync(dest, { recursive: true, force: true });
+    mkdirSync(root, { recursive: true });
+    "abcdefgh".split("").forEach((name, n) => copyFileSync(join(folder, jpegs[n]), join(root, `${name}.jpg`)));
+    if (raw) copyFileSync(join(folder, raw), join(root, `i.${raw.split(".").pop()}`));
+    const total = raw ? 9 : 8;
+    const tree = (dir) =>
+      Object.fromEntries(
+        readdirSync(dir, { withFileTypes: true })
+          .filter((e) => e.isDirectory())
+          .map((e) => [e.name, readdirSync(join(dir, e.name)).sort()]),
+      );
+    await session("tags", { ...desktop, pick: root }, async (page, shot) => {
+      const cell = (i) => page.locator(".cell").nth(i);
+      const cells = () => page.locator(".cell").count();
+      const bar = () => page.locator(".tag-bar button:not(.clear)").allTextContents();
+      const on = (i) => cell(i).locator(".cell-tags").allTextContents();
+      const toast = async () => ((await page.locator(".toast").count()) ? await page.locator(".toast").textContent() : "(none)");
+      const add = async (name) => {
+        await page.locator(".tag-new input").fill(name);
+        await page.locator(".tag-new input").press("Enter");
+      };
+      await openLibrary(page);
+      console.log(`[tags] photos: ${await cells()} (want ${total}), tag bar before any tag: ${await page.locator(".tag-bar").count()} (want 0)`);
+
+      // T opens the menu on the photo the keys act on; a name and Enter makes a tag and puts it on.
+      await cell(0).click();
+      await page.keyboard.press("T");
+      await page.locator(".tag-menu").waitFor();
+      await shot("menu-empty");
+      console.log(`[tags] T opens the menu, typing goes to the name: ${await page.evaluate(() => document.activeElement?.closest(".tag-new") != null)}`);
+      await add("小明");
+      await add("合影");
+      console.log(`[tags] two tags made on the first photo: bar ${JSON.stringify(await bar())}, cell ${JSON.stringify(await on(0))}`);
+      await shot("menu-two");
+      await page.keyboard.press("Escape");
+      console.log(`[tags] Escape closes the menu only: menu ${await page.locator(".tag-menu").count()} (want 0), cells ${await cells()}`);
+
+      await cell(1).click();
+      await page.keyboard.press("Shift+1");
+      const put = await toast();
+      await page.keyboard.press("Shift+1");
+      const off = await toast();
+      await page.keyboard.press("Shift+1");
+      console.log(`[tags] Shift+1 on the second photo: "${put}", again: "${off}", a third time: ${JSON.stringify(await on(1))}`);
+
+      // Several photos at once, from the bar that comes up for them.
+      await cell(2).click();
+      await cell(3).click({ modifiers: ["ControlOrMeta"] });
+      await page.locator(".selection-bar [aria-label='给所选照片打标签']").click();
+      await page.locator(".selection-bar .tag-menu").getByRole("menuitemcheckbox", { name: "合影" }).click();
+      console.log(`[tags] 合影 on two selected photos: ${JSON.stringify([await on(2), await on(3)])}, bar ${JSON.stringify(await bar())}`);
+      await shot("selection-bar");
+      await page.keyboard.press("Escape");
+      // A key for a tag that does not exist yet opens the menu to make it.
+      await page.keyboard.press("Shift+3");
+      console.log(`[tags] Shift+3 with two tags opens the menu: ${await page.locator(".selection-bar .tag-menu").count()} (want 1)`);
+      await add("客户");
+      await page.keyboard.press("Escape");
+      await page.keyboard.press("Escape");
+      console.log(`[tags] three tags: bar ${JSON.stringify(await bar())}, third photo ${JSON.stringify(await on(2))}`);
+      await shot("grid");
+
+      // Narrowing the grid.
+      await page.locator(".tag-bar button", { hasText: "小明" }).click();
+      const one = await cells();
+      await page.locator(".tag-bar button", { hasText: "客户" }).click();
+      const two = await cells();
+      await shot("filtered");
+      await page.locator(".tag-bar .clear").click();
+      console.log(`[tags] only 小明: ${one} (want 2), 小明 or 客户: ${two} (want 4), all again: ${await cells()} (want ${total})`);
+
+      // In the viewer a tag goes on the photo on screen.
+      await cell(4).dblclick();
+      await page.locator(".viewer").waitFor();
+      await page.keyboard.press("Shift+2");
+      await page.locator(".dock [aria-label='标签']").click();
+      await page.locator(".dock .tag-menu").getByRole("menuitemcheckbox", { name: "小明" }).click();
+      await shot("viewer-menu");
+      console.log(`[tags] viewer, Shift+2 then 小明 from the dock: title ${JSON.stringify(await page.locator(".viewer-title em.tag").allTextContents())}, info ${JSON.stringify(await page.locator(".info-tags").allTextContents())}`);
+      await page.keyboard.press("Escape");
+      console.log(`[tags] Escape closes the menu, not the viewer: ${await page.locator(".viewer").count()} (want 1)`);
+      await page.keyboard.press("Escape");
+      await page.locator(".viewer").waitFor({ state: "detached" });
+
+      // A crop on the first photo (two tags), so the export has something to render.
+      await cell(0).dblclick();
+      await page.locator(".viewer").waitFor();
+      await page.locator(".dock [aria-label='裁剪预览']").click();
+      await page.getByRole("menuitem", { name: "1:1" }).click();
+      await page.keyboard.press("Enter");
+      await page.keyboard.press("Escape");
+      await page.locator(".viewer").waitFor({ state: "detached" });
+
+      // Tags are part of the folder's progress.
+      await page.waitForTimeout(600);
+      const kept = await page.evaluate(() => localStorage.getItem("sift.settings"));
+      await page.addInitScript((settings) => localStorage.setItem("sift.settings", settings), kept);
+      await page.reload();
+      await page.locator(".cell img").first().waitFor();
+      console.log(`[tags] reopened: bar ${JSON.stringify(await bar())}, first photo ${JSON.stringify(await on(0))}`);
+
+      // Renaming, recolouring and deleting.
+      await page.locator(".toolbar [aria-label='给所选照片打标签']").click();
+      await page.getByRole("button", { name: "修改标签" }).click();
+      const names = page.locator(".tag-edit input");
+      await names.nth(2).fill("小明");
+      await names.nth(2).blur();
+      console.log(`[tags] renaming 客户 to a name in use: "${await toast()}", still ${JSON.stringify(await names.nth(2).inputValue())}`);
+      await names.nth(2).fill("Client: A");
+      await names.nth(2).blur();
+      await page.locator(".tag-edit .tag-color").nth(2).click();
+      await shot("edit");
+      console.log(`[tags] renamed: bar ${JSON.stringify(await bar())}, third photo ${JSON.stringify(await on(2))}`);
+
+      // Export sorted by tag, renamed {tag}_{seq}.
+      await page.keyboard.press("Escape");
+      await page.evaluate((dir) => localStorage.setItem("sift.exportDest", dir), dest);
+      await page.locator(".toolbar [aria-label='导出']").click();
+      await page.getByRole("switch").first().waitFor();
+      await page.locator(".row", { hasText: "按标签分文件夹" }).getByRole("switch").click();
+      await page.locator(".row-label small", { hasText: "示例" }).waitFor({ timeout: 5000 }).catch(() => {});
+      console.log(`[tags] export sheet: folders ${JSON.stringify(await page.locator(".tag-folders button").allTextContents())}, ${JSON.stringify(await page.locator(".row", { hasText: "重命名" }).locator("small").allTextContents())}, notes ${JSON.stringify(await page.locator(".sheet .note").allTextContents())}`);
+      await shot("export");
+      await page.getByRole("button", { name: "开始" }).click();
+      await page.locator(".report").waitFor({ timeout: 60000 });
+      console.log(`[tags] exported: "${await page.locator(".report strong").textContent()}" ${JSON.stringify(tree(dest))}`);
+      const same = (x, y) => readFileSync(x).equals(readFileSync(y));
+      console.log(`[tags] the cropped photo is one rendering in both folders: ${same(join(dest, "小明", "小明_001.jpg"), join(dest, "合影", "合影_001.jpg"))}, and not the file itself: ${!same(join(dest, "小明", "小明_001.jpg"), join(root, "a.jpg"))}; an untouched photo is a plain copy: ${same(join(dest, "小明", "小明_002.jpg"), join(root, "b.jpg"))}`);
+      await page.getByRole("button", { name: "完成" }).click();
+
+      // Again with the photos that have no tag, names kept, and one tag left out.
+      rmSync(dest, { recursive: true, force: true });
+      await page.locator(".toolbar [aria-label='导出']").click();
+      await page.locator(".row", { hasText: "按标签分文件夹" }).getByRole("switch").click();
+      await page.locator(".tag-folders button", { hasText: "未分类" }).click();
+      await page.locator(".tag-folders button", { hasText: "合影" }).click();
+      await page.locator(".row", { hasText: "重命名" }).getByRole("switch").click();
+      await page.getByRole("button", { name: "开始" }).click();
+      await page.locator(".report").waitFor({ timeout: 60000 });
+      console.log(`[tags] untagged too, 合影 left out, names kept: "${await page.locator(".report strong").textContent()}" ${JSON.stringify(tree(dest))}`);
+      await page.getByRole("button", { name: "完成" }).click();
+
+      // Framed, sorted by tag.
+      rmSync(dest, { recursive: true, force: true });
+      await page.locator(".toolbar [aria-label='导出']").click();
+      await page.getByRole("tab", { name: "加参数边框" }).click();
+      await page.locator(".row", { hasText: "按标签分文件夹" }).getByRole("switch").click();
+      await page.getByRole("button", { name: "开始" }).click();
+      await page.locator(".report").waitFor({ timeout: 120000 });
+      console.log(`[tags] framed: "${await page.locator(".report strong").textContent()}" ${JSON.stringify(tree(dest))}`);
+      console.log(`[tags] framed once, copied to the other folder: ${same(join(dest, "小明", "小明_001.jpg"), join(dest, "合影", "合影_001.jpg"))}`);
+      await page.getByRole("button", { name: "完成" }).click();
+
+      // Deleting a tag takes it off its photos.
+      await page.locator(".toolbar [aria-label='给所选照片打标签']").click();
+      await page.getByRole("button", { name: "修改标签" }).click();
+      await page.locator(".tag-edit .tag-remove").nth(2).click();
+      const asked = await page.locator(".tag-edit .tag-remove").nth(2).textContent();
+      await page.locator(".tag-edit .tag-remove").nth(2).click();
+      console.log(`[tags] delete asks first ("${asked}"), then: bar ${JSON.stringify(await bar())}, third photo ${JSON.stringify(await on(2))}`);
+      await page.keyboard.press("Escape");
+
+      // Another folder is offered the names used before.
+      await page.locator(".toolbar [aria-label='给所选照片打标签']").click();
+      console.log(`[tags] names remembered for other folders, minus the ones this folder has: ${JSON.stringify(await page.locator(".tag-suggest button").allTextContents())}`);
+      await page.keyboard.press("Escape");
+      await page.locator('[aria-label="更多"]').click();
+      await page.getByRole("menuitem", { name: "设置" }).click();
+      await page.locator(".group.keys .row", { hasText: "打上 / 去掉标签 1" }).scrollIntoViewIfNeeded();
+      await shot("settings-keys");
+    });
+    await session("tags-phone", { ...phone, pick: root }, async (page, shot) => {
+      await page.locator(".welcome button.primary").click().catch(() => {});
+      await page.locator(".cell img").first().waitFor();
+      await page.locator(".cell").nth(0).tap();
+      await page.locator(".viewer").waitFor();
+      await page.locator(".dock [aria-label='标签']").tap();
+      await shot("viewer-menu-empty");
+      await page.locator(".tag-new input").fill("小明");
+      await page.locator(".tag-new input").press("Enter");
+      await page.locator(".tag-new input").fill("很长很长的一个标签名字用来看看放不放得下");
+      await page.locator(".tag-new input").press("Enter");
+      await shot("viewer-menu");
+      const menu = await page.locator(".tag-menu").boundingBox();
+      console.log(`[tags-phone] menu inside the screen: ${menu.x >= 0 && menu.x + menu.width <= 390} (${Math.round(menu.x)}..${Math.round(menu.x + menu.width)} of 390), title ${JSON.stringify(await page.locator(".viewer-title em.tag").allTextContents())}`);
+      await page.locator(".viewer-title").tap();
+      await page.locator(".viewer-bar [aria-label='返回']").tap();
+      await page.locator(".viewer").waitFor({ state: "detached" });
+      await shot("grid");
+      await page.locator('[aria-label="更多"]').tap();
+      await page.getByRole("menuitem", { name: "选择照片" }).tap();
+      await page.locator(".cell").nth(1).tap();
+      await page.locator(".cell").nth(2).tap();
+      await page.locator(".selection-bar [aria-label='给所选照片打标签']").tap();
+      await shot("selection-menu");
+      const bar = await page.locator(".selection-bar").boundingBox();
+      const pop = await page.locator(".selection-bar .tag-menu").boundingBox();
+      const reach = await page.evaluate(() => Math.max(...[...document.querySelector(".selection-bar").children].map((el) => el.getBoundingClientRect().right)));
+      console.log(`[tags-phone] selection bar ${Math.round(bar.x)}..${Math.round(bar.x + bar.width)}, its buttons end at ${Math.round(reach)}, its menu ${Math.round(pop.x)}..${Math.round(pop.x + pop.width)} of 390`);
+      await page.locator(".selection-bar .tag-menu").getByRole("menuitemcheckbox", { name: "小明" }).tap();
+      console.log(`[tags-phone] tagged from the bar: ${JSON.stringify(await page.locator(".tag-bar button:not(.clear)").allTextContents())}`);
+    });
+    rmSync(root, { recursive: true, force: true });
+    rmSync(dest, { recursive: true, force: true });
   }
 }
 await browser.close();

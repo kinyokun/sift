@@ -13,6 +13,16 @@ export const ACTIONS = [
   "rate3",
   "rate4",
   "rate5",
+  "tags",
+  "tag1",
+  "tag2",
+  "tag3",
+  "tag4",
+  "tag5",
+  "tag6",
+  "tag7",
+  "tag8",
+  "tag9",
   "eye",
   "zoom",
   "af",
@@ -36,6 +46,8 @@ export const ACTIONS = [
 ] as const;
 export type Action = (typeof ACTIONS)[number];
 export const RATE_ACTIONS: Action[] = ["rate0", "rate1", "rate2", "rate3", "rate4", "rate5"];
+/** The first tags of a folder, in the order they were made, each have a key of their own. */
+export const TAG_ACTIONS: Action[] = ["tag1", "tag2", "tag3", "tag4", "tag5", "tag6", "tag7", "tag8", "tag9"];
 
 /** A binding is modifiers plus one key, such as `Alt+D`, `ArrowLeft` or `Space`.
  * `Mod` is Command on Apple devices and Ctrl elsewhere. An empty string means unassigned. */
@@ -53,6 +65,17 @@ export const DEFAULT_KEYS: Record<Action, string> = {
   rate3: "3",
   rate4: "4",
   rate5: "5",
+  tags: "T",
+  // The digits alone are the ratings.
+  tag1: "Shift+1",
+  tag2: "Shift+2",
+  tag3: "Shift+3",
+  tag4: "Shift+4",
+  tag5: "Shift+5",
+  tag6: "Shift+6",
+  tag7: "Shift+7",
+  tag8: "Shift+8",
+  tag9: "Shift+9",
   eye: "E",
   zoom: "Z",
   af: "F",
@@ -131,6 +154,12 @@ export function actionFor(keys: Record<Action, string>, e: KeyboardEvent): Actio
 /** The star rating an action sets, or null when it is not a rating action. */
 export function ratingOf(action: Action | null): number | null {
   const i = action ? RATE_ACTIONS.indexOf(action) : -1;
+  return i >= 0 ? i : null;
+}
+
+/** Which of the folder's tags an action toggles (from 0), or null when it is not a tag action. */
+export function tagOf(action: Action | null): number | null {
+  const i = action ? TAG_ACTIONS.indexOf(action) : -1;
   return i >= 0 ? i : null;
 }
 

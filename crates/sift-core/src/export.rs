@@ -106,12 +106,16 @@ pub enum Kind {
 }
 
 /// Batch rename rule. Tokens: `{name}` original name, `{seq}` running
-/// number, `{date}` and `{time}` of capture, `{camera}` model.
+/// number, `{date}` and `{time}` of capture, `{camera}` model, `{tag}` the
+/// tag the shots are exported under.
 #[derive(serde::Deserialize, Clone, Debug)]
 pub struct Rename {
     pub template: String,
     #[serde(default = "one")]
     pub start: u32,
+    /// What `{tag}` stands for; empty when the export is not sorted by tag.
+    #[serde(default)]
+    pub tag: String,
 }
 
 fn one() -> u32 {
@@ -121,6 +125,56 @@ fn one() -> u32 {
 fn clean(name: &str) -> String {
     let s: String = name.chars().filter(|c| !c.is_control() && !matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')).collect();
     s.trim().trim_matches('.').to_string()
+}
+
+/// The folders an export sorted by tag puts its shots in, one per tag in the
+/// order given: the tag's name without the characters a file name cannot
+/// have, and no two alike (a file system that ignores case would merge them).
+pub fn folder_names<'a>(tags: impl IntoIterator<Item = &'a str>) -> Vec<String> {
+    let mut used = std::collections::HashSet::new();
+    tags.into_iter()
+        .map(|tag| {
+            let base = Some(clean(tag)).filter(|name| !name.is_empty()).unwrap_or_else(|| "_".into());
+            (1..).map(|n| if n == 1 { base.clone() } else { format!("{base}_{n}") }).find(|name| used.insert(name.to_lowercase())).unwrap_or(base)
+        })
+        .collect()
+}
+
+/// One folder of an export sorted by tag: the tag, and the shots that carry
+/// it, by their place in the list of shots.
+#[derive(serde::Deserialize, Clone, Debug)]
+pub struct TagFolder {
+    pub tag: String,
+    pub shots: Vec<usize>,
+}
+
+/// One destination of an export: a folder, the rule its files are named by,
+/// and the shots that go into it.
+#[derive(Clone, Debug)]
+pub struct Part {
+    pub dir: PathBuf,
+    pub rename: Option<Rename>,
+    pub shots: Vec<usize>,
+}
+
+/// Where the `count` shots of an export go. Without `folders` they all go
+/// into `dest`. Sorted by tag, every tag gets a folder inside `dest` for the
+/// shots that carry it (a shot with two tags is in both), numbered from the
+/// rule's start in each folder, with `{tag}` standing for the tag.
+pub fn parts(dest: &Path, folders: &[TagFolder], rename: Option<&Rename>, count: usize) -> Vec<Part> {
+    if folders.is_empty() {
+        return vec![Part { dir: dest.to_path_buf(), rename: rename.cloned(), shots: (0..count).collect() }];
+    }
+    let names = folder_names(folders.iter().map(|f| f.tag.as_str()));
+    folders
+        .iter()
+        .zip(names)
+        .map(|(folder, name)| Part {
+            dir: dest.join(name),
+            rename: rename.map(|rule| Rename { tag: folder.tag.clone(), ..rule.clone() }),
+            shots: folder.shots.iter().copied().filter(|i| *i < count).collect(),
+        })
+        .collect()
 }
 
 fn stem_of(path: &Path) -> String {
@@ -168,7 +222,8 @@ pub fn stems(shots: &[Vec<PathBuf>], rename: Option<&Rename>) -> Vec<String> {
                     .replace("{seq}", &seq)
                     .replace("{date}", &date.replace('-', ""))
                     .replace("{time}", &time.replace(':', ""))
-                    .replace("{camera}", exif.model.as_deref().unwrap_or("")),
+                    .replace("{camera}", exif.model.as_deref().unwrap_or(""))
+                    .replace("{tag}", &rule.tag),
             );
             // A rule without a unique part still must not overwrite earlier files.
             if stem.is_empty() || !used.insert(stem.to_lowercase()) {
@@ -283,7 +338,7 @@ mod tests {
     #[test]
     fn rename_numbers_shots_and_keeps_pairs_together() {
         let list = shots(&[&["/a/DSC_0001.JPG", "/a/DSC_0001.NEF"], &["/a/DSC_0002.JPG"]]);
-        let rule = Rename { template: "Trip_{seq}".into(), start: 9 };
+        let rule = Rename { template: "Trip_{seq}".into(), start: 9, tag: String::new() };
         assert_eq!(stems(&list, Some(&rule)), ["Trip_009", "Trip_010"]);
         assert_eq!(stems(&list, None), ["DSC_0001", "DSC_0002"]);
     }
@@ -298,10 +353,38 @@ mod tests {
     #[test]
     fn rename_never_produces_duplicates_or_paths() {
         let list = shots(&[&["/a/x.jpg"], &["/a/y.jpg"], &["/a/z.jpg"]]);
-        let fixed = Rename { template: "same".into(), start: 1 };
+        let fixed = Rename { template: "same".into(), start: 1, tag: String::new() };
         assert_eq!(stems(&list, Some(&fixed)), ["same", "same_002", "same_003"]);
-        let sneaky = Rename { template: "../{name}".into(), start: 1 };
+        let sneaky = Rename { template: "../{name}".into(), start: 1, tag: String::new() };
         assert_eq!(stems(&list, Some(&sneaky)), ["x", "y", "z"]);
+    }
+
+    #[test]
+    fn a_tag_names_its_folder_and_its_files() {
+        assert_eq!(folder_names(["Ann", "a/b", "ann", "..", "A:B"]), ["Ann", "ab", "ann_2", "_", "AB_2"]);
+        let list = shots(&[&["/a/x.jpg", "/a/x.nef"], &["/a/y.jpg"]]);
+        let rule = Rename { template: "{tag}_{seq}".into(), start: 1, tag: "Ann".into() };
+        assert_eq!(stems(&list, Some(&rule)), ["Ann_001", "Ann_002"]);
+        // Outside an export sorted by tag the token stands for nothing.
+        let plain = Rename { tag: String::new(), ..rule };
+        assert_eq!(stems(&list, Some(&plain)), ["_001", "_002"]);
+    }
+
+    #[test]
+    fn an_export_sorted_by_tag_has_a_folder_and_a_count_for_each_tag() {
+        let rule = Rename { template: "{tag}_{seq}".into(), start: 1, tag: String::new() };
+        let all = parts(Path::new("/out"), &[], Some(&rule), 3);
+        assert_eq!((all.len(), all[0].dir.as_path(), all[0].shots.as_slice()), (1, Path::new("/out"), &[0, 1, 2][..]));
+        let folders = [TagFolder { tag: "Ann".into(), shots: vec![0, 2] }, TagFolder { tag: "Group: all".into(), shots: vec![0, 7] }];
+        let sorted = parts(Path::new("/out"), &folders, Some(&rule), 3);
+        assert_eq!(sorted.iter().map(|p| p.dir.clone()).collect::<Vec<_>>(), [PathBuf::from("/out/Ann"), PathBuf::from("/out/Group all")]);
+        // A shot that is not in the list is left out rather than failing the export.
+        assert_eq!(sorted.iter().map(|p| p.shots.clone()).collect::<Vec<_>>(), [vec![0, 2], vec![0]]);
+        let list = shots(&[&["/a/x.jpg"], &["/a/y.jpg"], &["/a/z.jpg"]]);
+        let names: Vec<Vec<String>> = sorted.iter().map(|p| stems(&p.shots.iter().map(|i| list[*i].clone()).collect::<Vec<_>>(), p.rename.as_ref())).collect();
+        assert_eq!(names, [vec!["Ann_001", "Ann_002"], vec!["Group all_001"]]);
+        // Without a rule the files keep their names in every folder.
+        assert!(parts(Path::new("/out"), &folders, None, 3).iter().all(|p| p.rename.is_none()));
     }
 
     #[test]
@@ -313,7 +396,7 @@ mod tests {
             fs::write(src.join(name), name).unwrap();
         }
         let list = vec![vec![src.join("A.JPG"), src.join("A.NEF")], vec![src.join("B.JPG")]];
-        let rule = Rename { template: "P{seq}".into(), start: 1 };
+        let rule = Rename { template: "P{seq}".into(), start: 1, tag: String::new() };
         let cancel = AtomicBool::new(false);
         let report = export(&list, &out, Kind::Raw, Some(&rule), &cancel, |_| {}).unwrap();
         assert_eq!(report.copied, 2);
@@ -332,7 +415,7 @@ mod tests {
             fs::write(bundle.join(name), name).unwrap();
         }
         let list = vec![vec![bundle.join("A_live.JPG"), bundle.join("A_live.MOV")]];
-        let rule = Rename { template: "Trip_{seq}".into(), start: 1 };
+        let rule = Rename { template: "Trip_{seq}".into(), start: 1, tag: String::new() };
         let report = export(&list, &out, Kind::All, Some(&rule), &AtomicBool::new(false), |_| {}).unwrap();
         assert_eq!(report.copied, 2);
         let mut names: Vec<String> = fs::read_dir(&out).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();

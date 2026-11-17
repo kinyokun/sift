@@ -11,6 +11,7 @@ import {
   type Session,
   type Stack,
   type StackKind,
+  type Tag,
   type UpdateOffer,
   type UpdateProgress,
 } from "./api";
@@ -63,11 +64,18 @@ export type Settings = {
   checkUpdates: boolean;
   /** The release the user chose not to be asked about again. */
   skippedUpdate: string | null;
+  /** Names of the tags made lately, newest first, offered again in other folders. */
+  tagNames: string[];
 };
 
 const SETTINGS_KEY = "sift.settings";
 const MAX_RECENTS = 6;
-const KEYS_VERSION = 6;
+const KEYS_VERSION = 7;
+/** The colours a tag can have; a tag keeps its place in this list. */
+export const TAG_COLORS = ["#ff453a", "#ff9f0a", "#ffd60a", "#30d158", "#64d2ff", "#0a84ff", "#bf5af2", "#ff6eb4"];
+const MAX_TAG_NAME = 40;
+const MAX_TAG_NAMES = 12;
+const NO_TAGS: string[] = [];
 /** The folder is listed again this often to see whether photos came or went; a slow
  * listing (a network share) is repeated less often, so it takes a twentieth of the time at most. */
 const WATCH_MS = 4000;
@@ -101,13 +109,14 @@ const defaults: Settings = {
   recents: [],
   checkUpdates: true,
   skippedUpdate: null,
+  tagNames: [],
 };
 
 function loadSettings(): Settings {
   try {
     const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
     let keys = { ...DEFAULT_KEYS };
-    // Versions 4 to 6 only added actions; bindings saved since version 3 carry over.
+    // Versions 4 to 7 only added actions; bindings saved since version 3 carry over.
     if (saved.keysVersion >= 3 && saved.keysVersion <= KEYS_VERSION) keys = resolveKeys(saved.keys || {});
     else if (saved.keysVersion === 2) {
       // Version 2 put "original" on the letter O, which reads like the 0 of
@@ -146,6 +155,12 @@ type State = {
   crops: Record<string, CropBox>;
   /** Looks imported into the app. */
   library: LookInfo[];
+  /** The tags of this folder, in the order they were made; saved with its progress. */
+  tags: Tag[];
+  /** File name -> ids of the tags the photo carries. Every file of a shot carries them. */
+  tagged: Record<string, string[]>;
+  /** Only photos with one of these tags are shown; empty shows all. */
+  tagFilter: string[];
   filter: FlagFilter;
   minStars: number;
   /** Bursts and pixel-shift series of the folder, known once every file has been read. */
@@ -184,6 +199,17 @@ type State = {
   setViewerIndex: (index: number) => void;
   rate: (ids: string[], rating: number) => Promise<void>;
   flag: (ids: string[], value: number) => void;
+  /** Makes a tag, or finds the one of that name; resolves to its id, `null` for a name with nothing in it. */
+  addTag: (name: string) => string | null;
+  /** False when the name is empty or another tag has it. */
+  renameTag: (id: string, name: string) => boolean;
+  /** Gives a tag the next colour. */
+  recolorTag: (id: string) => void;
+  /** Deletes a tag and takes it off every photo. */
+  removeTag: (id: string) => void;
+  /** Puts a tag on photos or takes it off; left open, it goes on unless all of them have it. Says which it did. */
+  tag: (ids: string[], tagId: string, on?: boolean) => boolean;
+  setTagFilter: (tagFilter: string[]) => void;
   /** Assigns a look to photos; `null` goes back to the photo as shot. */
   setLook: (ids: string[], look: string | null) => void;
   setLibrary: (library: LookInfo[]) => void;
@@ -235,6 +261,19 @@ export function flagOf(flags: Record<string, number>, item: Item): number {
   return 0;
 }
 
+/** The tags a shot carries, by id: any of its files may hold them. */
+export function tagsOf(tagged: Record<string, string[]>, item: Item): string[] {
+  for (const p of item.paths) {
+    const ids = tagged[shotKey(item.dir, p)];
+    if (ids?.length) return ids;
+  }
+  return NO_TAGS;
+}
+
+const sameName = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+/** A tag's name as it is kept: one line, no spaces around it, short enough for a file name. */
+const tagName = (name: string) => name.replace(/\s+/g, " ").trim().slice(0, MAX_TAG_NAME).trim();
+
 const two = (n: number) => String(n).padStart(2, "0");
 
 /** When a photo was taken, as sortable text; the file's own date stands in when it records none. */
@@ -258,7 +297,7 @@ export type Entry = {
   stack: { key: string; kind: StackKind; index: number; total: number; open: boolean } | null;
 };
 
-type Shown = Pick<State, "items" | "filter" | "minStars" | "flags" | "ratings" | "dates" | "stacks" | "stackOf" | "expanded"> & {
+type Shown = Pick<State, "items" | "filter" | "minStars" | "flags" | "ratings" | "dates" | "stacks" | "stackOf" | "expanded" | "tagged" | "tagFilter"> & {
   subfolder?: string | null;
   settings: Pick<Settings, "sortBy" | "sortDesc" | "stacks">;
 };
@@ -280,6 +319,7 @@ export function visibleEntries(s: Shown): Entry[] {
     if (s.filter === "picked" && flag !== 1) return false;
     if (s.filter === "rejected" && flag !== -1) return false;
     if (s.filter === "unflagged" && flag !== 0) return false;
+    if (s.tagFilter.length && !tagsOf(s.tagged, it).some((id) => s.tagFilter.includes(id))) return false;
     return (s.ratings[it.id] || 0) >= s.minStars;
   });
   const single = (it: Item): Entry => ({ id: it.id, item: it, members: [it], stack: null });
@@ -402,9 +442,9 @@ export const useStore = create<State>((set, get) => {
 
   const saveNow = () => {
     clearTimeout(saveTimer);
-    const { folder, flags, looks, crops, viewer, filter, minStars, loading, subfolder } = get();
+    const { folder, flags, looks, crops, viewer, filter, minStars, loading, subfolder, tags, tagged, tagFilter } = get();
     if (!folder || loading) return;
-    const session: Session = { flags, looks, crops, cursor: position(), viewer: !!viewer, filter, minStars, subfolder };
+    const session: Session = { flags, looks, crops, cursor: position(), viewer: !!viewer, filter, minStars, subfolder, tags, tagged, tagFilter };
     api.saveSession(folder, session).catch(() => {});
   };
 
@@ -412,6 +452,12 @@ export const useStore = create<State>((set, get) => {
   const save = () => {
     clearTimeout(saveTimer);
     saveTimer = setTimeout(saveNow, SAVE_DELAY_MS);
+  };
+
+  /** Keeps a tag's name to offer it in the folders opened later, newest first. */
+  const remember = (name: string) => {
+    const { settings, setSettings } = get();
+    setSettings({ tagNames: [name, ...settings.tagNames.filter((n) => !sameName(n, name))].slice(0, MAX_TAG_NAMES) });
   };
 
   const readRatings = async (path: string, items: Item[]) => {
@@ -548,6 +594,9 @@ export const useStore = create<State>((set, get) => {
     looks: {},
     crops: {},
     library: [],
+    tags: [],
+    tagged: {},
+    tagFilter: [],
     filter: "all",
     minStars: 0,
     stacks: [],
@@ -597,12 +646,13 @@ export const useStore = create<State>((set, get) => {
 
     openFolder: async (path) => {
       saveNow();
-      set({ loading: true, folder: path, deep: false, subfolder: null, items: [], ratings: {}, dates: {}, flags: {}, looks: {}, crops: {}, metas: {}, stacks: [], stackOf: {}, expanded: [], selection: [], cursor: null, viewer: null });
+      set({ loading: true, folder: path, deep: false, subfolder: null, items: [], ratings: {}, dates: {}, flags: {}, looks: {}, crops: {}, tags: [], tagged: {}, tagFilter: [], metas: {}, stacks: [], stackOf: {}, expanded: [], selection: [], cursor: null, viewer: null });
       try {
         const [{ items, deep, found }, saved] = await Promise.all([scanFolder(path), api.loadSession(path)]);
         if (get().folder !== path) return;
         const at = items.find((it) => it.paths.some((p) => shotKey(it.dir, p) === saved?.cursor));
         const subfolder = saved?.subfolder != null && items.some((it) => it.dir === saved.subfolder) ? saved.subfolder : null;
+        const tags = saved?.tags ?? [];
         set({
           items,
           deep,
@@ -610,6 +660,9 @@ export const useStore = create<State>((set, get) => {
           flags: saved?.flags ?? {},
           looks: saved?.looks ?? {},
           crops: saved?.crops ?? {},
+          tags,
+          tagged: saved?.tagged ?? {},
+          tagFilter: (saved?.tagFilter ?? []).filter((id) => tags.some((tag) => tag.id === id)),
           loading: false,
           filter: (saved?.filter as FlagFilter) ?? "all",
           minStars: saved?.minStars ?? 0,
@@ -733,6 +786,73 @@ export const useStore = create<State>((set, get) => {
         }
       }
       set({ flags: next });
+      save();
+    },
+
+    addTag: (name) => {
+      const clean = tagName(name);
+      if (!clean) return null;
+      const { tags } = get();
+      remember(clean);
+      const known = tags.find((tag) => sameName(tag.name, clean));
+      if (known) return known.id;
+      const number = tags.reduce((max, tag) => Math.max(max, Number(tag.id.slice(1)) || 0), 0) + 1;
+      // The first colour no tag has yet; with all of them taken, round again.
+      const free = TAG_COLORS.findIndex((_, i) => !tags.some((tag) => tag.color === i));
+      const tag: Tag = { id: `t${number}`, name: clean, color: free >= 0 ? free : tags.length % TAG_COLORS.length };
+      set({ tags: [...tags, tag] });
+      save();
+      return tag.id;
+    },
+
+    renameTag: (id, name) => {
+      const clean = tagName(name);
+      const { tags } = get();
+      if (!clean || tags.some((tag) => tag.id !== id && sameName(tag.name, clean))) return false;
+      set({ tags: tags.map((tag) => (tag.id === id ? { ...tag, name: clean } : tag)) });
+      remember(clean);
+      save();
+      return true;
+    },
+
+    recolorTag: (id) => {
+      set({ tags: get().tags.map((tag) => (tag.id === id ? { ...tag, color: (tag.color + 1) % TAG_COLORS.length } : tag)) });
+      save();
+    },
+
+    removeTag: (id) => {
+      const { tags, tagged, tagFilter } = get();
+      const next: Record<string, string[]> = {};
+      for (const [key, ids] of Object.entries(tagged)) {
+        const kept = ids.filter((t) => t !== id);
+        if (kept.length) next[key] = kept;
+      }
+      set({ tags: tags.filter((tag) => tag.id !== id), tagged: next, tagFilter: tagFilter.filter((t) => t !== id) });
+      save();
+    },
+
+    tag: (ids, tagId, on) => {
+      const { items, tagged, tags } = get();
+      const wanted = new Set(ids);
+      const targets = items.filter((it) => wanted.has(it.id));
+      if (!targets.length || !tags.some((tag) => tag.id === tagId)) return false;
+      const add = on ?? !targets.every((it) => tagsOf(tagged, it).includes(tagId));
+      const next = { ...tagged };
+      for (const item of targets) {
+        const now = tagsOf(tagged, item).filter((t) => t !== tagId);
+        if (add) now.push(tagId);
+        for (const p of item.paths) {
+          if (now.length) next[shotKey(item.dir, p)] = now;
+          else delete next[shotKey(item.dir, p)];
+        }
+      }
+      set({ tagged: next });
+      save();
+      return add;
+    },
+
+    setTagFilter: (tagFilter) => {
+      set({ tagFilter, selection: [], cursor: null });
       save();
     },
 

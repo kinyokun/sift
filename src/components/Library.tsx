@@ -1,14 +1,15 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { NO_LOOK, imageUrl, isRawPath, type Item, type StackKind } from "../lib/api";
 import { useT } from "../lib/i18n";
-import { actionFor, isTyping, keyOf, ratingOf } from "../lib/shortcuts";
+import { actionFor, isTyping, keyOf, ratingOf, tagOf } from "../lib/shortcuts";
 import { useShallow } from "zustand/react/shallow";
-import { flagOf, folderName, framesOf, lookOf, useStore, visibleEntries, type Entry, type FlagFilter, type SortBy } from "../lib/store";
+import { flagOf, folderName, framesOf, lookOf, tagsOf, useStore, visibleEntries, type Entry, type FlagFilter, type SortBy } from "../lib/store";
 import { IconButton, Menu, Segmented, Stars, type MenuItem } from "../ui/controls";
 import { Icon } from "../ui/Icon";
 import { useWheelSize } from "../lib/wheelSize";
 import { chooseFolder, importPhotos } from "./Welcome";
 import { MAX_PANES } from "./Compare";
+import { TagDot, TagMenu, tagsOn, type TagMenuHandle } from "./Tags";
 
 const GAP = 6;
 const THUMB_EDGE = 512;
@@ -28,6 +29,14 @@ const DRAG_SLOP = 6;
 const DOUBLE_CLICK_MS = 320;
 /** Dragging a selection this close to the top or bottom scrolls the grid. */
 const SCROLL_EDGE = 56;
+/** Cells at least this wide name up to `NAMED_TAGS` tags; smaller ones, and more tags, show the colours alone. */
+const TAG_NAMES_FROM = 150;
+const NAMED_TAGS = 2;
+const MAX_TAG_DOTS = 5;
+/** Room left under the last row for the selection bar; windows up to `NARROW` wide show it in two rows. */
+const BAR_ROOM = 76;
+const BAR_ROOM_NARROW = 108;
+const NARROW = 700;
 
 /** Width/height of thumbnails already seen, so badges sit on the picture itself. */
 const ratios = new Map<string, number>();
@@ -50,6 +59,8 @@ const Cell = memo(function Cell(props: {
   flag: number;
   /** Name of the look chosen for this photo, if any. */
   look: string;
+  /** The photo's tags, one to a line: place in the palette, a tab, the name. */
+  tags: string;
   selected: boolean;
   /** The photo the keyboard acts on when nothing is selected. */
   cursor: boolean;
@@ -79,6 +90,8 @@ const Cell = memo(function Cell(props: {
   }, [asked]);
   useEffect(() => () => clearTimeout(hold.current?.timer), []);
 
+  const tags = props.tags ? props.tags.split("\n").map((line) => line.split("\t")) : [];
+  const named = size >= TAG_NAMES_FROM && tags.length <= NAMED_TAGS;
   const inner = size - CELL_INSET * 2;
   const frame = ratio ? { width: ratio >= 1 ? inner : inner * ratio, height: ratio >= 1 ? inner / ratio : inner } : { width: inner, height: inner };
   const { onHold } = props;
@@ -144,6 +157,25 @@ const Cell = memo(function Cell(props: {
             </span>
           )}
         </div>
+        {tags.length > 0 && (
+          <div className={`cell-tags ${named ? "named" : ""}`}>
+            {named ? (
+              tags.map(([color, name]) => (
+                <span key={name}>
+                  <TagDot color={Number(color)} />
+                  <b>{name}</b>
+                </span>
+              ))
+            ) : (
+              <span title={tags.map(([, name]) => name).join(", ")}>
+                {tags.slice(0, MAX_TAG_DOTS).map(([color, name]) => (
+                  <TagDot key={name} color={Number(color)} />
+                ))}
+                {tags.length > MAX_TAG_DOTS && <b>+{tags.length - MAX_TAG_DOTS}</b>}
+              </span>
+            )}
+          </div>
+        )}
         {props.stack && (
           <button
             className={`cell-stack ${props.stack}`}
@@ -203,6 +235,9 @@ export function Library() {
       flags: st.flags,
       looks: st.looks,
       library: st.library,
+      tags: st.tags,
+      tagged: st.tagged,
+      tagFilter: st.tagFilter,
       filter: st.filter,
       minStars: st.minStars,
       stacks: st.stacks,
@@ -224,8 +259,8 @@ export function Library() {
   // The cells of the grid; a folded stack is one of them.
   const items: Entry[] = useMemo(
     () => visibleEntries({ ...s, settings: { sortBy: s.sortBy, sortDesc: s.sortDesc, stacks: s.stacking } }),
-    // Capture times only matter when sorting by them.
-    [s.items, s.subfolder, s.filter, s.minStars, s.flags, s.ratings, s.sortBy, s.sortDesc, s.sortBy === "time" ? s.dates : null, s.stacks, s.expanded, s.stacking],
+    // Capture times only matter when sorting by them, tags when narrowing to some.
+    [s.items, s.subfolder, s.filter, s.minStars, s.flags, s.ratings, s.sortBy, s.sortDesc, s.sortBy === "time" ? s.dates : null, s.stacks, s.expanded, s.stacking, s.tagFilter, s.tagFilter.length ? s.tagged : null],
   );
   const photoCount = useMemo(() => items.reduce((n, e) => n + e.members.length, 0), [items]);
   /** The photos an action on these cells reaches: every frame of a folded stack. */
@@ -247,6 +282,8 @@ export function Library() {
   useEffect(() => () => clearTimeout(collapse.current), []);
   /** Set while the click that ends a drag is still to come. */
   const dragged = useRef(false);
+  const toolbarTags = useRef<TagMenuHandle>(null);
+  const barTags = useRef<TagMenuHandle>(null);
 
   useLayoutEffect(() => {
     const el = scroller.current;
@@ -283,7 +320,7 @@ export function Library() {
   // A new folder, filter or order starts ranges afresh.
   useEffect(() => {
     anchor.current = { id: null, base: [] };
-  }, [s.folder, s.subfolder, s.filter, s.minStars]);
+  }, [s.folder, s.subfolder, s.filter, s.minStars, s.tagFilter]);
   useEffect(() => setSelecting(false), [s.folder]);
   /** The cell under a point of the window, and how far down it the point is. */
   const cellAt = (at: { clientX: number; clientY: number }) => {
@@ -543,8 +580,19 @@ export function Library() {
           }
           return;
       }
-      if (!targets.length) return;
       const action = actionFor(st.settings.keys, e);
+      // The tags open from the bar for several photos while it is up, else from the toolbar.
+      const openTags = () => (e.preventDefault(), (barTags.current ?? toolbarTags.current)?.open());
+      if (action === "tags") return openTags();
+      if (!targets.length) return;
+      const tagAt = tagOf(action);
+      if (tagAt !== null) {
+        const tag = st.tags[tagAt];
+        // A key for a tag that is yet to be made is the moment to make it.
+        if (!tag) return openTags();
+        e.preventDefault();
+        return st.notify(`${st.tag(targets, tag.id) ? "tagOn" : "tagOff"}:${tag.name}`);
+      }
       const stars = ratingOf(action);
       if (stars !== null) return void st.rate(targets, stars);
       const allFlagged = (v: number) => members.every((m) => flagOf(st.flags, m) === v);
@@ -577,6 +625,18 @@ export function Library() {
     for (const it of s.items) count.set(it.dir, (count.get(it.dir) ?? 0) + 1);
     return [...count];
   }, [s.items]);
+  // How many photos carry each tag, in the folder the grid is narrowed to.
+  const tagCounts = useMemo(() => {
+    const count = new Map<string, number>();
+    if (!s.tags.length) return count;
+    for (const it of s.items) {
+      if (s.subfolder != null && it.dir !== s.subfolder) continue;
+      for (const id of tagsOf(s.tagged, it)) count.set(id, (count.get(id) ?? 0) + 1);
+    }
+    return count;
+  }, [s.items, s.tagged, s.tags, s.subfolder]);
+  const toggleTagFilter = (id: string) => act.setTagFilter(s.tagFilter.includes(id) ? s.tagFilter.filter((x) => x !== id) : [...s.tagFilter, id]);
+  const tagLine = (item: Item) => (s.tags.length ? tagsOn(s.tags, s.tagged, item).map((tag) => `${tag.color}\t${tag.name}`).join("\n") : "");
   const here = s.folder ? folderName(s.folder) : "";
   const folderItems: MenuItem[] = [
     { label: `${t.allFolders} · ${s.items.length}`, checked: s.subfolder == null, onSelect: () => act.setSubfolder(null) },
@@ -658,6 +718,9 @@ export function Library() {
   const bar = !s.viewing && (mobile ? selecting : s.selection.length > 1);
   const sharedRating = chosen.length && chosen.every((id) => (s.ratings[id] || 0) === (s.ratings[chosen[0]] || 0)) ? s.ratings[chosen[0]] || 0 : 0;
   const flagAll = (value: number) => chosen.length && act.flag(chosen, value);
+  // Like a look from the toolbar, a tag goes on what is selected, or on the photo the keys act on.
+  const tagTargets = useMemo(() => frames(s.selection.length ? s.selection : s.cursor ? [s.cursor] : []), [frames, s.selection, s.cursor]);
+  const barTargets = useMemo(() => frames(s.selection), [frames, s.selection]);
 
   return (
     <div className="library">
@@ -688,17 +751,34 @@ export function Library() {
           <Menu label={t.sort} items={sortItems} button={<Icon name="sort" />} />
           <Menu label={t.stars} items={starItems} button={<><Icon name="star" fill={s.minStars > 0} />{s.minStars > 0 && <b>{s.minStars}</b>}</>} />
           <Menu label={t.lookApply} items={lookItems} button={<Icon name="look" />} />
+          <TagMenu ref={toolbarTags} label={t.tagApply} targets={tagTargets} />
           <IconButton icon="transfer" label={t.transfer} onClick={() => act.setSheet("transfer")} />
           <IconButton icon="export" label={t.export} onClick={() => act.setSheet("export")} />
           <Menu label={t.more} items={moreItems} button={<Icon name="more" />} />
         </div>
+        {s.tags.length > 0 && (
+          <div className="tag-bar" role="group" aria-label={t.tags}>
+            {s.tags.map((tag) => (
+              <button key={tag.id} className={s.tagFilter.includes(tag.id) ? "on" : ""} aria-pressed={s.tagFilter.includes(tag.id)} title={t.tagFilter} onClick={() => toggleTagFilter(tag.id)}>
+                <TagDot color={tag.color} />
+                {tag.name}
+                <i>{tagCounts.get(tag.id) ?? 0}</i>
+              </button>
+            ))}
+            {s.tagFilter.length > 0 && (
+              <button className="clear" onClick={() => act.setTagFilter([])}>
+                {t.tagFilterClear}
+              </button>
+            )}
+          </div>
+        )}
       </header>
 
       <div className="grid-scroller" ref={scroller} onScroll={(e) => setRow(rowAt(e.currentTarget.scrollTop))} onPointerDown={mobile ? undefined : onPointerDown}>
         <div
           className={`grid ${bar ? "selecting" : ""}`}
           ref={gridRef}
-          style={{ height: rows * pitch - GAP + pad * 2 + (bar ? 76 : 0), marginTop: box.head }}
+          style={{ height: rows * pitch - GAP + pad * 2 + (!bar ? 0 : box.width <= NARROW ? BAR_ROOM_NARROW : BAR_ROOM), marginTop: box.head }}
         >
           {shown.map((entry, k) => {
             const i = first * cols + k;
@@ -717,6 +797,7 @@ export function Library() {
                 rating={s.ratings[item.id] || 0}
                 flag={flagOf(s.flags, item)}
                 look={lookLabel(lookOf(s.looks, item))}
+                tags={tagLine(item)}
                 selected={selected.has(entry.id)}
                 cursor={entry.id === s.cursor}
                 size={size}
@@ -763,6 +844,7 @@ export function Library() {
             </button>
           </span>
           <Menu label={t.lookApply} items={lookItems} button={<Icon name="look" />} up />
+          <TagMenu ref={barTags} label={t.tagApply} targets={barTargets} up />
           {s.info?.save_to_photos && <IconButton icon="save" label={t.saveToPhotos} onClick={() => act.saveToPhotos(frames(s.selection))} />}
           {chosen.length > 1 && chosen.length <= MAX_PANES && (
             <IconButton icon="compare" label={t.compareSelected} onClick={() => act.openViewer(chosen[0], chosen)} />

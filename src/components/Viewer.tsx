@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { NO_LOOK, api, fileName, imageUrl, isHeifPath, isRawPath, type CropBox, type Item, type Meta } from "../lib/api";
+import { NO_LOOK, api, fileName, imageUrl, isHeifPath, isRawPath, type CropBox, type Item, type Meta, type Tag } from "../lib/api";
 import { useT } from "../lib/i18n";
-import { actionFor, isTyping, ratingOf } from "../lib/shortcuts";
+import { actionFor, isTyping, ratingOf, tagOf } from "../lib/shortcuts";
 import { cropOf, flagOf, lookOf, useStore } from "../lib/store";
 import { IconButton, Menu, Stars, type MenuItem } from "../ui/controls";
 import { Icon } from "../ui/Icon";
@@ -13,6 +13,7 @@ import { LiveEditor, LiveMovie, LivePreview, MIN_LIVE_FRAMES, type LiveDraft } f
 import { StackStrip } from "./StackStrip";
 import { ComparePicker, MAX_PANES, SLOT_BAR, SlotBar, paneGrid } from "./Compare";
 import { Pane, fullUrlOf, lookSource, type Nudge, type PaneHandle, type PaneStatus } from "./Pane";
+import { TagDot, TagMenu, tagsOn, type TagMenuHandle } from "./Tags";
 
 export function formatShutter(s: number): string {
   return s >= 1 ? `${Number(s.toFixed(1))}s` : `1/${Math.round(1 / s)}s`;
@@ -36,13 +37,14 @@ type InfoProps = {
   meta: Meta | null;
   docked: boolean;
   crop: CropBox | null;
+  tags: Tag[];
   /** What the histogram is taken from; `null` while a look is still rendering. */
   histogram: { path: string; look: string | null; edge: number } | null;
   /** Keeps the in-camera recipe as a look of its own; absent when the photo has none to keep. */
   onSaveLook?: () => void;
 };
 
-function InfoPanel({ item, meta, docked, crop, histogram, onSaveLook }: InfoProps) {
+function InfoPanel({ item, meta, docked, crop, tags, histogram, onSaveLook }: InfoProps) {
   const t = useT();
   const x = meta?.exif;
   const camera = x ? [x.make?.split(" ")[0], x.model].filter((v, i, a) => v && !(i === 0 && a[1]?.toUpperCase().includes(v.toUpperCase()))).join(" ") : "";
@@ -52,6 +54,19 @@ function InfoPanel({ item, meta, docked, crop, histogram, onSaveLook }: InfoProp
   const shooting = [t.programs[x?.program ?? 0], t.meterings[x?.metering ?? 0], x?.flash ? t.flashFired : ""].filter(Boolean).join("  ·  ");
   const rows: [string, React.ReactNode][] = [
     [t.file, [...item.paths, ...(item.live ? [item.live] : [])].map((p) => p.split(/[\\/]/).pop()).join("  +  ")],
+    [
+      t.tags,
+      tags.length > 0 && (
+        <span className="info-tags">
+          {tags.map((tag) => (
+            <span key={tag.id}>
+              <TagDot color={tag.color} />
+              {tag.name}
+            </span>
+          ))}
+        </span>
+      ),
+    ],
     [t.camera, camera],
     [t.lens, x?.lens],
     [t.exposure, meta ? [exposureLine(meta), equivalent].filter(Boolean).join("  ·  ") : ""],
@@ -113,6 +128,8 @@ export function Viewer() {
   const looks = useStore((s) => s.looks);
   const library = useStore((s) => s.library);
   const crops = useStore((s) => s.crops);
+  const tags = useStore((s) => s.tags);
+  const tagged = useStore((s) => s.tagged);
   const settings = useStore((s) => s.settings);
   const info = useStore((s) => s.info);
   const stacks = useStore((s) => s.stacks);
@@ -172,6 +189,7 @@ export function Viewer() {
   const topBar = useRef<HTMLElement>(null);
   const dock = useRef<HTMLDivElement>(null);
   const strip = useRef<HTMLDivElement>(null);
+  const tagMenu = useRef<TagMenuHandle>(null);
 
   const compare = extra.length > 0;
   const indices = [viewer.index, ...extra];
@@ -460,6 +478,20 @@ export function Viewer() {
     if (n > 0) advance();
   };
 
+  /** Puts one of the folder's tags on the current photo, or takes it off. */
+  const toggleTag = (at: number) => {
+    const st = useStore.getState();
+    const tag = st.tags[at];
+    // A key for a tag that is yet to be made is the moment to make it.
+    if (!tag || !current) return openTags();
+    st.notify(`${st.tag([current.id], tag.id) ? "tagOn" : "tagOff"}:${tag.name}`);
+  };
+
+  const openTags = () => {
+    setImmersive(false);
+    tagMenu.current?.open();
+  };
+
   /** Sets the look of the current photo; it is remembered and used on export. */
   const chooseLook = (look: string | null) => {
     if (!current) return;
@@ -540,7 +572,11 @@ export function Viewer() {
       e.preventDefault();
       const stars = ratingOf(action);
       if (stars !== null) return setRating(stars);
+      const tagAt = tagOf(action);
+      if (tagAt !== null) return toggleTag(tagAt);
       switch (action) {
+        case "tags":
+          return openTags();
         case "next":
           return step(1);
         case "prev":
@@ -627,6 +663,7 @@ export function Viewer() {
     ...(ROTATABLE_GUIDES.includes(guides) ? (["divider", { label: t.guidesRotate, onSelect: rotateGuides }] as MenuItem[]) : []),
   ];
   const savedCrop = cropOf(crops, current);
+  const currentTags = tagsOn(tags, tagged, current);
   const cropItems: MenuItem[] = [
     { label: t.guideNames[0], checked: !cropRatio, onSelect: () => chooseCrop(null) },
     ...(savedCrop ? [{ label: t.cropReset, onSelect: resetCrop } as MenuItem] : []),
@@ -811,6 +848,7 @@ export function Viewer() {
           <div className="dock-group">
             <IconButton icon="check" label={t.pick} active={flag === 1} className="pick" onClick={() => setFlag(1)} />
             <IconButton icon="x" label={t.reject} active={flag === -1} className="reject" onClick={() => setFlag(-1)} />
+            <TagMenu ref={tagMenu} label={t.tags} targets={[current]} up />
           </div>
           <div className="dock-group">
             <IconButton icon="focus" label={t.focusPoints} active={showAf && !!currentMeta?.af} onClick={toggleAf} />
@@ -836,9 +874,9 @@ export function Viewer() {
         </div>
       </div>
 
-      {docked && <InfoPanel item={current} meta={currentMeta} docked crop={savedCrop} histogram={histogramOf} onSaveLook={saveLook} />}
+      {docked && <InfoPanel item={current} meta={currentMeta} docked crop={savedCrop} tags={currentTags} histogram={histogramOf} onSaveLook={saveLook} />}
       {showInfo && mobile && !immersive && (
-        <InfoPanel item={current} meta={currentMeta} docked={false} crop={savedCrop} histogram={histogramOf} onSaveLook={saveLook} />
+        <InfoPanel item={current} meta={currentMeta} docked={false} crop={savedCrop} tags={currentTags} histogram={histogramOf} onSaveLook={saveLook} />
       )}
       {wall && (
         <LookWall
@@ -865,6 +903,12 @@ export function Viewer() {
             {current.live && <em>LIVE</em>}
             {look?.custom && <em className="recipe">{look.name}</em>}
             {savedCrop && <em>{t.cropped}</em>}
+            {currentTags.map((tag) => (
+              <em className="tag" key={tag.id}>
+                <TagDot color={tag.color} />
+                {tag.name}
+              </em>
+            ))}
           </span>
         </div>
         <div className="viewer-bar-end">
