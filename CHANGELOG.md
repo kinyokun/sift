@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-17
+
 ### 新增
 
 - 子文件夹里的照片（[#6](https://github.com/kinyokun/sift/issues/6)）：打开的文件夹本身没有照片时（比如存储卡的 `DCIM`），自动把里面各级子文件夹的照片一起列出来；“设置 → 包含子文件夹里的照片”或右上角“更多”菜单里打开后，任何文件夹都这样显示。标题旁多一个按钮，可以只看其中一个文件夹；查看页的标题下会写出照片在哪个子文件夹。不同子文件夹里同名的照片各有各的选中、排除、滤镜和裁剪；一起导出到同一个文件夹时，后面的同名文件会加上 `_2`、`_3`，不会互相覆盖。隐藏文件夹和“照片图库”这类软件自己的资料库不会被读进来，最多往下找 8 层
@@ -113,7 +115,8 @@
 - 导出（复制 / 重命名 / 找回 RAW / 参数相框）、局域网传输、自定义快捷键
 - 中文 / 英文界面
 
-[Unreleased]: https://github.com/kinyokun/sift/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/kinyokun/sift/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/kinyokun/sift/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/kinyokun/sift/compare/v0.3.4...v0.4.0
 [0.3.4]: https://github.com/kinyokun/sift/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/kinyokun/sift/compare/v0.3.2...v0.3.3
