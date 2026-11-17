@@ -116,9 +116,12 @@ fn rating_round_trips_without_moving_image_data() {
         let copy = dir.join(format!("sample.{ext}"));
         std::fs::copy(&f, &copy).unwrap();
         let before = std::fs::read(&copy).unwrap();
+        // Samples may carry a rating already (the camera's, or one given while trying the app on them).
+        let original = meta::read(&copy).unwrap().rating;
+        let rating = if original == 4 { 3 } else { 4 };
 
-        let stored = rating::write(&copy, 4).unwrap_or_else(|e| panic!("{}: {e}", name(&f)));
-        assert_eq!(meta::read(&copy).unwrap().rating, 4, "{}", name(&f));
+        let stored = rating::write(&copy, rating).unwrap_or_else(|e| panic!("{}: {e}", name(&f)));
+        assert_eq!(meta::read(&copy).unwrap().rating, rating, "{}", name(&f));
         let after = std::fs::read(&copy).unwrap();
         assert_eq!(before.len(), after.len(), "{}: RAW size changed", name(&f));
         let changed = before.iter().zip(&after).filter(|(a, b)| a != b).count();
@@ -131,15 +134,15 @@ fn rating_round_trips_without_moving_image_data() {
         }
         if let Some(tags) = exiftool(&copy, &["Rating"]) {
             if stored == rating::Stored::Embedded {
-                assert_eq!(tags.first().map(String::as_str), Some("4"), "{}: ExifTool disagrees", name(&f));
+                assert_eq!(tags.first().map(String::as_str), Some(rating.to_string().as_str()), "{}: ExifTool disagrees", name(&f));
             }
         }
 
-        rating::write(&copy, 0).unwrap();
-        assert_eq!(meta::read(&copy).unwrap().rating, 0, "{}", name(&f));
+        rating::write(&copy, original).unwrap();
+        assert_eq!(meta::read(&copy).unwrap().rating, original, "{}", name(&f));
         if stored == rating::Stored::Embedded {
-            assert_eq!(std::fs::read(&copy).unwrap(), before, "{}: clearing did not restore the file", name(&f));
-        } else {
+            assert_eq!(std::fs::read(&copy).unwrap(), before, "{}: restoring the rating did not restore the file", name(&f));
+        } else if original == 0 {
             assert!(!rating::sidecar_path(&copy).is_file(), "{}: sidecar left behind", name(&f));
         }
     }
