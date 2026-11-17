@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-17
+
 ### 新增
 
 - macOS / Windows：应用内更新。启动时自动检查有没有新版本，有的话弹出版本号和更新说明，可以“更新并重启”“以后再说”或“跳过这个版本”；下载时显示进度，可以取消。“设置 → 软件更新”里能看到当前版本、随时手动“检查更新”，也可以关掉启动时的自动检查
@@ -98,7 +100,11 @@
 - 导出（复制 / 重命名 / 找回 RAW / 参数相框）、局域网传输、自定义快捷键
 - 中文 / 英文界面
 
-[Unreleased]: https://github.com/kinyokun/sift/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/kinyokun/sift/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/kinyokun/sift/compare/v0.3.4...v0.4.0
+[0.3.4]: https://github.com/kinyokun/sift/compare/v0.3.3...v0.3.4
+[0.3.3]: https://github.com/kinyokun/sift/compare/v0.3.2...v0.3.3
+[0.3.2]: https://github.com/kinyokun/sift/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/kinyokun/sift/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/kinyokun/sift/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/kinyokun/sift/releases/tag/v0.2.0
