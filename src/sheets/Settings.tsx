@@ -10,7 +10,6 @@ import { UpdateSettings } from "./Update";
 const REPO = "https://github.com/kinyokun/sift";
 /** What Nikon asks of everyone using the engine that official builds include. */
 const NIKON_SDK_TERMS = `${REPO}/blob/main/NIKON_SDK_TERMS.md`;
-const ORIGIN_REPO = "https://github.com/R4ksh4/AnicropStudio";
 
 function openLink(url: string) {
   openUrl(url).catch((e) => useStore.getState().notify(String(e)));
@@ -221,12 +220,6 @@ export function SettingsSheet({ onClose }: { onClose: () => void }) {
             </button>
           </Row>
         </div>
-        <p className="note">
-          {t.originNote}{" "}
-          <button className="link" onClick={() => openLink(ORIGIN_REPO)}>
-            Anicrop Studio
-          </button>
-        </p>
       </div>
     </Sheet>
   );
