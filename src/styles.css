@@ -1918,6 +1918,64 @@ input.text {
   white-space: nowrap;
 }
 
+.link:disabled {
+  opacity: 0.4;
+}
+
+.update {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.update-versions {
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.update-versions strong {
+  color: var(--text);
+  font-weight: 650;
+}
+
+.update-notes {
+  background: var(--fill);
+  border-radius: 14px;
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.5;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.update-notes h5 {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+  margin: 12px 0 4px;
+}
+
+.update-notes h5:first-child {
+  margin-top: 0;
+}
+
+.update-notes ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.update-notes li + li,
+.update-notes p + p {
+  margin-top: 6px;
+}
+
+.update-notes code {
+  font: 12px ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  background: var(--fill-2);
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+
 .report {
   display: flex;
   flex-direction: column;

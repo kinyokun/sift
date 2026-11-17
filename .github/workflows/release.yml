@@ -65,12 +65,19 @@ jobs:
         with:
           path: out
           merge-multiple: true
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
       # Artifacts keep their folders (release/bundle/nsis/…); release files go flat.
-      - name: Collect files and checksums
+      # The macOS update package is built as Sift.app.tar.gz and gets the same
+      # kind of name as the installers.
+      - name: Collect files
         run: |
           mkdir dist
           find out -type f -exec mv -t dist {} +
-          cd dist && sha256sum -- * > SHA256SUMS.txt && cat SHA256SUMS.txt
+          for f in dist/Sift.app.tar.gz*; do
+            if [ -e "$f" ]; then mv "$f" "dist/Sift_${GITHUB_REF_NAME#v}_universal${f#dist/Sift}"; fi
+          done
       - name: Release notes from CHANGELOG.md
         run: |
           version="${GITHUB_REF_NAME#v}"
@@ -80,6 +87,14 @@ jobs:
           ' CHANGELOG.md > notes.md
           [ -s notes.md ] || echo "See CHANGELOG.md." > notes.md
           cat notes.md
+      # latest.json is what installed copies read to learn of this version; it
+      # carries the signatures, so the .sig files are not published.
+      - name: Update manifest
+        run: |
+          node scripts/latest-json.mjs dist "$GITHUB_REF_NAME" "$GITHUB_REPOSITORY" notes.md
+          rm -f dist/*.sig
+      - name: Checksums
+        run: cd dist && sha256sum -- * > SHA256SUMS.txt && cat SHA256SUMS.txt
       - name: Create the draft release
         env:
           GH_TOKEN: ${{ github.token }}

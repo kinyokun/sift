@@ -129,6 +129,8 @@ From [Releases](https://github.com/kinyokun/sift/releases/latest):
 
 The macOS installer is signed and notarized by Apple and opens normally. The Windows installer is not yet signed: if SmartScreen appears, click "More info → Run anyway".
 
+After that there is no need to come back here: the official installers check for a new version at launch (this can be turned off under Settings → Updates) and download and install it from within the app. The check and the download go through GitHub accelerators that are reachable from mainland China first, and every update package is verified against its signature. Versions up to 0.3.4 have no updater, so they need one more manual install. The `.app.tar.gz` and `latest.json` in a release are for the updater, not for downloading by hand.
+
 Every release includes `SHA256SUMS.txt` for checking the files. iOS and Android builds currently have to be built yourself; see [AGENTS.md](AGENTS.md).
 
 ## All features
@@ -157,6 +159,7 @@ Every release includes `SHA256SUMS.txt` for checking the files. iOS and Android 
 - Export: copy / rename, find RAW files by name, info frames
 - LAN transfer: download originals to a phone by QR code, or send photos back to the computer
 - Every shortcut can be changed (Settings → Shortcuts)
+- In-app updates: the official macOS / Windows installers check for new versions and install them from within the app
 
 <details>
 <summary><b>Common shortcuts</b></summary>

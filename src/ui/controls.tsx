@@ -137,25 +137,28 @@ export function Menu(props: { button: ReactNode; label: string; items: MenuItem[
   );
 }
 
-export function Sheet(props: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean }) {
+/** Without `onClose` the sheet stays until whatever it shows has finished. */
+export function Sheet(props: { title: string; onClose?: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation();
-        props.onClose();
+        props.onClose?.();
       }
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
   }, [props.onClose]);
   return (
-    <div className="sheet-backdrop" onPointerDown={(e) => e.target === e.currentTarget && props.onClose()}>
+    <div className="sheet-backdrop" onPointerDown={(e) => e.target === e.currentTarget && props.onClose?.()}>
       <section className={`sheet glass ${props.wide ? "wide" : ""}`} role="dialog" aria-modal="true" aria-label={props.title}>
         <header>
           <h2>{props.title}</h2>
-          <button className="sheet-close" aria-label="Close" onClick={props.onClose}>
-            <Icon name="x" size={15} />
-          </button>
+          {props.onClose && (
+            <button className="sheet-close" aria-label="Close" onClick={props.onClose}>
+              <Icon name="x" size={15} />
+            </button>
+          )}
         </header>
         <div className="sheet-body">{props.children}</div>
         {props.footer && <footer>{props.footer}</footer>}

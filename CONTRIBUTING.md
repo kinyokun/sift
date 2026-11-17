@@ -72,7 +72,7 @@ macOS 构建只在手动触发时运行（Actions → ci → Run workflow，勾�
    git tag v0.2.0 && git push origin main v0.2.0
    ```
 
-4. `release.yml` 会核对版本号、用完整 release 配置构建 macOS（通用二进制 `.dmg`）和 Windows（x64 `-setup.exe`）安装包、生成 `THIRD-PARTY-LICENSES.html` 和 `SHA256SUMS.txt`，并创建一个 **草稿** Release。检查无误后在 GitHub 上点发布。带 `-` 的标签（如 `v0.2.0-beta.1`）会标成预发布。
+4. `release.yml` 会核对版本号、用完整 release 配置构建 macOS（通用二进制 `.dmg`）和 Windows（x64 `-setup.exe`）安装包、生成 `THIRD-PARTY-LICENSES.html` 和 `SHA256SUMS.txt`，并创建一个 **草稿** Release。检查无误后在 GitHub 上点发布；发布之后，已安装的官方版本才会收到更新提示。带 `-` 的标签（如 `v0.2.0-beta.1`）会标成预发布，预发布不会推送给已安装的版本。
 
 ### macOS 签名（可选）
 
@@ -84,6 +84,12 @@ macOS 构建只在手动触发时运行（Actions → ci → Run workflow，勾�
 - `APPLE_ID`、`APPLE_PASSWORD`（App 专用密码）、`APPLE_TEAM_ID`：用于公证，不配则只签名不公证
 
 Windows 包目前未签名，SmartScreen 会提示 “未知发布者”。
+
+### 应用内更新（仅官方构建）
+
+仓库配置了 `TAURI_SIGNING_PRIVATE_KEY`（`pnpm tauri signer generate` 生成的更新签名私钥；私钥有密码时再配 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`）时，构建出的应用带应用内更新，更新包（Windows 的 `-setup.exe`、macOS 的 `.app.tar.gz`）会用它签名；对应的公钥写在 `src-tauri/tauri.conf.json` 的 `plugins.updater.pubkey` 里。发版时 `scripts/latest-json.mjs` 把版本号、更新说明（`CHANGELOG.md` 里那一节）、下载地址和签名写进 `latest.json`，随 Release 一起上传。已安装的应用读取的是最新一个正式 Release 里的 `latest.json`，所以草稿和预发布都不会被推送。
+
+没有这个密钥（例如 fork）时构建照常进行，只是应用里没有更新功能。私钥要另外备份：丢了以后，已安装的版本无法再验证新的更新包，只能请用户手动重装一次。
 
 ### 尼康引擎（仅官方构建）
 

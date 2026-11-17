@@ -8,6 +8,7 @@ import { actionFor, isTyping } from "./lib/shortcuts";
 import { useStore } from "./lib/store";
 import { ExportSheet, FindRawSheet, TransferSheet } from "./sheets/Export";
 import { HelpSheet, SettingsSheet } from "./sheets/Settings";
+import { UpdateSheet } from "./sheets/Update";
 
 /** Toasts are raised with short codes so the store stays free of UI text. */
 function Toast() {
@@ -85,6 +86,7 @@ export function App() {
       {sheet === "transfer" && folder && <TransferSheet onClose={close} />}
       {sheet === "settings" && <SettingsSheet onClose={close} />}
       {sheet === "help" && <HelpSheet onClose={close} />}
+      {sheet === "update" && <UpdateSheet onClose={close} />}
       <Toast />
     </>
   );

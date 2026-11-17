@@ -3,6 +3,7 @@ pub mod photos;
 pub mod protocol;
 pub mod state;
 pub mod transfer;
+pub mod update;
 
 use state::AppState;
 use std::path::PathBuf;
@@ -37,16 +38,21 @@ fn transfer_stop(state: State<AppState>) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_opener::init());
+    #[cfg(desktop)]
+    let builder = update::attach(builder);
+    builder
         .setup(|app| {
             let cache = app.path().app_cache_dir()?;
             let data = app.path().app_data_dir()?;
             std::fs::create_dir_all(&cache)?;
             std::fs::create_dir_all(&data)?;
             app.manage(AppState::new(cache, data));
+            #[cfg(all(desktop, debug_assertions))]
+            update::unattended(app.handle());
             Ok(())
         })
         .register_asynchronous_uri_scheme_protocol("sift", |ctx, request, responder| {
@@ -92,6 +98,9 @@ pub fn run() {
             commands::list_albums,
             commands::import_files,
             commands::save_to_photos,
+            update::update_check,
+            update::update_install,
+            update::update_cancel,
             transfer_start,
             transfer_stop,
         ])

@@ -30,6 +30,7 @@ jobs:
       HAS_APPLE_CERT: ${{ secrets.APPLE_CERTIFICATE != '' }}
       HAS_APPLE_NOTARY: ${{ secrets.APPLE_ID != '' }}
       HAS_NIKON: ${{ secrets.NIKON_DEPLOY_KEY != '' }}
+      HAS_UPDATER: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -128,25 +129,51 @@ jobs:
         shell: bash
         run: echo "::notice::Built without Nikon's renderer (no NIKON_DEPLOY_KEY secret)."
 
+      # Only builds signed with the update key update themselves: SIFT_OFFICIAL
+      # compiles the updater in, and the extra config makes the signed update
+      # packages. Without the key, forks included, the app has no updater.
+      - if: env.HAS_UPDATER == 'true'
+        name: Build with the updater
+        shell: bash
+        run: |
+          {
+            echo "SIFT_OFFICIAL=1"
+            echo "TAURI_EXTRA=$TAURI_EXTRA --config src-tauri/updater.conf.json"
+          } >> "$GITHUB_ENV"
+      - if: env.HAS_UPDATER != 'true'
+        shell: bash
+        run: echo "::notice::Built without the updater (no TAURI_SIGNING_PRIVATE_KEY secret)."
+
       - name: Build the Windows installer
         if: inputs.platform == 'windows'
         working-directory: ${{ env.WS }}
         shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          # $TAURI_EXTRA is empty or two words.
+          # $TAURI_EXTRA is empty or pairs of words, never quoted.
           # shellcheck disable=SC2086
           pnpm tauri build --bundles nsis $TAURI_EXTRA
+      # The update package is an archive of the .app, which is only kept (and
+      # archived) when the app bundle is asked for alongside the disk image.
       - name: Build the macOS app
         if: inputs.platform == 'macos'
         working-directory: ${{ env.WS }}
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           # shellcheck disable=SC2086
-          pnpm tauri build --target universal-apple-darwin --bundles dmg $TAURI_EXTRA
+          pnpm tauri build --target universal-apple-darwin --bundles app,dmg $TAURI_EXTRA
 
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.artifact }}
           path: |
             ${{ env.WS }}/target/release/bundle/nsis/*.exe
+            ${{ env.WS }}/target/release/bundle/nsis/*.exe.sig
             ${{ env.WS }}/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+            ${{ env.WS }}/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz
+            ${{ env.WS }}/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
           if-no-files-found: error

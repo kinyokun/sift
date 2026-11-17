@@ -5,6 +5,7 @@ import { useT } from "../lib/i18n";
 import { ACTIONS, DEFAULT_KEYS, comboOf, keyCaps, type Action } from "../lib/shortcuts";
 import { useStore } from "../lib/store";
 import { Row, Segmented, Sheet, Toggle } from "../ui/controls";
+import { UpdateSettings } from "./Update";
 
 const REPO = "https://github.com/kinyokun/sift";
 /** What Nikon asks of everyone using the engine that official builds include. */
@@ -188,6 +189,8 @@ export function SettingsSheet({ onClose }: { onClose: () => void }) {
             </button>
           </Row>
         </div>
+
+        {info?.updater && <UpdateSettings />}
 
         <h4>{t.about}</h4>
         <div className="group">

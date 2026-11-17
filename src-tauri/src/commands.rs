@@ -850,6 +850,8 @@ pub struct AppInfo {
     live_photo: bool,
     /// Whether photos can be saved to the system photo library (iOS).
     save_to_photos: bool,
+    /// Whether this build updates itself (official desktop builds).
+    updater: bool,
 }
 
 pub fn library_dir(app: &AppHandle) -> Option<PathBuf> {
@@ -887,6 +889,7 @@ pub async fn app_info(app: AppHandle) -> CmdResult<AppInfo> {
             nikon_sdk: state.nikon().is_some(),
             live_photo: cfg!(target_os = "macos"),
             save_to_photos: crate::photos::SUPPORTED,
+            updater: crate::update::ENABLED,
         })
     })
     .await

@@ -72,7 +72,13 @@ export type AppInfo = {
   live_photo?: boolean;
   /** Photos can be saved to the system photo library, Live Photos as Live Photos (iOS). */
   save_to_photos?: boolean;
+  /** This build updates itself (official macOS and Windows builds). */
+  updater?: boolean;
 };
+
+/** A newer release; `notes` is its section of CHANGELOG.md. */
+export type UpdateOffer = { version: string; current: string; notes: string };
+export type UpdateProgress = { downloaded: number; total: number | null; installing: boolean };
 
 export type CopyReport = {
   copied: number;
@@ -199,4 +205,10 @@ export const api = {
   saveToPhotos: (items: Item[]) => invoke<number>("save_to_photos", { items: items.map((it) => ({ still: it.id, movie: it.live ?? null })) }),
   transferStart: (folder: string, files: string[]) => invoke<TransferInfo>("transfer_start", { folder, files }),
   transferStop: () => invoke<void>("transfer_stop"),
+  /** Looks for a newer release; resolves to `null` when this is the newest. */
+  updateCheck: () => invoke<UpdateOffer | null>("update_check"),
+  /** Downloads and installs the release found by `updateCheck`, then restarts the app: it settles only by rejecting
+   * ("cancelled" after `updateCancel`). Progress arrives as `update-progress` events. */
+  updateInstall: () => invoke<void>("update_install"),
+  updateCancel: () => invoke<void>("update_cancel"),
 };

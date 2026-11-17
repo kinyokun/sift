@@ -30,3 +30,7 @@ rand = "0.10"
 percent-encoding = "2"
 futures-util = { version = "0.3", default-features = false }
 image = { version = "0.25", default-features = false }
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-updater = "=2.14.1"
+semver = "1"

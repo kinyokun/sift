@@ -5,6 +5,8 @@
 //   cargo run -p sift --example bridge &
 //   pnpm dev &
 //   node scripts/shots.mjs /path/to/photos [outDir]
+//
+// BRIDGE and DEV name the two servers when they are not on their usual ports.
 import { chromium } from "playwright-core";
 import { mkdirSync } from "node:fs";
 
@@ -15,12 +17,12 @@ mkdirSync(out, { recursive: true });
 
 const only = process.env.ONLY?.split(",");
 const lookFiles = (process.env.LOOKS ?? "").split(",").filter(Boolean);
-const base = `http://localhost:1420/?bridge=http://127.0.0.1:4777&pick=${encodeURIComponent(folder)}${lookFiles.map((l) => `&look=${encodeURIComponent(l)}`).join("")}`;
-const bridge = "http://127.0.0.1:4777";
+const bridge = process.env.BRIDGE ?? "http://127.0.0.1:4777";
+const base = `${process.env.DEV ?? "http://localhost:1420"}/?bridge=${bridge}&pick=${encodeURIComponent(folder)}${lookFiles.map((l) => `&look=${encodeURIComponent(l)}`).join("")}`;
 const reset = () => fetch(`${bridge}/invoke/dev_reset`, { method: "POST", body: "{}" });
 const browser = await chromium.launch({ channel: process.env.CHANNEL ?? "chrome" });
 
-async function session(name, { width, height, mobile = false, scheme = "dark", lang = "zh-CN", platform = "macos" }, steps) {
+async function session(name, { width, height, mobile = false, scheme = "dark", lang = "zh-CN", platform = "macos", query = "" }, steps) {
   if (only && !only.includes(name)) return;
   // A closing page still saves its progress; let that land before wiping it.
   await new Promise((r) => setTimeout(r, 500));
@@ -37,7 +39,7 @@ async function session(name, { width, height, mobile = false, scheme = "dark", l
   page.on("pageerror", (e) => console.log(`[${name}] page error: ${e.message}`));
   page.on("response", (r) => r.status() >= 400 && console.log(`[${name}] ${r.status()} ${decodeURIComponent(r.url()).slice(0, 160)}`));
   await page.addInitScript(() => localStorage.setItem("sift.settings", JSON.stringify({ onboarded: true })));
-  await page.goto(`${base}&platform=${platform}${mobile ? "&mobile" : ""}`);
+  await page.goto(`${base}&platform=${platform}${mobile ? "&mobile" : ""}${query}`);
   let n = 0;
   const shot = async (label) => {
     await page.waitForTimeout(350);
@@ -746,5 +748,97 @@ await session("compare-phone", phone, async (page, shot) => {
   await page.locator(".pane-count button", { hasText: "4" }).tap();
   await shot("four");
 });
+
+// The updater exists in official builds only; the bridge shim plays its part
+// (see src/dev/mock.ts). Offer, download, cancel, later, skip, as printed.
+await session("update", { ...desktop, query: "&update=0.4.0&install=stall" }, async (page, shot) => {
+  const dialog = page.locator('.sheet[aria-label="发现新版本"]');
+  const settings = async () => {
+    await page.locator('[aria-label="更多"]').click();
+    await page.getByRole("menuitem", { name: "设置" }).click();
+    await page.getByText("软件更新").scrollIntoViewIfNeeded();
+  };
+  const t0 = Date.now();
+  await dialog.waitFor({ timeout: 10000 });
+  console.log(`[update] offered ${((Date.now() - t0) / 1000).toFixed(1)} s after launch: ${(await dialog.locator(".update-versions").textContent()).trim()}`);
+  await shot("offer");
+  await dialog.getByRole("button", { name: "更新并重启" }).click();
+  await dialog.locator(".progress small", { hasText: "74.8 / 187.0 MB" }).waitFor();
+  await page.keyboard.press("Escape");
+  console.log(`[update] downloading: close button ${await dialog.locator(".sheet-close").count()} (want 0), still open after Esc: ${await dialog.count()}`);
+  await shot("downloading");
+  await dialog.getByRole("button", { name: "取消" }).click();
+  await dialog.getByRole("button", { name: "更新并重启" }).waitFor();
+  await dialog.getByRole("button", { name: "以后再说" }).click();
+  console.log(`[update] cancelled, then later: dialog ${await dialog.count()} (want 0)`);
+  await openLibrary(page);
+  await settings();
+  await shot("settings-available");
+  await page.locator(".sheet .row", { hasText: "有新版本 0.4.0" }).getByRole("button", { name: "查看" }).click();
+  await dialog.getByRole("button", { name: "跳过这个版本" }).click();
+  // Every load starts from fresh settings (see `session`), so the saved ones are put back.
+  const saved = await page.evaluate(() => localStorage.getItem("sift.settings"));
+  const skipped = JSON.parse(saved).skippedUpdate;
+  await page.addInitScript((settings) => localStorage.setItem("sift.settings", settings), saved);
+  await page.reload();
+  await page.locator(".cell img").first().waitFor();
+  await page.waitForTimeout(5000);
+  console.log(`[update] skipped ${skipped}; dialog after the next launch: ${await dialog.count()} (want 0)`);
+  await settings();
+  await page.locator(".sheet .row", { hasText: "有新版本 0.4.0" }).getByRole("button", { name: "查看" }).click();
+  console.log(`[update] a skipped release can still be opened from Settings: ${await dialog.count()}`);
+});
+
+await session("update-install", { ...desktop, query: "&update=0.4.0" }, async (page, shot) => {
+  const dialog = page.locator('.sheet[aria-label="发现新版本"]');
+  await dialog.waitFor({ timeout: 10000 });
+  await dialog.getByRole("button", { name: "更新并重启" }).click();
+  await dialog.locator(".progress small", { hasText: "正在安装" }).waitFor();
+  console.log(`[update-install] installing: buttons left ${await dialog.locator("footer button").count()} (want 0)`);
+  await shot("installing");
+});
+
+await session("update-en", { ...desktop, scheme: "light", lang: "en-US", platform: "windows", query: "&update=0.4.0&install=fail" }, async (page, shot) => {
+  const dialog = page.locator('.sheet[aria-label="Update available"]');
+  await dialog.waitFor({ timeout: 10000 });
+  await shot("offer");
+  await dialog.getByRole("button", { name: "Update and restart" }).click();
+  await dialog.locator(".note.bad").waitFor();
+  console.log(`[update-en] failed: ${(await dialog.locator(".note.bad").textContent()).slice(0, 90)}`);
+  await shot("failed");
+  await dialog.getByRole("button", { name: "Close" }).last().click();
+  await openLibrary(page);
+  await page.locator('[aria-label="More"]').click();
+  await page.getByRole("menuitem", { name: "Settings" }).click();
+  await page.getByText("Updates", { exact: true }).scrollIntoViewIfNeeded();
+  await shot("settings");
+});
+
+// Nothing newer, a failing check, a build that does not update itself, a phone.
+for (const [name, query, view] of [
+  ["update-none", "&update=none", desktop],
+  ["update-fail", "&update=fail", desktop],
+  ["update-off", "", desktop],
+  ["update-phone", "&update=0.4.0", phone],
+]) {
+  await session(name, { ...view, query }, async (page, shot) => {
+    await openLibrary(page);
+    await page.waitForTimeout(4500);
+    const prompted = await page.locator(".sheet").count();
+    await page.locator('[aria-label="更多"]').click();
+    await page.getByRole("menuitem", { name: "设置" }).click();
+    const section = page.locator(".sheet h4", { hasText: "软件更新" });
+    const shown = await section.count();
+    let result = "";
+    if (shown) {
+      await section.scrollIntoViewIfNeeded();
+      await page.getByRole("button", { name: "检查更新" }).click();
+      await page.waitForTimeout(900);
+      result = (await page.locator(".sheet .row", { hasText: "Sift " }).first().locator("small").textContent()) ?? "";
+      await shot("settings");
+    }
+    console.log(`[${name}] prompt at launch: ${prompted}, section in Settings: ${shown}, check now: ${result || "-"}`);
+  });
+}
 await browser.close();
 console.log(`screenshots in ${out}`);
