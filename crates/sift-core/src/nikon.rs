@@ -19,6 +19,7 @@
 //! quit\n
 //! ```
 //!
+//! (the helper opens with `ready\t<megabytes of memory in the machine>\n`)
 //! and for each `render` either `ok\t<width>\t<height>\t<0|1>\n` followed by
 //! width x height RGB bytes (the flag says the picture was developed from
 //! the bytes sent as `<key>`), or `err\t<why>\n`.
@@ -118,11 +119,14 @@ pub fn handles(path: &Path) -> bool {
 /// Whether Nikon's engine exists for this platform at all.
 pub const SUPPORTED: bool = cfg!(any(target_os = "macos", all(windows, target_arch = "x86_64")));
 
-/// Client for the helper process. One request runs at a time.
+/// Client for the helper program. A render asked for while one is running
+/// (the look wall asks for two tiles at a time) goes to a second helper:
+/// two of them develop about one and a half times as many pictures as one
+/// in the same time, and a third makes all of them slower.
 pub struct Engine {
     root: PathBuf,
     #[cfg(any(target_os = "macos", windows))]
-    helper: std::sync::Mutex<Option<client::Helper>>,
+    pool: client::Pool,
 }
 
 impl Engine {
@@ -150,7 +154,7 @@ impl Engine {
         Engine {
             root,
             #[cfg(any(target_os = "macos", windows))]
-            helper: std::sync::Mutex::new(None),
+            pool: client::Pool::default(),
         }
     }
 
@@ -163,20 +167,18 @@ impl Engine {
     pub fn render(&self, nef: &Path, recipe: &Recipe, max_edge: u32) -> Result<Rendered> {
         #[cfg(any(target_os = "macos", windows))]
         {
-            let mut slot = self.helper.lock().unwrap();
             // A helper that died (or a first failure) gets one fresh start.
             for attempt in 0..2 {
-                if slot.is_none() {
-                    *slot = Some(client::Helper::start(&self.root)?);
+                let mut lease = self.pool.lease(nef);
+                if lease.helper.is_none() {
+                    lease.helper = Some(self.pool.start(&self.root)?);
                 }
-                match slot.as_mut().unwrap().render(nef, recipe, max_edge) {
-                    Err(client::Failure::Broken(e)) if attempt == 0 => {
-                        let _ = e;
-                        *slot = None;
-                    }
+                match lease.helper.as_mut().unwrap().render(&self.pool, nef, recipe, max_edge) {
                     Err(client::Failure::Broken(e)) => {
-                        *slot = None;
-                        return Err(Error::Decode(format!("Nikon SDK helper stopped: {e}")));
+                        lease.helper = None;
+                        if attempt == 1 {
+                            return Err(Error::Decode(format!("Nikon SDK helper stopped: {e}")));
+                        }
                     }
                     Err(client::Failure::Refused(e)) => return Err(Error::Decode(format!("Nikon SDK: {e}"))),
                     Ok(img) => return Ok(img),
@@ -195,9 +197,9 @@ impl Engine {
     pub fn check(&self) -> Result<()> {
         #[cfg(any(target_os = "macos", windows))]
         {
-            let mut slot = self.helper.lock().unwrap();
-            if slot.is_none() {
-                *slot = Some(client::Helper::start(&self.root)?);
+            let mut lease = self.pool.lease(Path::new(""));
+            if lease.helper.is_none() {
+                lease.helper = Some(self.pool.start(&self.root)?);
             }
             Ok(())
         }
@@ -449,6 +451,7 @@ mod client {
     use std::io::{BufRead, BufReader, Read, Write};
     use std::net::{TcpListener, TcpStream};
     use std::process::{Child, Command, Stdio};
+    use std::sync::{Arc, Condvar, Mutex};
     use std::time::{Duration, Instant};
 
     pub enum Failure {
@@ -462,9 +465,10 @@ mod client {
         child: Child,
         out: TcpStream,
         answers: BufReader<TcpStream>,
-        /// The file last read, so that trying one look after another on a
-        /// photo reads it (often from a network share) only once.
-        file: Option<Source>,
+        /// Megabytes of memory in the machine, as the helper reports it.
+        memory: u64,
+        /// The photo it developed last and still has open.
+        photo: Option<PathBuf>,
         /// Key of the bytes the helper holds.
         sent: Option<u64>,
     }
@@ -475,12 +479,80 @@ mod client {
         bytes: Vec<u8>,
     }
 
+    /// The helpers that are running, and the ones waiting for work.
+    #[derive(Default)]
+    pub struct Pool {
+        helpers: Mutex<Helpers>,
+        freed: Condvar,
+        /// The file last read, so that trying one look after another on a
+        /// photo reads it (often from a network share) only once, whichever
+        /// helper develops it.
+        file: Mutex<Option<Arc<Source>>>,
+    }
+
+    #[derive(Default)]
+    struct Helpers {
+        /// Longest idle first.
+        idle: Vec<Helper>,
+        busy: usize,
+        /// The machine has room for two.
+        two: bool,
+    }
+
+    /// A helper taken out of the pool for one request; `None` asks the
+    /// holder to start one (or says the one it had is gone).
+    pub struct Lease<'a> {
+        pool: &'a Pool,
+        pub helper: Option<Helper>,
+    }
+
+    /// A second helper needs cores of its own and this much memory in the
+    /// machine, in megabytes: each takes 1 to 1.6 GB for a 45-megapixel file.
+    const CORES_FOR_TWO: usize = 8;
+    const MEMORY_FOR_TWO: u64 = 12 * 1024;
+
+    impl Pool {
+        /// Starts a helper; what it says about the machine decides whether
+        /// a second one may run beside it.
+        pub fn start(&self, root: &Path) -> Result<Helper> {
+            let helper = Helper::start(root)?;
+            let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
+            if cores >= CORES_FOR_TWO && helper.memory >= MEMORY_FOR_TWO {
+                self.helpers.lock().unwrap().two = true;
+            }
+            Ok(helper)
+        }
+
+        /// Waits for a free helper, preferably the one that has `nef` open:
+        /// it develops the next look without decoding the photo again.
+        pub fn lease(&self, nef: &Path) -> Lease<'_> {
+            let mut helpers = self.helpers.lock().unwrap();
+            loop {
+                let at = helpers.idle.iter().position(|h| h.photo.as_deref() == Some(nef)).or((!helpers.idle.is_empty()).then_some(0));
+                if at.is_some() || helpers.busy < 1 + helpers.two as usize {
+                    helpers.busy += 1;
+                    return Lease { pool: self, helper: at.map(|i| helpers.idle.remove(i)) };
+                }
+                helpers = self.freed.wait(helpers).unwrap();
+            }
+        }
+    }
+
+    impl Drop for Lease<'_> {
+        fn drop(&mut self) {
+            let mut helpers = self.pool.helpers.lock().unwrap();
+            helpers.busy -= 1;
+            helpers.idle.extend(self.helper.take());
+            self.pool.freed.notify_one();
+        }
+    }
+
     /// How long the helper may take to connect, and then to load the SDK.
     const CONNECT: Duration = Duration::from_secs(20);
     const START: Duration = Duration::from_secs(120);
 
     impl Helper {
-        pub fn start(root: &Path) -> Result<Helper> {
+        fn start(root: &Path) -> Result<Helper> {
             let exe = root.join(HELPER);
             // The helper connects back to this socket and proves it is ours
             // with a token only it was told.
@@ -501,7 +573,7 @@ mod client {
                 command.creation_flags(CREATE_NO_WINDOW);
             }
             let mut child = command.spawn()?;
-            let started = (|| -> std::result::Result<(TcpStream, BufReader<TcpStream>), String> {
+            let started = (|| -> std::result::Result<(TcpStream, BufReader<TcpStream>, u64), String> {
                 listener.set_nonblocking(true).map_err(|e| e.to_string())?;
                 let begun = Instant::now();
                 let (out, mut answers) = loop {
@@ -530,16 +602,18 @@ mod client {
                 };
                 let mut line = String::new();
                 answers.read_line(&mut line).map_err(|e| e.to_string())?;
-                if line.trim() != "ready" {
+                let mut words = line.trim().split('\t');
+                if words.next() != Some("ready") {
                     return Err(line.trim().strip_prefix("err\t").unwrap_or("no answer").to_string());
                 }
+                let memory = words.next().and_then(|mb| mb.parse().ok()).unwrap_or(0);
                 // A full-size render takes as long as it takes.
                 out.set_read_timeout(None).map_err(|e| e.to_string())?;
                 let _ = out.set_nodelay(true);
-                Ok((out, answers))
+                Ok((out, answers, memory))
             })();
             match started {
-                Ok((out, answers)) => Ok(Helper { child, out, answers, file: None, sent: None }),
+                Ok((out, answers, memory)) => Ok(Helper { child, out, answers, memory, photo: None, sent: None }),
                 Err(why) => {
                     let _ = child.kill();
                     let _ = child.wait();
@@ -548,13 +622,14 @@ mod client {
             }
         }
 
-        pub fn render(&mut self, nef: &Path, recipe: &Recipe, max_edge: u32) -> std::result::Result<Rendered, Failure> {
+        pub fn render(&mut self, pool: &Pool, nef: &Path, recipe: &Recipe, max_edge: u32) -> std::result::Result<Rendered, Failure> {
             let broken = |e: std::io::Error| Failure::Broken(e.to_string());
             let path = nef.to_str().ok_or_else(|| Failure::Refused("file name is not valid UTF-8".into()))?;
             let key = match &recipe.recorded {
-                Some(np3) => self.send_recorded(nef, np3).map_err(broken)?,
+                Some(np3) => self.send_recorded(pool, nef, np3).map_err(broken)?,
                 None => None,
             };
+            self.photo = Some(nef.to_path_buf());
             let key = key.map_or("-".to_string(), |k| format!("{k:016x}"));
             self.out.write_all(format!("render\t{max_edge}\t{}\t{key}\t{path}\n", recipe.encode()).as_bytes()).map_err(broken)?;
             let mut line = String::new();
@@ -583,7 +658,7 @@ mod client {
         /// it, unless it already has that copy. `None` when the file cannot
         /// take the look (or be read): it is then developed from the
         /// recipe's settings.
-        fn send_recorded(&mut self, nef: &Path, np3: &[u8]) -> std::io::Result<Option<u64>> {
+        fn send_recorded(&mut self, pool: &Pool, nef: &Path, np3: &[u8]) -> std::io::Result<Option<u64>> {
             use std::hash::{Hash, Hasher};
             let stamp = std::fs::metadata(nef).ok().map(|m| (m.len(), m.modified().unwrap_or(std::time::UNIX_EPOCH)));
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -592,12 +667,19 @@ mod client {
             if self.sent == Some(key) {
                 return Ok(Some(key));
             }
-            if !self.file.as_ref().is_some_and(|f| f.path == nef && f.stamp == stamp) {
-                self.file = None;
-                let Ok(bytes) = std::fs::read(nef) else { return Ok(None) };
-                self.file = Some(Source { path: nef.to_path_buf(), stamp, bytes });
-            }
-            let mut copy = self.file.as_ref().unwrap().bytes.clone();
+            let source = {
+                // Held while reading: a second helper asked for the same photo waits for these bytes.
+                let mut file = pool.file.lock().unwrap();
+                match file.as_ref().filter(|f| f.path == nef && f.stamp == stamp) {
+                    Some(known) => known.clone(),
+                    None => {
+                        *file = None;
+                        let Ok(bytes) = std::fs::read(nef) else { return Ok(None) };
+                        file.insert(Arc::new(Source { path: nef.to_path_buf(), stamp, bytes })).clone()
+                    }
+                }
+            };
+            let mut copy = source.bytes.clone();
             if record_look(&mut copy, np3).is_err() {
                 return Ok(None);
             }

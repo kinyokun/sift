@@ -224,6 +224,9 @@ pub struct Np3 {
     pub detail: [Option<f32>; 3],
     /// The file itself, for [`crate::nikon::record_look`].
     pub file: Vec<u8>,
+    /// Every Flexible Color value and all three sharpening values are given:
+    /// nothing is left for the camera's own setting to fill in.
+    pub spelled_out: bool,
 }
 
 /// Hue centres of the colour blender bands, in degrees.
@@ -270,6 +273,8 @@ pub fn parse_np3(buf: &[u8]) -> Result<Np3> {
     }
     let mut np3 = Np3 { file: buf.to_vec(), ..Np3::default() };
     let (mut classic, mut base) = ([0f32; 4], 0u16);
+    // One bit for each value [`Np3::spelled_out`] asks for.
+    let mut given = 0u32;
     let mut pos = 4;
     while pos + 8 <= buf.len() {
         let word = |o: usize| u32::from_be_bytes(buf[o..o + 4].try_into().unwrap());
@@ -290,11 +295,14 @@ pub fn parse_np3(buf: &[u8]) -> Result<Np3> {
                 np3.curve = Some(raw.as_chunks::<2>().0.iter().map(|c| u16::from_be_bytes(*c)).collect());
             }
             TAG_BLENDER if len >= 24 => {
+                given |= (v[..24].iter().all(|b| slider_opt(*b).is_some()) as u32) << 9;
                 for (i, band) in np3.blender.iter_mut().enumerate() {
                     *band = Hcb { hue: slider(v[i * 3]), chroma: slider(v[i * 3 + 1]), brightness: slider(v[i * 3 + 2]) };
                 }
             }
             TAG_GRADING if len >= 19 => {
+                let sliders = [2, 3, 6, 7, 10, 11, 16, 18];
+                given |= (sliders.iter().all(|i| slider_opt(v[*i]).is_some()) as u32) << 10;
                 for (i, zone) in np3.grading.iter_mut().enumerate() {
                     let o = i * 4;
                     *zone = Hcb { hue: (((v[o] & 0x0f) as u16) << 8 | v[o + 1] as u16) as f32, chroma: slider(v[o + 2]), brightness: slider(v[o + 3]) };
@@ -304,11 +312,13 @@ pub fn parse_np3(buf: &[u8]) -> Result<Np3> {
             }
             _ if len == 2 => {
                 if let Some(i) = TAGS_DETAIL.iter().position(|t| *t == tag) {
+                    given |= (stored().is_some() as u32) << i;
                     np3.detail[i] = stored();
                 } else if let Some(i) = TAGS_CLASSIC.iter().position(|t| *t == tag) {
                     classic[i] = scaled();
                     np3.classic[i] = stored();
                 } else if let Some(i) = TAGS_FLEXIBLE.iter().position(|t| *t == tag) {
+                    given |= (stored().is_some() as u32) << (3 + i);
                     let field = [&mut np3.contrast, &mut np3.highlights, &mut np3.shadows, &mut np3.white_level, &mut np3.black_level, &mut np3.saturation];
                     *field.into_iter().nth(i).unwrap() = scaled();
                 }
@@ -317,6 +327,7 @@ pub fn parse_np3(buf: &[u8]) -> Result<Np3> {
         }
     }
     np3.base = base;
+    np3.spelled_out = given == (1 << 11) - 1;
     // Classic sliders run -3..+3; bring them onto the -100..+100 scale.
     let (base_contrast, base_saturation) = base_offsets(base);
     np3.contrast += classic[0] * 30.0 + base_contrast;
@@ -441,10 +452,16 @@ impl Np3 {
     }
 
     /// The same look as settings for Nikon's own renderer. The SDK takes no
-    /// curve data, so a look with a custom tone curve also carries the file,
-    /// to be recorded in a copy of the NEF and developed as shot. Where that
-    /// is not possible ([`crate::nikon::Rendered::recorded`] is false),
+    /// curve data, and a value the look leaves out would be taken from what
+    /// the camera recorded, so such a look also carries the file, to be
+    /// recorded in a copy of the NEF and developed as shot. Where that is
+    /// not possible ([`crate::nikon::Rendered::recorded`] is false),
     /// [`Np3::apply_curve`] has to follow the render.
+    ///
+    /// A Flexible Color look without a curve that gives every value needs no
+    /// copy: its settings alone develop to the same pixels, and the engine
+    /// can then keep the photo open from look to look, which is about three
+    /// times as fast as opening a copy for each.
     pub fn recipe(&self) -> crate::nikon::Recipe {
         use crate::nikon::{Base, Recipe};
         let base = match self.base {
@@ -458,7 +475,9 @@ impl Np3 {
             _ => Base::Standard,
         };
         let mut recipe = Recipe::base(base);
-        recipe.recorded = Some(self.file.clone());
+        if !(base == Base::FlexibleColor && self.curve.is_none() && self.spelled_out) {
+            recipe.recorded = Some(self.file.clone());
+        }
         let raw = |v: Option<f32>| v.map_or(f64::NAN, f64::from);
         recipe.classic = self.classic.map(raw);
         recipe.detail = self.detail.map(raw);
@@ -594,6 +613,33 @@ mod tests {
         assert!(lut.map([20, 20, 20])[0] > 200 && lut.map([235, 235, 235])[0] < 60, "curve applied");
     }
 
+    #[test]
+    fn only_a_look_that_gives_every_value_is_developed_from_settings_alone() {
+        let look = |base: u16, sharpening: u8, curve: bool| {
+            let two = |tags: &[u32], value: u8| tags.iter().flat_map(|t| rec(*t, &[value, 1])).collect::<Vec<u8>>();
+            let tone: Vec<u8> = if curve { rec(TAG_CURVE, &[0u8; 64 + CURVE_POINTS * 2]) } else { Vec::new() };
+            let file = [
+                b"NCP\0".to_vec(),
+                rec(TAG_BASE, &base.to_be_bytes()),
+                rec(TAGS_DETAIL[0], &[sharpening, 4]),
+                two(&TAGS_DETAIL[1..], 0x82),
+                two(&TAGS_FLEXIBLE, 0x80),
+                rec(TAG_BLENDER, &[0x80; 28]),
+                rec(TAG_GRADING, &[0x80; 20]),
+                tone,
+                0u32.to_be_bytes().to_vec(),
+            ]
+            .concat();
+            parse_np3(&file).unwrap()
+        };
+        let complete = look(0x20, 0x84, false);
+        assert!(complete.spelled_out && complete.recipe().recorded.is_none());
+        // A curve can only be recorded, a missing value would come from the camera's
+        // setting, and built-in controls do not develop the same from settings.
+        assert!(look(0x20, 0x84, true).recipe().recorded.is_some());
+        assert!(!look(0x20, 0xff, false).spelled_out && look(0x20, 0xff, false).recipe().recorded.is_some());
+        assert!(look(0xc3, 0x84, false).recipe().recorded.is_some());
+    }
     #[test]
     fn three_dl_and_hald_tables_match_the_same_cube() {
         // The same look (swap red and blue, halve green) in both formats.
