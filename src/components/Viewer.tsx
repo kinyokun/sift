@@ -367,14 +367,15 @@ export function Viewer() {
     const frame = liveSource[index ?? liveRef.current?.cover ?? 0];
     if (frame) show(viewer.ids.indexOf(frame.id));
   };
+  const liveHeif = !!info?.live_heif && settings.liveHeif;
   const saveLive = async () => {
     if (!live || saving) return;
     setSaving(true);
     setPlaying(false);
     try {
-      const saved = await api.saveLivePhoto(liveFrames.map((f) => f.id), live.cover - live.start, settings.liveHeif);
+      const saved = await api.saveLivePhoto(liveFrames.map((f) => f.id), live.cover - live.start, liveHeif);
       endLive();
-      useStore.getState().notify(`livePhotoSaved:${fileName(saved)}`);
+      useStore.getState().notify(`${info?.platform === "macos" ? "livePhotoSaved" : "livePhotoSavedElsewhere"}:${fileName(saved)}`);
       useStore.getState().refresh();
     } catch (e) {
       useStore.getState().notify(`livePhotoFailed:${e}`);
@@ -813,8 +814,8 @@ export function Viewer() {
                   playing={playing}
                   ready={liveReady}
                   saving={saving}
-                  heif={settings.liveHeif}
-                  onHeif={(liveHeif) => useStore.getState().setSettings({ liveHeif })}
+                  heif={liveHeif}
+                  onHeif={info?.live_heif ? (liveHeif) => useStore.getState().setSettings({ liveHeif }) : undefined}
                   onChange={changeLive}
                   onPeek={peek}
                   onPlay={() => setPlaying((v) => !v)}

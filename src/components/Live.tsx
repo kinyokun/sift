@@ -90,9 +90,9 @@ type EditorProps = {
   /** Frames of the range decoded so far. */
   ready: number;
   saving: boolean;
-  /** Whether the still is saved as HEIC and not as JPEG. */
+  /** Whether the still is saved as HEIC and not as JPEG; without `onHeif` there is no choice. */
   heif: boolean;
-  onHeif: (heif: boolean) => void;
+  onHeif?: (heif: boolean) => void;
   onChange: (draft: LiveDraft) => void;
   /** A frame to look at while an end of the range is dragged; `null` when the drag ends. */
   onPeek: (index: number | null) => void;
@@ -167,16 +167,18 @@ export function LiveEditor({ frames, draft, step, playing, ready, saving, heif, 
         </div>
       </div>
       <span className="live-length">{t.liveLength(count, (count * step).toFixed(1))}</span>
-      <div className="live-format" title={t.liveFormatHint}>
-        <Segmented
-          value={heif ? "heif" : "jpg"}
-          options={[
-            { value: "jpg", label: "JPG" },
-            { value: "heif", label: "HEIF" },
-          ]}
-          onChange={(v) => onHeif(v === "heif")}
-        />
-      </div>
+      {onHeif && (
+        <div className="live-format" title={t.liveFormatHint}>
+          <Segmented
+            value={heif ? "heif" : "jpg"}
+            options={[
+              { value: "jpg", label: "JPG" },
+              { value: "heif", label: "HEIF" },
+            ]}
+            onChange={(v) => onHeif(v === "heif")}
+          />
+        </div>
+      )}
       <button className="stack-strip-action" onClick={onCancel} disabled={saving}>
         {t.cancel}
       </button>

@@ -1,19 +1,31 @@
 //! Live Photos: a still and a short QuickTime movie that belong together.
 //! What ties them is a content identifier, a UUID stored in the still (in its
 //! Apple maker note) and in the movie's metadata. Recognising a pair works
-//! everywhere; writing one needs the system's encoder (`writer`, Apple only).
+//! everywhere. Writing one needs an H.264 encoder, the system's: on Apple
+//! platforms AVFoundation, which writes both files itself (`writer`); on
+//! Windows Media Foundation (`mf`), whose movie is then made into the pair
+//! here (`mov`, `still`), in code that runs on every platform.
 //! A pair is either two files side by side (what Sift writes) or one Live
 //! Photo bundle (`.pvt`, what AirDrop between Macs sometimes leaves).
 
-use crate::Result;
+use crate::{Error, Result};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
+#[cfg(windows)]
+mod mf;
+mod mov;
+mod portable;
+mod still;
 #[cfg(target_vendor = "apple")]
 mod writer;
+
+pub use portable::from_movie;
+#[cfg(not(target_vendor = "apple"))]
+pub use portable::export;
 #[cfg(target_vendor = "apple")]
-pub use writer::*;
+pub use writer::export;
 
 const IDENTIFIER_KEY: &[u8] = b"com.apple.quicktime.content.identifier";
 /// A movie's index (`moov`) is small; anything larger is not read.
@@ -27,6 +39,104 @@ const DEFAULT_STEP: f64 = 0.1;
 /// cameras shoot (120 a second); a slow burst is sped up so that it does not
 /// turn into a slide show.
 const STEP_RANGE: (f64, f64) = (1.0 / 120.0, 0.25);
+
+/// Long edge of the movie; Live Photos from phones are about this size.
+pub const MOVIE_EDGE: u32 = 1920;
+/// A burst is at least this many frames before it is worth a movie.
+pub const MIN_FRAMES: usize = 3;
+/// More frames than this are not written (about half a minute at the slowest pace).
+pub const MAX_FRAMES: usize = 600;
+/// Whether [`export`] can make a Live Photo here: it needs the system's H.264 encoder.
+pub const EXPORT: bool = cfg!(any(target_vendor = "apple", windows));
+/// Whether the still can be a HEIC ([`Still::Heic`]): only Apple's encoder writes one.
+pub const HEIC_STILL: bool = cfg!(target_vendor = "apple");
+
+/// The file a Live Photo's still is written as.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Still {
+    /// Opens everywhere.
+    Jpeg,
+    /// What iPhones write (HEVC in HEIF): about half the size.
+    Heic,
+}
+
+impl Still {
+    /// Every extension a still may have been written with.
+    pub const EXTS: [&'static str; 2] = ["JPG", "HEIC"];
+
+    pub fn ext(self) -> &'static str {
+        Self::EXTS[self as usize]
+    }
+}
+
+/// An identifier in the form Photos writes: an upper-case version 4 UUID.
+/// It only has to be the same in both files and unlikely to occur twice.
+pub fn identifier(seed: &Path) -> String {
+    use std::hash::{BuildHasher, Hasher};
+    let mut bytes = [0u8; 16];
+    for (i, half) in bytes.chunks_mut(8).enumerate() {
+        // `RandomState` is seeded by the system for every instance.
+        let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+        h.write(seed.to_string_lossy().as_bytes());
+        h.write_usize(i);
+        h.write_u128(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos()));
+        half.copy_from_slice(&h.finish().to_le_bytes());
+    }
+    bytes[6] = (bytes[6] & 0x0F) | 0x40;
+    bytes[8] = (bytes[8] & 0x3F) | 0x80;
+    let hex: String = bytes.iter().map(|b| format!("{b:02X}")).collect();
+    format!("{}-{}-{}-{}-{}", &hex[..8], &hex[8..12], &hex[12..16], &hex[16..20], &hex[20..])
+}
+
+/// Whether a burst of this many frames can become a Live Photo.
+#[cfg(any(target_vendor = "apple", windows))]
+fn enough(frames: &[PathBuf]) -> Result<()> {
+    if frames.len() < MIN_FRAMES {
+        return Err(Error::Unsupported("a Live Photo needs a burst of at least three frames"));
+    }
+    if frames.len() > MAX_FRAMES {
+        return Err(Error::Unsupported("too many frames for one Live Photo"));
+    }
+    Ok(())
+}
+
+/// The frame as the movie shows it: upright and `width` x `height`.
+#[cfg(any(target_vendor = "apple", windows))]
+fn frame(path: &Path, size: Option<(u32, u32)>) -> Result<image::RgbImage> {
+    use image::imageops;
+    let img = crate::preview::pixels(path, MOVIE_EDGE)?;
+    // The encoder wants even sides; every frame takes the size of the first.
+    let (w, h) = size.unwrap_or((img.width() & !1, img.height() & !1));
+    if w < 2 || h < 2 {
+        return Err(Error::Malformed);
+    }
+    Ok(if (img.width(), img.height()) == (w, h) { img } else { imageops::resize(&img, w, h, imageops::FilterType::Triangle) })
+}
+
+/// Has `make` write the still and the movie of `<stem>` at the two paths it
+/// is given, then puts them in `dest` and returns where. They are put
+/// together in a hidden folder, so that half-written files are never listed,
+/// then moved out (the movie first: a movie alone is not listed). Nothing is
+/// left behind on failure, and existing files of those names are never
+/// replaced.
+fn staged(dest: &Path, stem: &str, format: Still, make: impl FnOnce(&Path, &Path) -> Result<()>) -> Result<(PathBuf, PathBuf)> {
+    let (still, movie) = (dest.join(format!("{stem}.{}", format.ext())), dest.join(format!("{stem}.MOV")));
+    if still.exists() || movie.exists() {
+        return Err(Error::Unsupported("a Live Photo of that name already exists"));
+    }
+    let staging = dest.join(format!(".{stem}.live.partial"));
+    let _ = std::fs::remove_dir_all(&staging);
+    std::fs::create_dir(&staging)?;
+    let (still_path, movie_path) = (staging.join(format!("{stem}.{}", format.ext())), staging.join(format!("{stem}.MOV")));
+    let done = make(&still_path, &movie_path).and_then(|()| Ok(std::fs::rename(&movie_path, &movie)?)).and_then(|()| {
+        std::fs::rename(&still_path, &still).inspect_err(|_| {
+            let _ = std::fs::remove_file(&movie);
+        })?;
+        Ok(())
+    });
+    let _ = std::fs::remove_dir_all(&staging);
+    done.map(|()| (still, movie))
+}
 
 /// When each frame appears, in seconds from the first, and when the movie ends.
 /// `taken` holds the capture times in milliseconds where the files record them.
@@ -83,9 +193,8 @@ fn uuid_in(data: &[u8]) -> Option<&[u8]> {
     data.windows(36).find(|w| w.iter().enumerate().all(|(i, b)| if matches!(i, 8 | 13 | 18 | 23) { *b == b'-' } else { b.is_ascii_hexdigit() }))
 }
 
-/// The content identifier of a QuickTime movie, if it has one.
-pub fn movie_identifier(path: &Path) -> Result<Option<String>> {
-    let mut file = File::open(path)?;
+/// A movie's index (`moov`), if it has one of a sensible size.
+fn index(file: &mut File) -> Result<Option<Vec<u8>>> {
     let length = file.metadata()?.len();
     let mut at = 0u64;
     // Walk the top-level boxes to the index; the media data is skipped unread.
@@ -111,13 +220,19 @@ pub fn movie_identifier(path: &Path) -> Result<Option<String>> {
             }
             let mut index = vec![0u8; (size - header) as usize];
             file.read_exact(&mut index)?;
-            let Some(key) = find(&index, IDENTIFIER_KEY) else { break };
-            // The value follows the list of keys.
-            return Ok(uuid_in(&index[key..]).map(|u| String::from_utf8_lossy(u).into_owned()));
+            return Ok(Some(index));
         }
         at += size;
     }
     Ok(None)
+}
+
+/// The content identifier of a QuickTime movie, if it has one.
+pub fn movie_identifier(path: &Path) -> Result<Option<String>> {
+    let Some(index) = index(&mut File::open(path)?)? else { return Ok(None) };
+    let Some(key) = find(&index, IDENTIFIER_KEY) else { return Ok(None) };
+    // The value follows the list of keys.
+    Ok(uuid_in(&index[key..]).map(|u| String::from_utf8_lossy(u).into_owned()))
 }
 
 /// Whether the still carries this content identifier.
@@ -163,6 +278,15 @@ mod tests {
         assert!((timeline(&fast).0[120] - 1.0).abs() < 0.01);
         // No capture times at all.
         assert!((timeline(&[None, None, None]).1 - 0.3).abs() < 1e-9);
+    }
+
+    #[test]
+    fn identifiers_look_like_uuids_and_differ() {
+        let (a, b) = (identifier(Path::new("a.jpg")), identifier(Path::new("a.jpg")));
+        assert_eq!(a.len(), 36);
+        assert_eq!(a.as_bytes()[14], b'4');
+        assert!(a.chars().all(|c| c == '-' || c.is_ascii_digit() || c.is_ascii_uppercase()));
+        assert_ne!(a, b);
     }
 
     fn boxed(kind: &[u8; 4], body: &[u8]) -> Vec<u8> {

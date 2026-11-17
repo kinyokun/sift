@@ -143,8 +143,9 @@ iOS and Android builds currently have to be built yourself; see [AGENTS.md](AGEN
 - Subfolders: a folder with no photos of its own (a card's `DCIM`, say) lists the photos in the folders inside it, at every level; a setting does the same for any folder, and the grid can be narrowed to one of them
 - Copy photos into the open folder or delete some, and the grid follows within seconds, keeping flags, selection and your place; `⌘R` / `Ctrl+R` refreshes by hand
 - Bursts and pixel-shift series fold into one stack you can step through in the viewer; Live Photos show as one photo and play, and on macOS a burst can be made into one
-- Selection: click the circle at a photo's top left, drag a box, Shift for a range, ⌘/Ctrl to add; with several selected, a bar at the bottom rates, flags or applies a look to all of them. On phones, a long press starts selecting
+- Selection: click the circle at a photo's top left, drag a box, Shift for a range, ⌘/Ctrl to add; with several selected, a bar at the bottom rates, flags, tags or applies a look to all of them. On phones, a long press starts selecting
 - Pick / reject / 0–5 stars; ratings are written into the XMP inside the file (or a `.xmp` sidecar when that is not possible), and RAW files are never rewritten
+- Tags: make a tag at any point while culling (one per person at an event, say) and put it on photos; a photo can carry several. Show only the photos with certain tags; on export every tag gets its own folder, with the files named after the tag, and a photo with several tags is in each of their folders
 - 100% view, eye close-up (people, and the eyes of cats, dogs, birds, horses, sheep, cows and other animals), AF points (Nikon, Canon, Sony, Fujifilm)
 - Compare 2, 3 or 4 photos side by side; each pane picks and steps its own photo, burst frames included; zoom and pan can be synced; compare a grid selection directly
 - Composition guides and crop preview (applied on export once confirmed)
@@ -160,7 +161,7 @@ iOS and Android builds currently have to be built yourself; see [AGENTS.md](AGEN
 
 **More**
 
-- Export: copy / rename, find RAW files by name, info frames
+- Export: copy / rename, a folder for each tag, find RAW files by name, info frames
 - LAN transfer: download originals to a phone by QR code, or send photos back to the computer
 - Every shortcut can be changed (Settings → Shortcuts)
 - In-app updates: the official macOS / Windows installers check for new versions and install them from within the app
@@ -172,6 +173,7 @@ iOS and Android builds currently have to be built yourself; see [AGENTS.md](AGEN
 - `↑` / `↓`: previous / next stack (bursts, pixel shift)
 - `P` / `X` / `U`: pick / reject / unflag
 - `0`–`5`: rating
+- `T`: tags; `Shift+1`–`Shift+9`: put on / take off tags 1–9
 - `Z`: 100% / fit
 - `E`: eye close-up
 - `F`: AF points

@@ -358,8 +358,8 @@ pub async fn live_photo_pace(app: AppHandle, frames: Vec<String>) -> CmdResult<f
 /// Writes a burst as a Live Photo (a still and a movie of the same name that
 /// belong together) next to its frames. `frames` are the displayed files in
 /// shooting order and `key` is the one that becomes the still, a HEIC with
-/// `heif` and a JPEG without. Returns the path of the still.
-#[cfg(target_vendor = "apple")]
+/// `heif` where one can be written and a JPEG otherwise. Returns the path of
+/// the still.
 pub fn live_photo(state: &AppState, frames: &[String], key: usize, heif: bool, on_frame: impl FnMut(usize)) -> CmdResult<String> {
     use sift_core::live::Still;
     let files = frames.iter().map(|p| state.check(p)).collect::<Result<Vec<_>, _>>()?;
@@ -376,14 +376,9 @@ pub fn live_photo(state: &AppState, frames: &[String], key: usize, heif: bool, o
         .unwrap_or_default();
     let taken = taken_at(state, frames);
     state.cancel.store(false, AtomicOrdering::Relaxed);
-    let format = if heif { Still::Heic } else { Still::Jpeg };
+    let format = if heif && sift_core::live::HEIC_STILL { Still::Heic } else { Still::Jpeg };
     let (still, _) = sift_core::live::export(&files, &taken, key, format, dest, &stem, &state.cancel, on_frame).map_err(err)?;
     Ok(still.to_string_lossy().into_owned())
-}
-
-#[cfg(not(target_vendor = "apple"))]
-pub fn live_photo(_: &AppState, _: &[String], _: usize, _: bool, _: impl FnMut(usize)) -> CmdResult<String> {
-    Err("Live Photos can only be made on Apple platforms".into())
 }
 
 #[tauri::command]
@@ -955,8 +950,10 @@ pub struct AppInfo {
     /// Whether Nikon's Image SDK can be used on this platform, and is installed.
     nikon_supported: bool,
     nikon_sdk: bool,
-    /// Whether a burst can be written as a Live Photo here.
+    /// Whether a burst can be written as a Live Photo here, and whether its
+    /// still can be a HEIC.
     live_photo: bool,
+    live_heif: bool,
     /// Whether photos can be saved to the system photo library (iOS).
     save_to_photos: bool,
     /// Whether this build updates itself (official desktop builds).
@@ -996,7 +993,8 @@ pub async fn app_info(app: AppHandle) -> CmdResult<AppInfo> {
             cache_bytes: crate::state::dir_size(&state.cache_dir),
             nikon_supported: sift_core::nikon::SUPPORTED,
             nikon_sdk: state.nikon().is_some(),
-            live_photo: cfg!(target_os = "macos"),
+            live_photo: cfg!(desktop) && sift_core::live::EXPORT,
+            live_heif: sift_core::live::HEIC_STILL,
             save_to_photos: crate::photos::SUPPORTED,
             updater: crate::update::ENABLED,
         })

@@ -32,6 +32,7 @@ function Toast() {
     tagOff: t.tagOff(detail ?? ""),
     tagTaken: t.tagTaken,
     livePhotoSaved: t.livePhotoSaved(detail ?? ""),
+    livePhotoSavedElsewhere: t.livePhotoSavedElsewhere(detail ?? ""),
     livePhotoFailed: `${t.livePhotoFailed}${detail ? ` · ${detail}` : ""}`,
     savingToPhotos: t.savingToPhotos,
     savedToPhotos: (([n, live]) => t.savedToPhotos(Number(n) || 0, Number(live) || 0))((detail ?? "").split(",")),

@@ -92,6 +92,8 @@ w.__TAURI_INTERNALS__ = {
       value.mobile = params.has("mobile");
       value.platform = params.get("platform") ?? value.platform;
       value.updater = params.has("update") && !value.mobile;
+      // Only Apple's systems write a HEIC still, whatever the bridge runs on.
+      value.live_heif = value.live_heif && value.platform !== "windows";
     }
     return value;
   },
