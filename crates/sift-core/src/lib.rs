@@ -21,6 +21,7 @@ pub mod jpeg;
 pub mod live;
 pub mod look;
 pub mod nikon;
+pub mod nksc;
 pub mod meta;
 pub mod preview;
 pub mod rating;

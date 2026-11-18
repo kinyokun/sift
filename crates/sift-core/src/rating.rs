@@ -70,7 +70,7 @@ fn overwrite(path: &Path, pos: u64, bytes: &[u8]) -> std::io::Result<()> {
     crate::io::sync(&f)
 }
 
-fn replace_file(path: &Path, parts: &[&[u8]]) -> std::io::Result<()> {
+pub(crate) fn replace_file(path: &Path, parts: &[&[u8]]) -> std::io::Result<()> {
     let tmp = path.with_extension(format!(
         "{}.sift-tmp",
         path.extension().and_then(|e| e.to_str()).unwrap_or("")
@@ -151,6 +151,11 @@ pub fn write(path: &Path, rating: u8) -> Result<Stored> {
     let mtime = fs::metadata(path).map(|m| filetime::FileTime::from_last_modification_time(&m))?;
     let stored = write_inner(path, rating);
     let _ = filetime::set_file_mtime(path, mtime);
+    if stored.is_ok() {
+        // The rating is in the photo by now; a sidecar of Nikon's that cannot
+        // be written is no reason to report the rating as failed.
+        let _ = crate::nksc::sync(path, rating);
+    }
     stored
 }
 
