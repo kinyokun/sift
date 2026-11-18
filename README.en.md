@@ -94,7 +94,7 @@ Press `C` to compare photos side by side: two, three or four at a time (`Shift+C
 
 Make a tag at any point while culling and put it on photos: press `T` and give it a name, then `Shift+1`–`Shift+9` put on or take off the first nine tags. A photo can carry several, one per person at an event, say, or one per use: "Client", "Instagram", "Print". The row of tags below the toolbar filters the grid: click one to see only its photos, or several at once.
 
-On export, switch on "A folder for each tag": every tag gets its own folder inside the destination, with the files named after the tag (`Client_001.JPG`), and a photo with several tags is in each of their folders; photos without a tag are left out unless you ask for them. Tags are saved with the folder's progress and are not written into the files.
+On export, switch on "A folder for each tag": every tag gets its own folder inside the destination, with the files named after the tag (`Client_001.JPG`), and a photo with several tags is in each of their folders; photos without a tag go into an "Untagged" folder, which you can switch off. Tags are saved with the folder's progress and are not written into the files.
 
 <table>
 <tr>

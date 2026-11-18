@@ -1071,16 +1071,17 @@ if (!only || only.includes("tags") || only.includes("tags-phone")) {
       console.log(`[tags] the cropped photo is one rendering in both folders: ${same(join(dest, "小明", "小明_001.jpg"), join(dest, "合影", "合影_001.jpg"))}, and not the file itself: ${!same(join(dest, "小明", "小明_001.jpg"), join(root, "a.jpg"))}; an untouched photo is a plain copy: ${same(join(dest, "小明", "小明_002.jpg"), join(root, "b.jpg"))}`);
       await page.getByRole("button", { name: "完成" }).click();
 
-      // Again with the photos that have no tag, names kept, and one tag left out.
+      // Again without the photos that have no tag, names kept, and one tag left out.
       rmSync(dest, { recursive: true, force: true });
       await page.locator(".toolbar [aria-label='导出']").click();
       await page.locator(".row", { hasText: "按标签分文件夹" }).getByRole("switch").click();
       await page.locator(".tag-folders button", { hasText: "未分类" }).click();
       await page.locator(".tag-folders button", { hasText: "合影" }).click();
       await page.locator(".row", { hasText: "重命名" }).getByRole("switch").click();
+      console.log(`[tags] 未分类 and 合影 switched off: ${JSON.stringify(await page.locator(".tag-folders button[aria-pressed=true]").allTextContents())}, notes ${JSON.stringify(await page.locator(".sheet .note").allTextContents())}`);
       await page.getByRole("button", { name: "开始" }).click();
       await page.locator(".report").waitFor({ timeout: 60000 });
-      console.log(`[tags] untagged too, 合影 left out, names kept: "${await page.locator(".report strong").textContent()}" ${JSON.stringify(tree(dest))}`);
+      console.log(`[tags] no untagged, 合影 left out, names kept: "${await page.locator(".report strong").textContent()}" ${JSON.stringify(tree(dest))}`);
       await page.getByRole("button", { name: "完成" }).click();
 
       // Framed, sorted by tag.

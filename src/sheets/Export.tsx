@@ -105,8 +105,8 @@ export function ExportSheet({ onClose }: { onClose: () => void }) {
   const tags = useStore((s) => s.tags);
   const tagged = useStore((s) => s.tagged);
   const [byTag, setByTag] = useState(false);
-  /** Tags that get no folder; photos without a tag only get one when asked for. */
-  const [left, setLeft] = useState<string[]>([UNTAGGED]);
+  /** Tags that get no folder. Photos without a tag get one of their own unless it is put here too. */
+  const [left, setLeft] = useState<string[]>([]);
   const [template, setTemplate] = byTag ? [tagTemplate, setTagTemplate] : [plainTemplate, setPlainTemplate];
   const [start, setStart] = useState(1);
   const [example, setExample] = useState("");
