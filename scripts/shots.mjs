@@ -285,6 +285,14 @@ await session("select", desktop, async (page, shot) => {
   await shot("ticked");
   await cell(9).locator(".cell-check").click();
   console.log(`[select] untick: ${await picked()} (want 3)`);
+  // A click on one of several selected photos waits to see whether it becomes a double click
+  // before it selects that photo alone; a tick made meanwhile is not undone by it.
+  const [held, other] = [await cell(1).boundingBox(), await cell(9).boundingBox()];
+  await page.mouse.click(held.x + held.width / 2, held.y + held.height / 2);
+  await page.mouse.click(other.x + 18, other.y + 18);
+  await page.waitForTimeout(600);
+  console.log(`[select] a tick right after a click inside the selection stays: ${await picked()} (want 4)`);
+  await page.mouse.click(other.x + 18, other.y + 18);
   await cell(1).dblclick();
   await page.locator(".viewer").waitFor();
   await page.keyboard.press("Escape");
@@ -317,6 +325,11 @@ await session("select", desktop, async (page, shot) => {
   await page.locator(".selection-bar .flag-button.pick").click();
   console.log(`[select] bar: ${await page.locator(".cell-stars").count()} rated, ${await page.locator(".cell-flag.pick").count()} picked (want 4, 4)`);
   await shot("bar");
+  // Nor does that click take back a move with the arrow keys.
+  await page.mouse.click(b.x + 30, a.y + 30);
+  await page.keyboard.press("ArrowRight");
+  await page.waitForTimeout(600);
+  console.log(`[select] an arrow key right after a click inside the selection: ${await picked()}, on cell ${await page.locator(".cell").evaluateAll((cells) => cells.findIndex((c) => c.classList.contains("selected")) + 1)} (want 1 (no bar), on cell 5)`);
   // Dragging to the bottom edge scrolls and keeps selecting.
   const view = page.viewportSize();
   await page.mouse.move(a.x - 8, a.y + 20);

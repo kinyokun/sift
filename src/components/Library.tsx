@@ -405,7 +405,9 @@ export function Library() {
       };
       // A click on one of several selected photos may be the first half of a
       // double click that opens it; the selection is kept until that is ruled out.
-      if (st.selection.length > 1 && st.selection.includes(id)) collapse.current = setTimeout(only, DOUBLE_CLICK_MS);
+      // What is ticked or moved to meanwhile is meant, and is not taken back.
+      const { selection } = st;
+      if (selection.length > 1 && selection.includes(id)) collapse.current = setTimeout(() => useStore.getState().selection === selection && only(), DOUBLE_CLICK_MS);
       else only();
     },
     [selecting, toggle, extendTo],
