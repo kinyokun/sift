@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-11-19
+
 ### 新增
 
 - 删除照片：有用户希望在 Sift 里直接删掉不要的照片。删除的照片放进系统的废纸篓（Windows 上是回收站），删错了可以从那里拿回来。在列表里选中照片后按 `⌘⌫`（Windows 上是 `Delete`，可在“设置 → 快捷键”里改），或点底部操作栏的垃圾桶按钮、“更多”菜单里的“删除选中的照片”；查看页底部的工具栏也有删除按钮，删掉后接着显示下一张。只删一张时直接放进废纸篓，一次删几张会先问一下。RAW+JPG 一对、实况照片的视频、照片的 `.xmp` 评级文件会一起删掉；尼康工坊在 `NKSC_PARAM` 里的文件保留，照片从废纸篓里放回来后在尼康工坊里做的调整还在。文件夹不会被删
@@ -161,7 +163,8 @@
 - 导出（复制 / 重命名 / 找回 RAW / 参数相框）、局域网传输、自定义快捷键
 - 中文 / 英文界面
 
-[Unreleased]: https://github.com/kinyokun/sift/compare/v0.4.3...HEAD
+[Unreleased]: https://github.com/kinyokun/sift/compare/v0.4.4...HEAD
+[0.4.4]: https://github.com/kinyokun/sift/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/kinyokun/sift/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/kinyokun/sift/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/kinyokun/sift/compare/v0.4.0...v0.4.1
