@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-11-18
+
 ### 新增
 
 - 查看页里鼠标怎么用可以自己定（“设置 → 鼠标”）：有用户希望右手用滚轮翻页、左手打标记。滚轮可以选“缩放”“切换照片”或“移动画面”：选“切换照片”时滚一格换一张，快速滚动时每一格都算数，按住 Ctrl（Mac 上是 ⌘）滚动仍然是缩放。双击可以选“放大 / 还原”或“返回列表”。不改设置的话和以前一样：滚轮在 Windows 上缩放、在 Mac 上移动画面，双击放大。原来的“滚轮直接缩放”开关并进了这一项，已经改过的设置会保留
@@ -147,7 +149,8 @@
 - 导出（复制 / 重命名 / 找回 RAW / 参数相框）、局域网传输、自定义快捷键
 - 中文 / 英文界面
 
-[Unreleased]: https://github.com/kinyokun/sift/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/kinyokun/sift/compare/v0.4.3...HEAD
+[0.4.3]: https://github.com/kinyokun/sift/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/kinyokun/sift/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/kinyokun/sift/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/kinyokun/sift/compare/v0.3.4...v0.4.0
