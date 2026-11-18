@@ -193,6 +193,16 @@ impl Engine {
         }
     }
 
+    /// Lets go of `photos`: a helper keeps the photo it developed last open,
+    /// and Windows does not move or delete a file that is. The helper starts
+    /// again when it is next needed.
+    pub fn release(&self, photos: &[PathBuf]) {
+        #[cfg(any(target_os = "macos", windows))]
+        self.pool.release(photos);
+        #[cfg(not(any(target_os = "macos", windows)))]
+        let _ = photos;
+    }
+
     /// Starts the helper and lets the SDK initialise; fails if it cannot.
     pub fn check(&self) -> Result<()> {
         #[cfg(any(target_os = "macos", windows))]
@@ -535,6 +545,13 @@ mod client {
                 }
                 helpers = self.freed.wait(helpers).unwrap();
             }
+        }
+    }
+
+    impl Pool {
+        /// Stops the idle helpers that have one of `photos` open.
+        pub fn release(&self, photos: &[PathBuf]) {
+            self.helpers.lock().unwrap().idle.retain(|h| !h.photo.as_ref().is_some_and(|open| photos.contains(open)));
         }
     }
 

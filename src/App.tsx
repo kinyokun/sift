@@ -6,6 +6,7 @@ import { Welcome } from "./components/Welcome";
 import { useT } from "./lib/i18n";
 import { actionFor, isTyping } from "./lib/shortcuts";
 import { useStore } from "./lib/store";
+import { DeleteSheet } from "./sheets/Delete";
 import { ExportSheet, FindRawSheet, TransferSheet } from "./sheets/Export";
 import { HelpSheet, SettingsSheet } from "./sheets/Settings";
 import { UpdateSheet } from "./sheets/Update";
@@ -14,6 +15,7 @@ import { UpdateSheet } from "./sheets/Update";
 function Toast() {
   const t = useT();
   const toast = useStore((s) => s.toast);
+  const bin = t.trashName(useStore((s) => s.info?.platform === "macos"));
   if (!toast) return null;
   const [code, detail] = toast.text.split(/:(.*)/s);
   const known: Record<string, string> = {
@@ -42,6 +44,8 @@ function Toast() {
     refreshed: (([added, removed]) => t.refreshed(Number(added) || 0, Number(removed) || 0))((detail ?? "").split(",")),
     refreshedSame: t.refreshedSame,
     photoGone: t.photoGone,
+    deleted: (([n, forGood]) => (forGood === "1" ? t.deletedForGood(Number(n) || 0) : t.deleted(Number(n) || 0, bin)))((detail ?? "").split(",")),
+    deleteFailed: (([n, why]) => `${t.deleteFailed(Number(n) || 0)}${why ? ` · ${why}` : ""}`)((detail ?? "").split(/,(.*)/s)),
     subfoldersShown: t.subfoldersShown(Number(detail) || 0),
   };
   return (
@@ -103,6 +107,7 @@ export function App() {
       {sheet === "settings" && <SettingsSheet onClose={close} />}
       {sheet === "help" && <HelpSheet onClose={close} />}
       {sheet === "update" && <UpdateSheet onClose={close} />}
+      {sheet === "delete" && <DeleteSheet />}
       <Toast />
     </>
   );

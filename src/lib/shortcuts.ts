@@ -7,6 +7,7 @@ export const ACTIONS = [
   "pick",
   "reject",
   "unflag",
+  "delete",
   "rate0",
   "rate1",
   "rate2",
@@ -49,6 +50,8 @@ export const RATE_ACTIONS: Action[] = ["rate0", "rate1", "rate2", "rate3", "rate
 /** The first tags of a folder, in the order they were made, each have a key of their own. */
 export const TAG_ACTIONS: Action[] = ["tag1", "tag2", "tag3", "tag4", "tag5", "tag6", "tag7", "tag8", "tag9"];
 
+const APPLE = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+
 /** A binding is modifiers plus one key, such as `Alt+D`, `ArrowLeft` or `Space`.
  * `Mod` is Command on Apple devices and Ctrl elsewhere. An empty string means unassigned. */
 export const DEFAULT_KEYS: Record<Action, string> = {
@@ -59,6 +62,8 @@ export const DEFAULT_KEYS: Record<Action, string> = {
   pick: "P",
   reject: "X",
   unflag: "U",
+  // What moves a file to the trash in Finder and in Explorer.
+  delete: APPLE ? "Mod+Backspace" : "Delete",
   rate0: "0",
   rate1: "1",
   rate2: "2",
@@ -100,7 +105,6 @@ export const DEFAULT_KEYS: Record<Action, string> = {
 };
 
 const MODIFIER_KEYS = ["Shift", "Control", "Alt", "Meta"];
-const APPLE = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 
 /** Saved bindings win; a default that would collide with one of them is left
  * unassigned instead, so no key ever triggers two actions. */

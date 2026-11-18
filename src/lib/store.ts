@@ -19,7 +19,11 @@ import { DEFAULT_KEYS, resolveKeys, type Action } from "./shortcuts";
 
 export type FlagFilter = "all" | "picked" | "unflagged" | "rejected";
 export type SortBy = "name" | "time" | "rating" | "size";
-export type SheetName = "export" | "findraw" | "transfer" | "settings" | "help" | "update";
+export type SheetName = "export" | "findraw" | "transfer" | "settings" | "help" | "update" | "delete";
+
+/** What the delete sheet asks about: photos by id. `forGood`: they would not go into a trash. `why`: the
+ * trash did not take them, and this is what the system said. `busy` while they are being deleted. */
+export type DeleteRequest = { ids: string[]; forGood: boolean; why?: string; busy?: boolean };
 
 /** Where the updater stands. `offer` is kept for as long as a newer release is known;
  * "failed" without one means the check failed, with one the download or installation. */
@@ -82,7 +86,7 @@ export type Settings = {
 
 const SETTINGS_KEY = "sift.settings";
 const MAX_RECENTS = 6;
-const KEYS_VERSION = 7;
+const KEYS_VERSION = 8;
 /** The colours a tag can have; a tag keeps its place in this list. */
 export const TAG_COLORS = ["#ff453a", "#ff9f0a", "#ffd60a", "#30d158", "#64d2ff", "#0a84ff", "#bf5af2", "#ff6eb4"];
 const MAX_TAG_NAME = 40;
@@ -129,7 +133,7 @@ function loadSettings(): Settings {
   try {
     const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
     let keys = { ...DEFAULT_KEYS };
-    // Versions 4 to 7 only added actions; bindings saved since version 3 carry over.
+    // Versions 4 to 8 only added actions; bindings saved since version 3 carry over.
     if (saved.keysVersion >= 3 && saved.keysVersion <= KEYS_VERSION) keys = resolveKeys(saved.keys || {});
     else if (saved.keysVersion === 2) {
       // Version 2 put "original" on the letter O, which reads like the 0 of
@@ -192,6 +196,8 @@ type State = {
    * `compare` holds the photos it opened comparing, if it did. */
   viewer: { ids: string[]; index: number; compare?: string[] } | null;
   sheet: SheetName | null;
+  /** The photos the delete sheet is asking about. */
+  doomed: DeleteRequest | null;
   toast: Toast | null;
   update: UpdateState;
 
@@ -215,6 +221,12 @@ type State = {
   setViewerIndex: (index: number) => void;
   rate: (ids: string[], rating: number) => Promise<void>;
   flag: (ids: string[], value: number) => void;
+  /** Deletes photos, by id. One goes into the system's trash at once; several are asked about first (`ask`
+   * says so either way), and so is everything where there is no trash to take it back out of. */
+  deletePhotos: (ids: string[], ask?: boolean) => void;
+  /** Deletes what the delete sheet asked about. */
+  confirmDelete: () => Promise<void>;
+  cancelDelete: () => void;
   /** Makes a tag, or finds the one of that name; resolves to its id, `null` for a name with nothing in it. */
   addTag: (name: string) => string | null;
   /** False when the name is empty or another tag has it. */
@@ -602,6 +614,35 @@ export const useStore = create<State>((set, get) => {
     if (manual) void readBriefs(folder, items.filter((it) => !known.has(it.id)), true);
   };
 
+  /** Deletes photos and takes them out of what is shown. What the trash does not take is asked about again. */
+  const erase = async (ids: string[], forGood: boolean) => {
+    const { folder, items } = get();
+    const wanted = new Set(ids);
+    const shots = items.filter((it) => wanted.has(it.id));
+    if (!folder || !shots.length) return;
+    // A Live Photo's movie goes with its still.
+    const files = shots.map((it) => (it.live ? [...it.paths, it.live] : it.paths));
+    const done = await api.deletePhotos(files, forGood).catch((e) => ({ failed: shots.map((_, i) => i), reason: String(e) }));
+    if (get().folder !== folder) return;
+    const stuck = new Set(done.failed.map((i) => shots[i]?.id));
+    const gone = new Set(shots.filter((it) => !stuck.has(it.id)).map((it) => it.id));
+    if (gone.size) {
+      // In turn with the refreshes: one that listed the folder before the photos went would bring them back.
+      const run = refreshing.then(() => void (get().folder === folder && adopt(get().items.filter((it) => !gone.has(it.id)))));
+      refreshing = run.catch(() => {});
+      await run;
+      if (get().folder !== folder) return;
+      void group(folder, get().items);
+    }
+    if (!stuck.size) get().notify(`deleted:${gone.size},${forGood ? 1 : 0}`);
+    else if (forGood) get().notify(`deleteFailed:${stuck.size},${done.reason ?? ""}`);
+    else {
+      // A network share has no trash, for one. Finder asks the same question then.
+      set({ doomed: { ids: [...stuck] as string[], forGood: true, why: done.reason ?? "" } });
+      get().setSheet("delete");
+    }
+  };
+
   /** The grid cell a photo is in. */
   const cellOf = (id: string): string => visibleEntries(get()).find((e) => e.members.some((m) => m.id === id))?.id ?? id;
 
@@ -641,6 +682,7 @@ export const useStore = create<State>((set, get) => {
     cursor: null,
     viewer: null,
     sheet: null,
+    doomed: null,
     toast: null,
     update: NO_UPDATE,
 
@@ -822,6 +864,36 @@ export const useStore = create<State>((set, get) => {
       }
       set({ flags: next });
       save();
+    },
+
+    deletePhotos: (ids, ask) => {
+      const { info, items, doomed } = get();
+      if (doomed?.busy) return;
+      const known = new Set(items.map((it) => it.id));
+      ids = ids.filter((id) => known.has(id));
+      if (!ids.length) return get().notify("selectFirst");
+      const forGood = !info?.trash;
+      if (!forGood && !(ask ?? ids.length > 1)) return void erase(ids, false);
+      set({ doomed: { ids, forGood } });
+      get().setSheet("delete");
+    },
+
+    confirmDelete: async () => {
+      const asked = get().doomed;
+      if (!asked || asked.busy) return;
+      set({ doomed: { ...asked, busy: true } });
+      await erase(asked.ids, asked.forGood);
+      // Unless it has asked the next question by now.
+      if (get().doomed?.busy) {
+        set({ doomed: null });
+        if (get().sheet === "delete") get().setSheet(null);
+      }
+    },
+
+    cancelDelete: () => {
+      if (get().doomed?.busy) return;
+      set({ doomed: null });
+      if (get().sheet === "delete") get().setSheet(null);
     },
 
     addTag: (name) => {

@@ -25,6 +25,7 @@ pub mod nksc;
 pub mod meta;
 pub mod preview;
 pub mod rating;
+pub mod remove;
 pub mod render;
 pub mod stack;
 pub mod tiff;

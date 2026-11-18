@@ -327,6 +327,10 @@ button.primary:disabled {
   opacity: 0.4;
 }
 
+button.primary.danger {
+  background: var(--red);
+}
+
 button.primary.large {
   font-size: 16px;
   padding: 12px 30px;
@@ -1888,6 +1892,25 @@ input.text {
 
 .note.lead {
   font-size: 13px;
+}
+
+.delete-ask {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.delete-ask .lead {
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 550;
+  overflow-wrap: anywhere;
+}
+
+.sheet > footer .spinner {
+  width: 18px;
+  height: 18px;
+  border-width: 2px;
 }
 
 .note.bad,

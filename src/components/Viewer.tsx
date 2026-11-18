@@ -693,6 +693,10 @@ export function Viewer() {
           return setFlag(-1);
         case "unflag":
           return st.flag([current.id], 0);
+        case "delete":
+          // Not out from under a crop or a Live Photo in the making.
+          if (!crop && !live) st.deletePhotos([current.id]);
+          return;
         case "eye":
           return toggleEye();
         case "zoom":
@@ -1027,6 +1031,7 @@ export function Viewer() {
             </button>
           )}
           {info?.save_to_photos && <IconButton icon="save" label={t.saveToPhotos} onClick={() => useStore.getState().saveToPhotos([current])} className="on-dark" />}
+          <IconButton icon="trash" label={t.delete} disabled={!!crop || !!live} onClick={() => useStore.getState().deletePhotos([current.id])} className="on-dark" />
           <IconButton icon="info" label={t.info} active={showInfo} onClick={toggleInfo} className="on-dark" />
         </div>
       </header>

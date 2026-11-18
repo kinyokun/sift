@@ -77,6 +77,7 @@ pub fn run() {
             commands::live_photo_pace,
             commands::save_live_photo,
             commands::set_rating,
+            commands::delete_photos,
             commands::locate_eyes,
             commands::develop_raw,
             commands::cancel_task,

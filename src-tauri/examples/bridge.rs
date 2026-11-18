@@ -34,6 +34,7 @@ fn run(state: &AppState, cmd: &str, args: &Value) -> Result<Response, String> {
             "library": null, "cache_bytes": sift_lib::state::dir_size(&state.cache_dir),
             "nikon_supported": sift_core::nikon::SUPPORTED, "nikon_sdk": state.nikon().is_some(),
             "live_photo": sift_core::live::EXPORT, "save_to_photos": false, "updater": false,
+            "trash": sift_core::remove::TRASH,
         })),
         "scan_folder" => {
             let dir = PathBuf::from(arg::<String>(args, "path")?);
@@ -50,6 +51,7 @@ fn run(state: &AppState, cmd: &str, args: &Value) -> Result<Response, String> {
         "live_photo_pace" => json(&commands::live_pace(state, &arg::<Vec<String>>(args, "frames")?)),
         "save_live_photo" => json(&commands::live_photo(state, &arg::<Vec<String>>(args, "frames")?, arg(args, "key")?, arg::<Option<bool>>(args, "heif")?.unwrap_or(false), |_| {})?),
         "set_rating" => json(&commands::rate(state, &arg::<Vec<String>>(args, "paths")?, arg(args, "rating")?)?),
+        "delete_photos" => json(&commands::delete_shots(state, &arg::<Vec<Vec<String>>>(args, "shots")?, arg(args, "forGood")?)?),
         "locate_eyes" => json(&commands::eyes_of(state, arg(args, "path")?, &arg::<Vec<sift_core::af::AfBox>>(args, "af")?)?),
         "load_session" => ok(commands::session_of(state, &arg::<String>(args, "folder")?)),
         "save_session" => {

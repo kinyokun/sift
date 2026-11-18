@@ -76,6 +76,8 @@ export type AppInfo = {
   save_to_photos?: boolean;
   /** This build updates itself (official macOS and Windows builds). */
   updater?: boolean;
+  /** Deleted photos go into the system's trash (macOS and Windows); elsewhere they are deleted for good. */
+  trash?: boolean;
 };
 
 /** A newer release; `notes` is its section of CHANGELOG.md. */
@@ -184,6 +186,9 @@ export const api = {
   /** Writes `frames` as a Live Photo next to them (a still and a MOV of the same name), `key` being the still, a HEIC with `heif` and a JPEG without; resolves to the still's path. */
   saveLivePhoto: (frames: string[], key: number, heif: boolean) => invoke<string>("save_live_photo", { frames, key, heif }),
   setRating: (paths: string[], rating: number) => invoke<"embedded" | "sidecar">("set_rating", { paths, rating }),
+  /** Deletes shots, each given as its files: into the trash, or with `forGood` at once. `failed` are the shots,
+   * by their place in the list, that are still there, and `reason` is why the first of them is. */
+  deletePhotos: (shots: string[][], forGood: boolean) => invoke<{ failed: number[]; reason: string | null }>("delete_photos", { shots, forGood }),
   locateEyes: (path: string, af: AfBox[]) => invoke<EyeTarget | null>("locate_eyes", { path, af }),
   developRaw: (path: string) => invoke<void>("develop_raw", { path }),
   cancelTask: () => invoke<void>("cancel_task"),

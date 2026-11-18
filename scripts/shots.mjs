@@ -8,7 +8,7 @@
 //
 // BRIDGE and DEV name the two servers when they are not on their usual ports.
 import { chromium } from "playwright-core";
-import { copyFileSync, mkdirSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -1431,5 +1431,185 @@ if (!only || only.includes("tags") || only.includes("tags-phone")) {
     rmSync(dest, { recursive: true, force: true });
   }
 }
-await browser.close();
+// Deleting photos: one at once, several after a question, the rejects in one go,
+// from the viewer, and where there is no trash. The sessions build their own
+// folder from the first JPEGs and the first RAW of the one given, so nothing
+// of it is deleted. `delete` uses the real trash: the copies it deletes are
+// left in the trash of the volume the temp folder is on (`TMPDIR`).
+for (const [name, view, query] of [
+  ["delete", desktop, ""],
+  ["delete-none", { ...desktop, scheme: "light", platform: "linux" }, "&trash=none"],
+  ["delete-refused", desktop, "&trash=refuse"],
+  ["delete-phone", phone, ""],
+]) {
+  if (only && !only.includes(name)) continue;
+  const files = readdirSync(folder).sort();
+  const jpegs = files.filter((f) => /\.jpe?g$/i.test(f));
+  const raw = files.find((f) => /\.(nef|arw|cr2|cr3|raf|dng)$/i.test(f));
+  if (jpegs.length < 9 || !raw) {
+    console.log(`[${name}] skipped: needs a folder with 9 JPEGs and a RAW`);
+    continue;
+  }
+  const root = join(tmpdir(), `sift-${name}-${process.pid}`);
+  rmSync(root, { recursive: true, force: true });
+  mkdirSync(root, { recursive: true });
+  "abcdefgh".split("").forEach((letter, n) => copyFileSync(join(folder, jpegs[n]), join(root, `${letter}.jpg`)));
+  // A pair with a rating sidecar, which goes with it.
+  const rawName = `i.${raw.split(".").pop()}`;
+  copyFileSync(join(folder, jpegs[8]), join(root, "i.jpg"));
+  copyFileSync(join(folder, raw), join(root, rawName));
+  writeFileSync(join(root, "i.xmp"), "<x:xmpmeta xmlns:x='adobe:ns:meta/'/>");
+  const left = () => readdirSync(root).sort().join(" ");
+  await session(name, { ...view, pick: root, query }, async (page, shot) => {
+    const photos = async () => Number((await page.locator(".toolbar-title span").textContent()).match(/(\d+) 张/)?.[1] ?? -1);
+    const toast = async () => ((await page.locator(".toast").count()) ? await page.locator(".toast").textContent() : "(none)");
+    const until = async (want) => {
+      const t0 = Date.now();
+      while ((await photos()) !== want && Date.now() - t0 < 6000) await page.waitForTimeout(50);
+      return `${await photos()} photos after ${Date.now() - t0} ms (want ${want})`;
+    };
+    const sheet = page.locator(".sheet");
+    const asked = async () => ((await sheet.count()) ? `"${(await sheet.locator(".sheet-body").innerText()).replace(/\s+/g, " ")}" [${(await sheet.locator("footer button").allTextContents()).join(" | ")}]` : "(no question)");
+    await openLibrary(page);
+    const total = await photos();
+    console.log(`[${name}] opened: ${total} photos (want 9), trash: ${(await (await fetch(`${bridge}/invoke/app_info`, { method: "POST", body: "{}" })).json()).trash}`);
+
+    if (name === "delete-phone") {
+      // No trash on a phone: a question first, and the bar has room for its button.
+      await page.locator('[aria-label="更多"]').tap();
+      await page.getByRole("menuitem", { name: "选择照片" }).tap();
+      await page.waitForTimeout(300);
+      // The first photo is selected from the start.
+      await page.locator(".cell").nth(1).tap();
+      const bar = await page.locator(".selection-bar").boundingBox();
+      const reach = await page.evaluate(() => Math.max(...[...document.querySelector(".selection-bar").children].map((el) => el.getBoundingClientRect().right)));
+      console.log(`[${name}] selection bar ${Math.round(bar.x)}..${Math.round(bar.x + bar.width)}, its buttons end at ${Math.round(reach)} of 390`);
+      await shot("bar");
+      await page.locator('.selection-bar [aria-label="删除"]').tap();
+      await sheet.waitFor();
+      console.log(`[${name}] two selected, delete: ${await asked()}`);
+      await shot("ask");
+      await sheet.locator("footer button.primary").tap();
+      console.log(`[${name}] confirmed: ${await until(total - 2)}, toast "${await toast()}", left: ${left()}`);
+      await page.locator(".cell").nth(0).tap({ timeout: 2000 }).catch(() => {});
+      await shot("after");
+      return;
+    }
+
+    // One photo in the grid.
+    await page.locator(".cell").nth(0).click();
+    await page.keyboard.press("Meta+Backspace");
+    if (name === "delete") {
+      const went = await until(total - 1);
+      await page.locator(".toast").waitFor({ timeout: 2000 }).catch(() => {});
+      console.log(`[${name}] one photo, the key: ${went}, ${await asked()}, toast "${await toast()}", ${await page.locator(".cell.selected").count()} selected (want 1)`);
+      console.log(`[${name}] left: ${left()}`);
+      await shot("one-gone");
+    } else {
+      await sheet.waitFor();
+      console.log(`[${name}] one photo, the key: ${await asked()}, still ${await photos()} photos`);
+      await shot("ask-one");
+      if (name === "delete-none") {
+        // Enter is not "yes" to what cannot be taken back.
+        await page.keyboard.press("Enter");
+        await page.waitForTimeout(300);
+        console.log(`[${name}] Enter: sheet ${await sheet.count()} (want 0), ${await photos()} photos (want ${total}), left: ${left()}`);
+        await page.keyboard.press("Meta+Backspace");
+        await sheet.waitFor();
+      }
+      await sheet.locator("footer button.primary").click();
+      console.log(`[${name}] confirmed: ${await until(total - 1)}, toast "${await toast()}", left: ${left()}`);
+      await shot("one-gone");
+      if (name === "delete-refused") {
+        // Several: the question whether to move them to the trash, then the one about what the trash refused.
+        await page.keyboard.press("Meta+A");
+        await page.keyboard.press("Meta+Backspace");
+        await sheet.waitFor();
+        console.log(`[${name}] all of them, the key: ${await asked()}`);
+        await page.keyboard.press("Enter");
+        await page.waitForTimeout(500);
+        console.log(`[${name}] Enter, and the trash refuses: ${await asked()}, ${await photos()} photos (want ${total - 1})`);
+        await shot("refused");
+        await page.keyboard.press("Enter");
+        await page.waitForTimeout(300);
+        console.log(`[${name}] Enter again: sheet ${await sheet.count()} (want 0), ${await photos()} photos (want ${total - 1}), left: ${left()}`);
+        await page.keyboard.press("Meta+Backspace");
+        await sheet.waitFor();
+        await page.keyboard.press("Enter");
+        await page.waitForTimeout(500);
+        await sheet.locator("footer button.primary").click();
+        console.log(`[${name}] asked twice and answered with the button: ${await until(0)}, toast "${await toast()}", left: "${left()}"`);
+        return;
+      }
+    }
+
+    // The rejects: all of them selected, a question, and Escape leaves them.
+    for (const i of [0, 1, 2]) {
+      await page.locator(".cell").nth(i).click();
+      await page.keyboard.press("X");
+    }
+    await page.getByRole("tab", { name: /排除/ }).click();
+    await page.keyboard.press("Meta+A");
+    console.log(`[${name}] rejects: ${await page.locator(".cell").count()} cells, bar "${await page.locator(".selection-bar strong").textContent()}"`);
+    await page.locator('.selection-bar [aria-label="删除"]').click();
+    await sheet.waitFor();
+    console.log(`[${name}] delete from the bar: ${await asked()}`);
+    await shot("ask-several");
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(300);
+    console.log(`[${name}] Escape: sheet ${await sheet.count()} (want 0), ${await photos()} photos (want 3), left: ${left()}`);
+    await page.keyboard.press("Meta+Backspace");
+    await sheet.waitFor();
+    if (name === "delete") await page.keyboard.press("Enter");
+    else await sheet.locator("footer button.primary").click();
+    console.log(`[${name}] the key, then ${name === "delete" ? "Enter" : "the button"}: ${await until(0)}, toast "${await toast()}"`);
+    console.log(`[${name}] left: ${left()}`);
+    await shot("rejects-gone");
+    await page.getByRole("tab", { name: "全部" }).click();
+    console.log(`[${name}] all: ${await photos()} photos (want ${total - 4})`);
+
+    // The rejects again, from the menu, without selecting them. One is asked about by name.
+    await page.locator(".cell").nth(1).click();
+    await page.keyboard.press("X");
+    await page.locator('[aria-label="更多"]').click();
+    console.log(`[${name}] more menu: ${JSON.stringify((await page.getByRole("menuitem").allTextContents()).filter((label) => label.includes("删除")))}`);
+    await shot("menu");
+    await page.getByRole("menuitem", { name: /删除排除的/ }).click();
+    await sheet.waitFor();
+    console.log(`[${name}] rejects from the menu: ${await asked()}`);
+    await sheet.locator("footer button.primary").click();
+    console.log(`[${name}] confirmed: ${await until(total - 5)}, toast "${await toast()}", left: ${left()}`);
+
+    // In the viewer: the pair on screen goes with its RAW and its sidecar, and the next photo comes up.
+    await page.locator(".cell").last().dblclick();
+    await page.locator(".tier.full.ready").waitFor({ timeout: 20000 });
+    const title = () => page.locator(".viewer-title strong").textContent();
+    const place = () => page.locator(".viewer-title span").first().textContent();
+    const before = `${await title()} (${(await place()).trim().split(/\s/).slice(0, 3).join(" ")})`;
+    await page.keyboard.press("Meta+Backspace");
+    if (name !== "delete") await sheet.locator("footer button.primary").click();
+    await page.waitForTimeout(700);
+    console.log(`[${name}] viewer on ${before}, the key: now "${await title()}" (${(await place()).trim().split(/\s/).slice(0, 3).join(" ")}), toast "${await toast()}"`);
+    console.log(`[${name}] left: ${left()}`);
+    await shot("viewer");
+    // The button, and a file that went away on its own a moment before.
+    const doomed = await title();
+    rmSync(join(root, doomed));
+    await page.locator('.viewer-bar [aria-label="删除"]').click();
+    if (name !== "delete") await sheet.locator("footer button.primary").click();
+    await page.waitForTimeout(700);
+    console.log(`[${name}] the button on ${doomed}, already gone from the disk: now "${await title()}", toast "${await toast()}"`);
+    await page.keyboard.press("Escape");
+    console.log(`[${name}] back in the grid: ${await photos()} photos (want ${total - 7}), ${await page.locator(".cell.selected").count()} selected (want 1), left: ${left()}`);
+    // The last ones, until the folder is empty.
+    await page.keyboard.press("Meta+A");
+    await page.keyboard.press("Meta+Backspace");
+    await sheet.waitFor();
+    await sheet.locator("footer button.primary").click();
+    await page.locator(".empty").waitFor({ timeout: 5000 }).catch(() => {});
+    console.log(`[${name}] the rest: "${(await page.locator(".empty").count()) ? await page.locator(".empty p").textContent() : "(not empty)"}", left: "${left()}"`);
+    await shot("empty");
+  });
+  rmSync(root, { recursive: true, force: true });
+}await browser.close();
 console.log(`screenshots in ${out}`);

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use sift_core::af::AfBox;
 use sift_core::export::{self, CopyReport, Progress};
 use sift_core::frame::FrameOptions;
-use sift_core::{face, formats, frame, meta, nksc, preview, rating, stack};
+use sift_core::{face, formats, frame, meta, nksc, preview, rating, remove, stack};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fs;
@@ -419,6 +419,24 @@ pub fn rate(state: &AppState, paths: &[String], rating: u8) -> CmdResult<rating:
 #[tauri::command]
 pub async fn set_rating(app: AppHandle, paths: Vec<String>, rating: u8) -> CmdResult<rating::Stored> {
     blocking(move || rate(&app.state::<AppState>(), &paths, rating)).await
+}
+
+/// Deletes shots, each given as its files (a Live Photo's movie among them):
+/// into the system's trash, or with `for_good` at once and without a way back.
+pub fn delete_shots(state: &AppState, shots: &[Vec<String>], for_good: bool) -> CmdResult<remove::Outcome> {
+    let shots = checked_shots(state, shots)?;
+    // Windows does not move a file that is open, and Nikon's helper keeps the photo it developed last.
+    if cfg!(windows) {
+        if let Some(engine) = state.nikon() {
+            engine.release(&shots.concat());
+        }
+    }
+    Ok(remove::remove(&shots, for_good))
+}
+
+#[tauri::command]
+pub async fn delete_photos(app: AppHandle, shots: Vec<Vec<String>>, for_good: bool) -> CmdResult<remove::Outcome> {
+    blocking(move || delete_shots(&app.state::<AppState>(), &shots, for_good)).await
 }
 
 #[derive(Serialize, Clone, Copy)]
@@ -965,6 +983,8 @@ pub struct AppInfo {
     save_to_photos: bool,
     /// Whether this build updates itself (official desktop builds).
     updater: bool,
+    /// Whether deleted photos go into the system's trash; without one they are deleted for good.
+    trash: bool,
 }
 
 pub fn library_dir(app: &AppHandle) -> Option<PathBuf> {
@@ -1003,6 +1023,7 @@ pub async fn app_info(app: AppHandle) -> CmdResult<AppInfo> {
             live_photo: cfg!(desktop) && sift_core::live::EXPORT,
             save_to_photos: crate::photos::SUPPORTED,
             updater: crate::update::ENABLED,
+            trash: cfg!(desktop) && remove::TRASH,
         })
     })
     .await

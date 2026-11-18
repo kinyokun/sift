@@ -6,6 +6,9 @@
 // `&update=0.4.0` offers that version, `&update=none` finds nothing and
 // `&update=fail` fails the check; `&install=fail` breaks the download part
 // way and `&install=stall` leaves it there.
+//
+// Deleting: `&trash=none` plays a platform without a trash, and with
+// `&trash=refuse` the trash takes nothing, as on a network share.
 const params = new URLSearchParams(location.search);
 const base = params.get("bridge")!;
 let callbacks = 0;
@@ -84,6 +87,10 @@ w.__TAURI_INTERNALS__ = {
     }
     if (cmd === "update_install") return fakeInstall();
     if (cmd === "update_cancel") return void (cancelled = true);
+    if (cmd === "delete_photos" && params.get("trash") === "refuse") {
+      const { shots, forGood } = args as { shots: string[][]; forGood: boolean };
+      if (!forGood) return { failed: shots.map((_, i) => i), reason: "The volume does not have a trash." };
+    }
     const res = await fetch(`${base}/invoke/${cmd}`, { method: "POST", body: JSON.stringify(args ?? {}) });
     if (!res.ok) throw await res.text();
     if (!(res.headers.get("content-type") || "").includes("json")) return res.arrayBuffer();
@@ -92,6 +99,7 @@ w.__TAURI_INTERNALS__ = {
       value.mobile = params.has("mobile");
       value.platform = params.get("platform") ?? value.platform;
       value.updater = params.has("update") && !value.mobile;
+      if (value.mobile || params.get("trash") === "none") value.trash = false;
     }
     return value;
   },

@@ -554,6 +554,11 @@ export function Library() {
         anchor.current = { id: null, base: [] };
         return st.select(st.cursor && !selecting ? [st.cursor] : [], st.cursor);
       }
+      const action = actionFor(st.settings.keys, e);
+      if (action === "delete") {
+        e.preventDefault();
+        return st.deletePhotos(frames(st.selection.length ? st.selection : st.cursor ? [st.cursor] : []).map((m) => m.id));
+      }
       if (mod || !items.length) return;
       const at = indexOf(st.cursor);
       const move = (delta: number) => {
@@ -582,7 +587,6 @@ export function Library() {
           }
           return;
       }
-      const action = actionFor(st.settings.keys, e);
       // The tags open from the bar for several photos while it is up, else from the toolbar.
       const openTags = () => (e.preventDefault(), (barTags.current ?? toolbarTags.current)?.open());
       if (action === "tags") return openTags();
@@ -620,6 +624,8 @@ export function Library() {
     }
     return { picked, rejected };
   }, [s.items, s.flags, s.subfolder]);
+  /** Every rejected photo of the folder the grid is narrowed to, whatever else is filtered out. */
+  const deleteRejected = () => act.deletePhotos(s.items.filter((it) => (s.subfolder == null || it.dir === s.subfolder) && flagOf(s.flags, it) === -1).map((it) => it.id), true);
 
   // The folders the photos are in, for showing one of them alone.
   const folders = useMemo(() => {
@@ -703,6 +709,9 @@ export function Library() {
     ...(mobile ? [{ label: t.selectPhotos, icon: "check", onSelect: () => setSelecting(true) } as MenuItem] : []),
     ...(mobile ? [] : [{ label: t.findRaw, icon: "raw", onSelect: () => act.setSheet("findraw") } as MenuItem]),
     { label: t.refresh, icon: "refresh", onSelect: () => void act.refresh(true) },
+    "divider",
+    { label: t.deleteSelected, icon: "trash", onSelect: () => act.deletePhotos(frames(s.selection.length ? s.selection : s.cursor ? [s.cursor] : []).map((m) => m.id)) },
+    ...(counts.rejected ? [{ label: t.deleteRejected(counts.rejected), icon: "trash", onSelect: deleteRejected } as MenuItem] : []),
     "divider",
     ...(mobile ? [] : [{ label: t.subfolders, checked: s.subfolders, onSelect: () => (act.setSettings({ subfolders: !s.subfolders }), void act.reload()) } as MenuItem]),
     ...(s.stacks.length ? [{ label: t.stackPhotos, checked: s.stacking, onSelect: () => act.setSettings({ stacks: !s.stacking }) } as MenuItem] : []),
@@ -851,6 +860,7 @@ export function Library() {
           {chosen.length > 1 && chosen.length <= MAX_PANES && (
             <IconButton icon="compare" label={t.compareSelected} onClick={() => act.openViewer(chosen[0], chosen)} />
           )}
+          <IconButton icon="trash" label={t.delete} onClick={() => act.deletePhotos(chosen)} />
           <button className="text-button select-all" onClick={selectAll}>
             {t.selectAll}
           </button>
