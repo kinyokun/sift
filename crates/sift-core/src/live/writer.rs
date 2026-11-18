@@ -7,8 +7,8 @@
 //! Both files are written by the operating system (AVFoundation and ImageIO,
 //! `live.m`), so this exists on Apple platforms only.
 
-use super::{enough, frame, identifier, staged, timeline, Still};
-use crate::{formats, preview, Error, Result};
+use super::{enough, frame, identifier, picture, staged, timeline, Still};
+use crate::{formats, Error, Result};
 use image::RgbImage;
 use std::ffi::{c_char, c_int, c_long, c_void, CStr, CString};
 use std::path::{Path, PathBuf};
@@ -102,7 +102,7 @@ pub fn export(frames: &[PathBuf], taken: &[Option<i64>], key: usize, format: Sti
             }
             // A HEIF goes to the system as it is, which reads it with everything it
             // records; of other files, the JPEG that is shown.
-            let picture = if formats::is_heif(&frames[key]) { std::fs::read(&frames[key])? } else { preview::full(&frames[key])? };
+            let picture = if formats::is_heif(&frames[key]) { std::fs::read(&frames[key])? } else { picture(&frames[key])? };
             let heic = (format == Still::Heic) as c_int;
             if sift_live_still(picture.as_ptr(), picture.len() as c_long, heic, c_path(still_path)?.as_ptr(), id.as_ptr(), message.ptr(), 512) == 0 {
                 return Err(message.error());

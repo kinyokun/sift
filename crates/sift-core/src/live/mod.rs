@@ -88,6 +88,14 @@ pub fn identifier(seed: &Path) -> String {
     format!("{}-{}-{}-{}-{}", &hex[..8], &hex[8..12], &hex[12..16], &hex[16..20], &hex[20..])
 }
 
+/// The picture a still is made of: the frame as a webview shows it, which of
+/// a RAW file is the JPEG it embeds. That one says how it is turned and no
+/// more, so it gets what the RAW file records about the shot.
+fn picture(frame: &Path) -> Result<Vec<u8>> {
+    let shown = crate::preview::full(frame)?;
+    Ok(if crate::formats::is_raw(frame) && shown.starts_with(&[0xFF, 0xD8]) { still::described(shown, frame) } else { shown })
+}
+
 /// Whether a burst of this many frames can become a Live Photo.
 #[cfg(any(target_vendor = "apple", windows))]
 fn enough(frames: &[PathBuf]) -> Result<()> {

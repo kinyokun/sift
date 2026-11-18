@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 /// The picture of the still as a JPEG: the frame's own file when it is one,
 /// so that nothing it records is lost, and the JPEG that is shown otherwise.
 fn cover(frame: &Path) -> Result<Vec<u8>> {
-    let shown = preview::full(frame)?;
+    let shown = super::picture(frame)?;
     if shown.starts_with(&[0xFF, 0xD8]) {
         return Ok(shown);
     }

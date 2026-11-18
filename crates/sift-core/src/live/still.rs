@@ -6,11 +6,12 @@
 //! replaces it (`live.m`): a still has one maker note, and Photos only reads
 //! Apple's.
 
-use crate::io::{u16_at, u32_at};
+use crate::io::{u16_at, u32_at, Src};
 use crate::jpeg::EXIF_HEADER;
 use crate::tiff::{type_size, T_EXIF_IFD, T_MAKERNOTE, T_ORIENTATION};
-use crate::{Error, Result};
+use crate::{container, Error, Result};
 use std::ops::Range;
+use std::path::Path;
 
 /// The longest TIFF block an APP1 segment holds: its length field counts
 /// itself and the `Exif` header too.
@@ -186,6 +187,127 @@ pub fn orientation(block: &[u8]) -> Option<u16> {
     u16_at(&ifd0.entries[ifd0.find(T_ORIENTATION, le)?], 8, le).filter(|o| (1..=8).contains(o))
 }
 
+/// What a camera records about a shot that its picture should keep once it
+/// is out of the RAW file: who made it and when, with what, and how it was
+/// exposed. Tags of the first directory, then of the EXIF directory.
+const SHOT_FIRST: [u16; 6] = [0x010F, 0x0110, 0x0131, 0x0132, 0x013B, 0x8298];
+const SHOT_EXIF: [u16; 26] = [
+    0x829A, 0x829D, 0x8822, 0x8827, 0x8830, 0x8832, 0x9000, 0x9003, 0x9004, 0x9010, 0x9011, 0x9012, 0x9204, 0x9207, 0x9209, 0x920A, 0x9290, 0x9291, 0x9292, 0xA402, 0xA403, 0xA405, 0xA406, 0xA432, 0xA433, 0xA434,
+];
+const T_TAKEN: u16 = 0x9003;
+/// None of those values is longer (lens names, a copyright line).
+const MAX_SHOT_VALUE: usize = 512;
+
+/// A value of a directory: tag, type, count, and its bytes in big-endian order.
+type Value = (u16, u16, u32, Vec<u8>);
+
+/// A big-endian TIFF block of a first directory and, when it has values, an
+/// EXIF directory.
+fn shot_block(mut first: Vec<Value>, mut exif: Vec<Value>) -> Vec<u8> {
+    first.sort_by_key(|v| v.0);
+    exif.sort_by_key(|v| v.0);
+    let pointer = !exif.is_empty() as usize;
+    let exif_at = 8 + 2 + (first.len() + pointer) * 12 + 4;
+    let values_at = exif_at + pointer * (2 + exif.len() * 12 + 4);
+    let mut values = Vec::new();
+    let mut placed = |(tag, typ, count, value): &Value| {
+        let mut held = [0u8; 4];
+        match value.len() {
+            n if n <= 4 => held[..n].copy_from_slice(value),
+            _ => {
+                held = long(false, (values_at + values.len()) as u32);
+                values.extend_from_slice(value);
+                values.resize(values.len() + values.len() % 2, 0);
+            }
+        }
+        entry(false, *tag, *typ, *count, held)
+    };
+    let mut entries: Vec<[u8; 12]> = first.iter().map(&mut placed).collect();
+    let exif: Vec<[u8; 12]> = exif.iter().map(&mut placed).collect();
+    let mut block = b"MM\0*\0\0\0\x08".to_vec();
+    if pointer == 1 {
+        // Every tag of the first directory sorts before the pointer.
+        entries.push(entry(false, T_EXIF_IFD, LONG, 1, long(false, exif_at as u32)));
+    }
+    block.extend(directory(false, &entries, 0));
+    if pointer == 1 {
+        block.extend(directory(false, &exif, 0));
+    }
+    block.extend_from_slice(&values);
+    block
+}
+
+/// The block for the picture of `source`: what that file records about the
+/// shot, and `orientation`, how the picture is turned. `None` when the file
+/// records none of it.
+fn shot(source: &Path, orientation: Option<u16>) -> Option<Vec<u8>> {
+    let src = Src::open(source).ok()?;
+    let p = container::parse(&src);
+    let value = |tag: &u16| -> Option<Value> {
+        let (tiff, e) = [&p.exif, &p.ifd0].into_iter().flatten().find_map(|(t, i)| i.get(*tag).map(|e| (t, e)))?;
+        let mut data = tiff.data(e).filter(|d| (1..=12).contains(&e.typ) && !d.is_empty() && d.len() <= MAX_SHOT_VALUE)?;
+        if tiff.le {
+            let unit = match e.typ {
+                3 | 8 => 2,
+                4 | 5 | 9 | 10 | 11 => 4,
+                12 => 8,
+                _ => 1,
+            };
+            data.chunks_exact_mut(unit).for_each(|part| part.reverse());
+        }
+        Some((*tag, e.typ, e.count, data))
+    };
+    let mut first: Vec<Value> = SHOT_FIRST.iter().filter_map(value).collect();
+    let exif: Vec<Value> = SHOT_EXIF.iter().filter_map(value).collect();
+    if first.is_empty() && exif.is_empty() {
+        return None;
+    }
+    first.extend(orientation.map(|o| (T_ORIENTATION, 3, 1, o.to_be_bytes().to_vec())));
+    Some(shot_block(first, exif))
+}
+
+/// Whether a TIFF block says when its picture was taken.
+fn dated(block: &[u8]) -> bool {
+    let read = || {
+        let le = block.get(..2)? == b"II";
+        let ifd0 = Dir::read(block, u32_at(block, 4, le)? as usize, le)?;
+        let exif = ifd0.find(T_EXIF_IFD, le).and_then(|i| Dir::read(block, u32_at(&ifd0.entries[i], 8, le)? as usize, le));
+        Some(ifd0.find(T_TAKEN, le).is_some() || exif.is_some_and(|exif| exif.find(T_TAKEN, le).is_some()))
+    };
+    read().unwrap_or(false)
+}
+
+/// `jpeg`, the picture a RAW file embeds, with what `source` (that file)
+/// records about the shot as its EXIF block. Such a picture comes with its
+/// orientation at most, and a still made of it would be a photo taken by no
+/// camera at no time, which Photos files under the day it was imported. A
+/// picture that already says when it was taken is left as it is, and so is
+/// one whose source records nothing.
+pub fn described(jpeg: Vec<u8>, source: &Path) -> Vec<u8> {
+    let (segment, insert) = exif_segment(&jpeg);
+    let old = segment.clone().map(|s| &jpeg[s.start + 4 + EXIF_HEADER.len()..s.end]);
+    if old.is_some_and(dated) {
+        return jpeg;
+    }
+    match shot(source, old.and_then(orientation)) {
+        Some(block) => with_block(&jpeg, &block, segment.unwrap_or(insert..insert)),
+        None => jpeg,
+    }
+}
+
+/// `jpeg` with `block` as its EXIF segment at `place`: over the segment
+/// there, or put in where there was none.
+fn with_block(jpeg: &[u8], block: &[u8], place: Range<usize>) -> Vec<u8> {
+    let mut out = Vec::with_capacity(jpeg.len() + block.len() + 16);
+    out.extend_from_slice(&jpeg[..place.start]);
+    out.extend_from_slice(&[0xFF, 0xE1]);
+    out.extend_from_slice(&((2 + EXIF_HEADER.len() + block.len()) as u16).to_be_bytes());
+    out.extend_from_slice(EXIF_HEADER);
+    out.extend_from_slice(block);
+    out.extend_from_slice(&jpeg[place.end..]);
+    out
+}
+
 /// The EXIF segment of a JPEG (marker to end), and where one goes when there
 /// is none: after the JFIF header that must come first.
 fn exif_segment(jpeg: &[u8]) -> (Option<Range<usize>>, usize) {
@@ -243,14 +365,7 @@ pub fn exif(jpeg: &[u8], identifier: &str) -> Result<Vec<u8>> {
 /// The picture and everything else the file records are kept as they are.
 pub fn tagged(jpeg: &[u8], identifier: &str) -> Result<Vec<u8>> {
     let (block, place) = block(jpeg, identifier)?;
-    let mut out = Vec::with_capacity(jpeg.len() + block.len() + 16);
-    out.extend_from_slice(&jpeg[..place.start]);
-    out.extend_from_slice(&[0xFF, 0xE1]);
-    out.extend_from_slice(&((2 + EXIF_HEADER.len() + block.len()) as u16).to_be_bytes());
-    out.extend_from_slice(EXIF_HEADER);
-    out.extend_from_slice(&block);
-    out.extend_from_slice(&jpeg[place.end..]);
-    Ok(out)
+    Ok(with_block(jpeg, &block, place))
 }
 
 #[cfg(test)]
@@ -385,6 +500,60 @@ pub(super) mod tests {
         let block = &out[exif_segment(&out).0.unwrap()][10..];
         let first = Dir::read(block, u32_at(block, 4, true).unwrap() as usize, true).unwrap();
         assert_eq!(first.entries.iter().map(|e| u16_at(e, 0, true).unwrap()).collect::<Vec<_>>(), [T_ORIENTATION, T_EXIF_IFD]);
+    }
+
+    /// A file holding `block`, as far as the reader goes a RAW file. Each name is used by one test.
+    fn raw(name: &str, block: &[u8]) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!("sift-still-{}-{name}", std::process::id()));
+        std::fs::write(&path, block).unwrap();
+        path
+    }
+
+    #[test]
+    fn the_picture_of_a_raw_file_gets_what_the_file_records() {
+        let taken = Some("2024-10-20 07:50:17".to_string());
+        for le in [true, false] {
+            let source = raw(if le { "le.nef" } else { "be.nef" }, &camera(le, Some(b"the camera's own maker note")));
+            // The preview of a RAW file as it comes: turned, and nothing else.
+            let preview = [&[0xFF, 0xD8][..], &crate::jpeg::orientation_app1(8), &picture()[2..]].concat();
+            let out = described(preview.clone(), &source);
+            // Camera and time are the file's, the turn is the picture's own, and the camera's note stays behind.
+            assert_eq!(read(&out), (Some("Canon".into()), 8, taken.clone(), vec![]));
+            assert_eq!(rest(&out), rest(&preview));
+            // A preview that is not turned has no EXIF block at all.
+            let out = described(picture(), &source);
+            assert_eq!(read(&out), (Some("Canon".into()), 1, taken.clone(), vec![]));
+            assert_eq!(rest(&out), picture());
+            assert_eq!(read(&tagged(&out, ID).unwrap()), (Some("Canon".into()), 1, taken.clone(), maker_note(ID)));
+            // A picture that says when it was taken already is left as it is.
+            let dated = with_exif(&picture(), &camera(!le, None));
+            assert_eq!(described(dated.clone(), &source), dated);
+            std::fs::remove_file(source).unwrap();
+        }
+        // Nothing to add: no such file, and a file that records nothing.
+        assert_eq!(described(picture(), Path::new("/no/such/file.nef")), picture());
+        let empty = raw("empty.nef", &picture());
+        assert_eq!(described(picture(), &empty), picture());
+        std::fs::remove_file(empty).unwrap();
+    }
+
+    #[test]
+    fn numbers_keep_their_value_whatever_the_byte_order() {
+        for le in [true, false] {
+            // An EXIF directory with an exposure time (a fraction, stored after it) and a sensitivity (a short number, stored in its entry).
+            let mut block = if le { b"II*\0".to_vec() } else { b"MM\0*".to_vec() };
+            block.extend_from_slice(&long(le, 8));
+            block.extend(directory(le, &[entry(le, T_EXIF_IFD, LONG, 1, long(le, 26))], 0));
+            let sensitivity = [short(le, 200), [0; 2]].concat().try_into().unwrap();
+            block.extend(directory(le, &[entry(le, 0x829A, 5, 1, long(le, 56)), entry(le, 0x8827, 3, 1, sensitivity)], 0));
+            block.extend([long(le, 1), long(le, 250)].concat());
+            let source = raw(if le { "le.arw" } else { "be.arw" }, &block);
+            let src = Src::mem(described(picture(), &source));
+            let read = exif::read(&container::parse(&src));
+            assert!((read.shutter.unwrap() - 1.0 / 250.0).abs() < 1e-9);
+            assert_eq!(read.iso, Some(200));
+            std::fs::remove_file(source).unwrap();
+        }
     }
 
     #[test]
