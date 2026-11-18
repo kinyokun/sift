@@ -14,7 +14,7 @@ For RAW files Sift shows the preview the camera wrote into the file, so the next
 [![CI](https://github.com/kinyokun/sift/actions/workflows/ci.yml/badge.svg)](https://github.com/kinyokun/sift/actions/workflows/ci.yml)
 [![License](https://img.shields.io/github/license/kinyokun/sift?color=3a3d4a)](LICENSE)
 
-[**Download for macOS / Windows**](https://github.com/kinyokun/sift/releases/latest) · [Features](#no-waiting-for-raw-decoding) · [Performance](#performance) · [Build](#build) · [中文](README.md)
+[**Download for macOS / Windows**](https://github.com/kinyokun/sift/releases/latest) · [Features](#no-waiting-for-raw-decoding) · [Tags](#tags) · [Performance](#performance) · [Build](#build) · [中文](README.md)
 
 <img src="docs/readme/hero-en.webp" alt="Sift's photo grid on the desktop and its viewer on a phone" width="100%">
 
@@ -89,6 +89,19 @@ Press `C` to compare photos side by side: two, three or four at a time (`Shift+C
 `Ctrl` + scroll wheel or a pinch resizes the thumbnails. Keep zooming past two to a row and the photo under the pointer opens; zoom out in the viewer and you are back in the grid.
 
 <p align="center"><img src="docs/readme/zoom-en.webp" alt="Pinching from the grid into a photo and back out" width="88%"></p>
+
+## Tags
+
+Make a tag at any point while culling and put it on photos: press `T` and give it a name, then `Shift+1`–`Shift+9` put on or take off the first nine tags. A photo can carry several, one per person at an event, say, or one per use: "Client", "Instagram", "Print". The row of tags below the toolbar filters the grid: click one to see only its photos, or several at once.
+
+On export, switch on "A folder for each tag": every tag gets its own folder inside the destination, with the files named after the tag (`Client_001.JPG`), and a photo with several tags is in each of their folders; photos without a tag are left out unless you ask for them. Tags are saved with the folder's progress and are not written into the files.
+
+<table>
+<tr>
+<td width="50%"><img src="docs/readme/tags-en.webp" alt="Photos in the grid carrying tags, with the row of tags that filters them below the toolbar"></td>
+<td width="50%"><img src="docs/readme/tag-export-en.webp" alt="The export sheet: a folder for each tag, files named after the tag"></td>
+</tr>
+</table>
 
 ## Export and send to a phone
 

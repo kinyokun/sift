@@ -14,7 +14,7 @@ RAW 直接用相机写在文件里的预览图，所以按一下就是下一张�
 [![CI](https://github.com/kinyokun/sift/actions/workflows/ci.yml/badge.svg)](https://github.com/kinyokun/sift/actions/workflows/ci.yml)
 [![许可](https://img.shields.io/github/license/kinyokun/sift?label=%E8%AE%B8%E5%8F%AF&color=3a3d4a)](LICENSE)
 
-[**下载 macOS / Windows 版**](https://github.com/kinyokun/sift/releases/latest) · [功能](#翻页不等解码) · [性能](#性能) · [构建](#构建) · [English](README.en.md)
+[**下载 macOS / Windows 版**](https://github.com/kinyokun/sift/releases/latest) · [功能](#翻页不等解码) · [标签](#标签) · [性能](#性能) · [构建](#构建) · [English](README.en.md)
 
 <img src="docs/readme/hero-zh.webp" alt="Sift 的照片列表（桌面）和查看页（手机）" width="100%">
 
@@ -89,6 +89,19 @@ RAW 直接用相机写在文件里的预览图，所以按一下就是下一张�
 `Ctrl` + 滚轮或者双指捏合缩放缩略图，放到一行两张后继续放大就打开指针下的那张，在查看页里继续缩小又回到列表。
 
 <p align="center"><img src="docs/readme/zoom-zh.webp" alt="从列表捏合放大进照片，再缩小回列表" width="88%"></p>
+
+## 标签
+
+选片时随时新建标签并打在照片上：按 `T` 起个名字，之后用 `Shift+1`～`Shift+9` 直接打上或去掉前 9 个标签。一张照片可以带多个标签，比如一场活动里每个人一个，或者按用途分成“交付客户”“发朋友圈”“打印”。工具栏下面的一排标签用来筛选，点一个就只看带它的照片，可以同时点几个。
+
+导出时打开“按标签分文件夹”，每个标签在目标文件夹里得到一个子文件夹，文件按标签名重命名（`交付客户_001.JPG`），带多个标签的照片在每个文件夹里各有一份；没有标签的照片默认不导出。标签随文件夹的选片进度保存，不写进照片文件。
+
+<table>
+<tr>
+<td width="50%"><img src="docs/readme/tags-zh.webp" alt="列表里的照片带着标签，工具栏下面是用来筛选的一排标签"></td>
+<td width="50%"><img src="docs/readme/tag-export-zh.webp" alt="导出面板：按标签分文件夹，文件按标签名重命名"></td>
+</tr>
+</table>
 
 ## 导出与传到手机
 

@@ -26,7 +26,7 @@ done; done
 node scripts/readme-art.mjs /tmp/sift-readme docs/readme docs/readme/perf.json
 ```
 
-- `ONLY=library,viewer` 只跑其中几段；段名有 `library`、`viewer`、`eyes`、`looks`、`stack`、`clipping`、`export`、`light`、`phone`、`flip`、`zoom`、`perf`。`readme-art.mjs` 的 `ONLY` 按输出文件名前缀过滤
+- `ONLY=library,viewer` 只跑其中几段；段名有 `library`、`viewer`、`eyes`、`looks`、`stack`、`clipping`、`export`、`tags`、`light`、`phone`、`flip`、`zoom`、`perf`。`readme-art.mjs` 的 `ONLY` 按输出文件名前缀过滤
 - `perf` 一段不出图，在终端打印界面里实测的翻页耗时和第一屏耗时；要测近千张的文件夹，可以用硬链接把样张复制几十份
 - 核心的耗时（取内嵌预览、生成缩略图、完整解码）用 `cargo run --release -p sift-core --example probe -- --preview <输出目录> <文件…>` 和 `--develop` 测；`perf.json` 是性能图上的数字，换机器重测后改这里
 - 没有尼康引擎也能跑，只是 NP3 滤镜换成近似还原

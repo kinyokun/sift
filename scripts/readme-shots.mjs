@@ -20,8 +20,8 @@ const lookFiles = (process.env.LOOKS ?? "").split(",").filter(Boolean);
 const bridge = "http://127.0.0.1:4777";
 const base = `http://localhost:1420/?bridge=${bridge}&pick=${encodeURIComponent(folder)}${lookFiles.map((l) => `&look=${encodeURIComponent(l)}`).join("")}`;
 const T = {
-  zh: { looks: "滤镜", importLooks: "导入滤镜…", export: "导出", frame: "加参数边框", livePhoto: "实况照片", locale: "zh-CN" },
-  en: { looks: "Looks", importLooks: "Import looks…", export: "Export", frame: "Add info frame", livePhoto: "Live Photo", locale: "en-US" },
+  zh: { looks: "滤镜", importLooks: "导入滤镜…", export: "导出", frame: "加参数边框", livePhoto: "实况照片", byTag: "按标签分文件夹", shown: "当前显示", tags: ["交付客户", "发朋友圈", "打印"], dest: "/Users/me/Pictures/精选", locale: "zh-CN" },
+  en: { looks: "Looks", importLooks: "Import looks…", export: "Export", frame: "Add info frame", livePhoto: "Live Photo", byTag: "A folder for each tag", shown: "Shown", tags: ["Client", "Instagram", "Print"], dest: "/Users/me/Pictures/Picks", locale: "en-US" },
 }[lang];
 
 const browser = await chromium.launch({ channel: "chrome" });
@@ -200,6 +200,40 @@ await session("export", desktop, async (page, shot) => {
   await shot("frame");
 });
 
+// Tags: three of them over the folder, several on some photos, then the export
+// sheet with a folder for each.
+await session("tags", desktop, async (page, shot) => {
+  await openLibrary(page);
+  await rate(page);
+  const tagged = [
+    ["kingfisher-on-a-rock", [0, 1]], ["cat-portrait", [0, 2]], ["cross-fox", [0, 1]], ["DSC0018", [0]], ["white-throated-kingfisher", [0]],
+    ["pied-kingfisher-on-a-twig", [1]], ["squirrel.jpg", [1]], ["horse.jpg", [2]], ["tabby-on-the-porch", [2]], ["kingfisher-on-a-branch", [1, 2]],
+  ];
+  // The first photo makes the tags (a new tag goes onto it), then drops the ones it should not have.
+  await cell(page, tagged[0][0]).click();
+  await page.keyboard.press("T");
+  for (const name of T.tags) {
+    await page.locator(".tag-new input").fill(name);
+    await page.locator(".tag-new input").press("Enter");
+  }
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Shift+3");
+  for (const [name, tags] of tagged.slice(1)) {
+    await cell(page, name).click();
+    for (const n of tags) await page.keyboard.press(`Shift+${n + 1}`);
+  }
+  await page.locator(".toast").waitFor({ state: "detached", timeout: 8000 }).catch(() => {});
+  await cell(page, "cat-portrait").click();
+  await page.mouse.move(5, 890);
+  await shot("grid");
+  await page.evaluate((dir) => localStorage.setItem("sift.exportDest", dir), T.dest);
+  await page.locator(`.toolbar [aria-label="${T.export}"]`).click();
+  await page.getByRole("switch").first().waitFor();
+  await page.locator(".sheet button", { hasText: T.shown }).click();
+  await page.locator(".row", { hasText: T.byTag }).getByRole("switch").click();
+  await page.waitForTimeout(800);
+  await shot("export");
+});
 await session("light", { ...desktop, scheme: "light", platform: "windows" }, async (page, shot) => {
   await openLibrary(page);
   await rate(page);

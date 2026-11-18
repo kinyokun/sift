@@ -86,6 +86,8 @@ for (const lang of ["zh", "en"]) {
     ["live", "stack-live"],
     ["clipping", "clipping-on"],
     ["frame", "export-frame"],
+    ["tags", "tags-grid"],
+    ["tag-export", "tags-export"],
     ["windows", "light-grid", { mac: false, light: true }],
   ]) if (has(lang, src)) await framed(`${name}-${lang}`, L(src), opts);
   if (has(lang, "phone-grid")) {

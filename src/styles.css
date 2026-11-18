@@ -3093,6 +3093,7 @@ input.text {
 }
 
 .row.tag-folders {
+  justify-content: flex-start;
   padding-top: 0;
   gap: 6px;
 }
