@@ -101,7 +101,7 @@ function InfoPanel({ item, meta, docked, crop, tags, histogram, onSaveLook }: In
     ],
   ];
   return (
-    <aside className={docked ? "info-side" : "info-panel glass"}>
+    <aside className={docked ? "info-side" : "info-panel solid"}>
       <Histogram request={histogram} crop={crop} />
       {rows
         .filter(([, v]) => v)

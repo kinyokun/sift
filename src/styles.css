@@ -12,8 +12,9 @@
   --green: #34c759;
   --red: #ff3b30;
   --yellow: #ff9f0a;
-  --glass: rgba(255, 255, 255, 0.7);
+  --glass: rgba(255, 255, 255, 0.84);
   --glass-edge: rgba(255, 255, 255, 0.6);
+  --popup: #ffffff;
   --shadow: 0 10px 40px rgba(0, 0, 0, 0.14), 0 1px 3px rgba(0, 0, 0, 0.06);
   --bar: 52px;
   --safe-top: env(safe-area-inset-top, 0px);
@@ -38,8 +39,9 @@
     --green: #30d158;
     --red: #ff453a;
     --yellow: #ffd60a;
-    --glass: rgba(44, 44, 48, 0.64);
+    --glass: rgba(40, 40, 43, 0.82);
     --glass-edge: rgba(255, 255, 255, 0.1);
+    --popup: #2a2a2d;
     --shadow: 0 12px 44px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.3);
   }
 }
@@ -98,6 +100,13 @@ p {
   -webkit-backdrop-filter: blur(30px) saturate(180%);
   backdrop-filter: blur(30px) saturate(180%);
   border: 0.5px solid var(--glass-edge);
+}
+
+/* What is read or chosen from (menus, sheets, messages) is solid. Glass over a grid of photos makes
+ * text hard to read, and a blur inside a blurred bar is not drawn at all by Chromium (Windows). */
+.solid {
+  background: var(--popup);
+  border: 0.5px solid var(--hairline);
 }
 
 .link {
@@ -930,8 +939,9 @@ button.primary.large {
   --green: #30d158;
   --red: #ff453a;
   --yellow: #ffd60a;
-  --glass: rgba(38, 38, 42, 0.62);
+  --glass: rgba(34, 34, 37, 0.8);
   --glass-edge: rgba(255, 255, 255, 0.12);
+  --popup: #2a2a2d;
   --shadow: 0 12px 44px rgba(0, 0, 0, 0.5);
   color: var(--text);
 }
@@ -1689,7 +1699,6 @@ button.primary.large {
   display: flex;
   flex-direction: column;
   animation: rise 0.22s cubic-bezier(0.2, 0.9, 0.3, 1);
-  --glass: color-mix(in srgb, var(--surface) 82%, transparent);
 }
 
 .sheet.wide {

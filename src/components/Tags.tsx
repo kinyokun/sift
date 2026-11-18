@@ -97,7 +97,7 @@ export function TagMenu(props: { targets: Item[]; label: string; up?: boolean; r
         <Icon name="tag" />
       </button>
       {open && (
-        <div ref={menu} className={`menu glass tag-menu ${props.up ? "up" : "right"}`} role="menu" aria-label={t.tags}>
+        <div ref={menu} className={`menu solid tag-menu ${props.up ? "up" : "right"}`} role="menu" aria-label={t.tags}>
           {!tags.length && <p className="tag-hint">{t.tagHint}</p>}
           {tags.map((tag, i) => {
             if (editing)

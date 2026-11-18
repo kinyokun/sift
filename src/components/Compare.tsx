@@ -89,7 +89,7 @@ export function ComparePicker({ items, current, marks, top, bottom, onChoose, on
   }, [onClose]);
 
   return (
-    <div className="compare-picker glass" ref={root} style={{ top: top + SLOT_BAR + 4, bottom: bottom + 8 }} role="listbox" aria-label={t.compareChoose}>
+    <div className="compare-picker solid" ref={root} style={{ top: top + SLOT_BAR + 4, bottom: bottom + 8 }} role="listbox" aria-label={t.compareChoose}>
       {items.map((it) => (
         <button
           key={it.id}

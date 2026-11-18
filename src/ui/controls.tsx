@@ -113,7 +113,7 @@ export function Menu(props: { button: ReactNode; label: string; items: MenuItem[
         {props.button}
       </button>
       {open && (
-        <div className={`menu glass ${props.align === "left" ? "left" : "right"} ${props.up ? "up" : ""}`} role="menu">
+        <div className={`menu solid ${props.align === "left" ? "left" : "right"} ${props.up ? "up" : ""}`} role="menu">
           {props.items.map((item, i) =>
             item === "divider" ? (
               <hr key={i} />
@@ -151,7 +151,7 @@ export function Sheet(props: { title: string; onClose?: () => void; children: Re
   }, [props.onClose]);
   return (
     <div className="sheet-backdrop" onPointerDown={(e) => e.target === e.currentTarget && props.onClose?.()}>
-      <section className={`sheet glass ${props.wide ? "wide" : ""}`} role="dialog" aria-modal="true" aria-label={props.title}>
+      <section className={`sheet solid ${props.wide ? "wide" : ""}`} role="dialog" aria-modal="true" aria-label={props.title}>
         <header>
           <h2>{props.title}</h2>
           {props.onClose && (

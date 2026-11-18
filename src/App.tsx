@@ -45,7 +45,7 @@ function Toast() {
     subfoldersShown: t.subfoldersShown(Number(detail) || 0),
   };
   return (
-    <div className="toast glass" role="status" key={toast.id}>
+    <div className="toast solid" role="status" key={toast.id}>
       {known[code] ?? toast.text}
     </div>
   );
