@@ -30,6 +30,15 @@ export type UpdateState = {
   error: string | null;
 };
 
+/** The scroll wheel in the viewer zooms, goes to the photo after or before, or moves a
+ * zoomed photo the way a trackpad scrolls (a sideways swipe then turns the page). */
+export type WheelMode = "zoom" | "turn" | "pan";
+
+/** A Mac is used with a trackpad more often than with a wheel. */
+export function wheelModeOf(settings: Settings, platform: string | undefined): WheelMode {
+  return settings.wheel ?? (platform === "macos" ? "pan" : "zoom");
+}
+
 export type Settings = {
   lang: "auto" | "zh" | "en";
   pair: boolean;
@@ -48,7 +57,10 @@ export type Settings = {
   infoPinned: boolean;
   /** Mark blown highlights and crushed shadows on the photo in the viewer. */
   clipping: boolean;
-  wheelZoom: boolean | null;
+  /** What the scroll wheel does in the viewer; unset, what suits the platform (`wheelModeOf`). */
+  wheel: WheelMode | null;
+  /** What a double click on the photo does in the viewer. */
+  doubleClick: "zoom" | "back";
   thumb: number;
   /** Width of a tile on the look wall. */
   wallTile: number;
@@ -98,7 +110,8 @@ const defaults: Settings = {
   autoAdvance: false,
   infoPinned: true,
   clipping: false,
-  wheelZoom: null,
+  wheel: null,
+  doubleClick: "zoom",
   thumb: 184,
   wallTile: 230,
   sortBy: "name",
@@ -125,7 +138,10 @@ function loadSettings(): Settings {
       const { original, ...rest } = saved.keys || {};
       keys = resolveKeys(original === "O" ? rest : { ...rest, original });
     }
-    return { ...defaults, ...saved, keys, keysVersion: KEYS_VERSION };
+    // Up to 0.4.2 the wheel either zoomed or did not.
+    const { wheelZoom, ...rest } = saved;
+    const wheel = typeof wheelZoom === "boolean" ? (wheelZoom ? "zoom" : "pan") : null;
+    return { ...defaults, wheel, ...rest, keys, keysVersion: KEYS_VERSION };
   } catch {
     return defaults;
   }

@@ -10,6 +10,8 @@ const PLAY_EDGE = 1024;
 const SLIVER_EDGE = 512;
 /** A Live Photo needs at least this many frames. */
 export const MIN_LIVE_FRAMES = 3;
+/** Rest this long on a Live Photo before fetching its movie. */
+const MOVIE_DELAY_MS = 200;
 
 export type LiveDraft = { start: number; end: number; cover: number };
 
@@ -195,24 +197,29 @@ export function LiveMovie({ item, area }: { item: Item; area: Area }) {
   const [playing, setPlaying] = useState(false);
   const [failed, setFailed] = useState(false);
 
-  // The movie is small; it is fetched whole and played from memory.
+  // The movie is small; it is fetched whole and played from memory, once the photo is
+  // looked at rather than passed on the way to another.
   useEffect(() => {
     setPlaying(false);
     setFailed(false);
     setSrc(null);
-    if (!item.live) return;
+    const movie = item.live;
+    if (!movie) return;
     let url: string | null = null;
     let live = true;
-    fetch(imageUrl("live", item.live, item.mtime))
-      .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(String(r.status)))))
-      .then((data) => {
-        if (!live) return;
-        url = URL.createObjectURL(new Blob([data], { type: "video/mp4" }));
-        setSrc(url);
-      })
-      .catch(() => live && setFailed(true));
+    const timer = setTimeout(() => {
+      fetch(imageUrl("live", movie, item.mtime))
+        .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(String(r.status)))))
+        .then((data) => {
+          if (!live) return;
+          url = URL.createObjectURL(new Blob([data], { type: "video/mp4" }));
+          setSrc(url);
+        })
+        .catch(() => live && setFailed(true));
+    }, MOVIE_DELAY_MS);
     return () => {
       live = false;
+      clearTimeout(timer);
       if (url) URL.revokeObjectURL(url);
     };
   }, [item.live, item.mtime]);

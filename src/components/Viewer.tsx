@@ -3,7 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { NO_LOOK, api, fileName, imageUrl, isHeifPath, isRawPath, type CropBox, type Item, type Meta, type Tag } from "../lib/api";
 import { useT } from "../lib/i18n";
 import { actionFor, isTyping, ratingOf, tagOf } from "../lib/shortcuts";
-import { cropOf, flagOf, lookOf, useStore } from "../lib/store";
+import { cropOf, flagOf, lookOf, useStore, wheelModeOf } from "../lib/store";
 import { IconButton, Menu, Stars, type MenuItem } from "../ui/controls";
 import { Icon } from "../ui/Icon";
 import { CROP_RATIOS, GUIDE_MODES, ROTATABLE_GUIDES, centeredCrop, type Crop } from "./Overlay";
@@ -12,7 +12,7 @@ import { LookWall } from "./LookWall";
 import { LiveEditor, LiveMovie, LivePreview, MIN_LIVE_FRAMES, type LiveDraft } from "./Live";
 import { StackStrip } from "./StackStrip";
 import { ComparePicker, MAX_PANES, SLOT_BAR, SlotBar, paneGrid } from "./Compare";
-import { Pane, fullUrlOf, lookSource, type Nudge, type PaneHandle, type PaneStatus } from "./Pane";
+import { Pane, fullUrlOf, lookSource, screenUrlOf, wheelNotch, type Nudge, type PaneHandle, type PaneStatus } from "./Pane";
 import { TagDot, TagMenu, tagsOn, type TagMenuHandle } from "./Tags";
 
 export function formatShutter(s: number): string {
@@ -117,6 +117,18 @@ function InfoPanel({ item, meta, docked, crop, tags, histogram, onSaveLook }: In
 
 /** Frames one Live Photo holds at most; the backend refuses more. */
 const MAX_LIVE_FRAMES = 600;
+/** Photos fetched ahead in the direction of travel, so a held key finds its pictures there; a phone turns one page at a time. */
+const AHEAD = 3;
+/** Page turns asked for one by one (wheel notches, swipes, clicks) that may wait for their pictures. */
+const TURNS_AHEAD = 6;
+/** A picture that has taken longer than this no longer holds a page turn up. */
+const TURN_PATIENCE_MS = 2000;
+/** Pages turned faster than this are being passed, not looked at: the full-size picture of the
+ * next one is then only decoded once a photo is rested on for as long. */
+const HURRY_MS = 250;
+
+/** A photo's picture and metadata, fetched before the page is turned to it. */
+type Ahead = { url: string; picture: HTMLImageElement; since: number; done: boolean };
 
 export function Viewer() {
   const t = useT();
@@ -181,7 +193,18 @@ export function Viewer() {
   // On desktop the info sidebar stays open across photos and sessions.
   const showInfo = mobile ? floatingInfo : settings.infoPinned;
   const toggleInfo = () => (mobile ? setFloatingInfo((v) => !v) : useStore.getState().setSettings({ infoPinned: !settings.infoPinned }));
-  const warm = useRef<HTMLImageElement[]>([]);
+  const ahead = useRef(new Map<string, Ahead>());
+  const aheadFull = useRef<HTMLImageElement | null>(null);
+  const landed = useRef(0);
+  /** Which way the pages were last turned. */
+  const heading = useRef(1);
+  /** The photo each pane has had on screen for a frame. */
+  const shown = useRef<(string | undefined)[]>([]);
+  /** The photo the pane in use was given, and when. */
+  const placed = useRef({ id: "", at: 0 });
+  /** Page turns still to make. */
+  const turns = useRef({ steps: 0, stacks: false, timer: 0 });
+  const pump = useRef(() => {});
   const [insets, setInsets] = useState({ top: 0, bottom: 0 });
 
   const panes = [useRef<PaneHandle>(null), useRef<PaneHandle>(null), useRef<PaneHandle>(null), useRef<PaneHandle>(null)];
@@ -193,7 +216,6 @@ export function Viewer() {
 
   const compare = extra.length > 0;
   const indices = [viewer.index, ...extra];
-  const indexKey = indices.join(",");
   const slotItems = indices.map((i) => byId.get(viewer.ids[i]));
   const slotKey = slotItems.map((it) => it?.id).join("\n");
   const leftItem = slotItems[0];
@@ -201,29 +223,59 @@ export function Viewer() {
   const currentMeta = current ? metas[current.id] ?? null : null;
   const status = statuses[active] ?? null;
 
-  // Metadata for what is on screen, and warm the neighbours.
+  /** Starts fetching a photo's picture and metadata, or finds the fetch that is under way. */
+  const fetchAhead = (item: Item): Ahead => {
+    const url = screenUrlOf(item);
+    const known = ahead.current.get(item.id);
+    if (known?.url === url) return known;
+    const picture = new Image();
+    picture.decoding = "async";
+    picture.src = url;
+    const entry: Ahead = { url, picture, since: performance.now(), done: false };
+    ahead.current.set(item.id, entry);
+    const decoded = picture.decode?.() ?? new Promise<void>((arrived) => (picture.onload = picture.onerror = () => arrived()));
+    // A picture that cannot be had is not waited for either.
+    Promise.all([decoded.catch(() => {}), useStore.getState().loadMeta(item.id)]).then(() => {
+      entry.done = true;
+      pump.current();
+    });
+    return entry;
+  };
+
+  // Metadata for what is on screen, and the photos either side of the pane in use fetched ahead,
+  // further the way the pages are being turned.
   useEffect(() => {
     const st = useStore.getState();
     slotItems.forEach((it) => it && st.loadMeta(it.id));
-    warm.current = [];
-    for (const d of [1, -1, 2]) {
-      const next = byId.get(viewer.ids[viewer.index + d]);
-      if (!next) continue;
-      const img = new Image();
-      img.src = imageUrl("screen", next.id, next.mtime, 2048);
-      warm.current.push(img);
-      // Decode the next photo at full size ahead of time so stepping forward is instant.
-      st.loadMeta(next.id).then((meta) => {
-        const now = useStore.getState();
-        if (d !== 1 || now.viewer?.ids[now.viewer.index] !== leftItem?.id) return;
-        const full = new Image();
-        full.decoding = "async";
-        full.src = fullUrlOf(next, meta, { mobile, autoDevelop: settings.autoDevelop, nikon: !!now.info?.nikon_sdk, look: lookOf(now.looks, next) });
-        full.decode?.().catch(() => {});
-        warm.current.push(full);
-      });
-    }
-  }, [slotKey]);
+    const at = indices[active] ?? viewer.index;
+    const dir = heading.current;
+    const beside = (d: number) => byId.get(viewer.ids[at + d]);
+    const near = [...Array.from({ length: mobile ? 1 : AHEAD }, (_, i) => beside((i + 1) * dir)), beside(-dir)].filter((it) => !!it);
+    const keep = new Set(near.map((it) => it.id));
+    ahead.current.forEach((_, id) => keep.has(id) || ahead.current.delete(id));
+    near.forEach(fetchAhead);
+    // A photo that is looked at rather than passed has the next one decoded at full size too,
+    // so stepping on is sharp at once.
+    const next = beside(dir);
+    const hurried = performance.now() - landed.current < HURRY_MS;
+    landed.current = performance.now();
+    let passed = false;
+    const timer = setTimeout(async () => {
+      if (!next) return;
+      const meta = await st.loadMeta(next.id);
+      if (passed) return;
+      const now = useStore.getState();
+      const full = new Image();
+      full.decoding = "async";
+      full.src = fullUrlOf(next, meta, { mobile, autoDevelop: settings.autoDevelop, nikon: !!now.info?.nikon_sdk, look: lookOf(now.looks, next) });
+      full.decode?.().catch(() => {});
+      aheadFull.current = full;
+    }, hurried ? HURRY_MS : 0);
+    return () => {
+      passed = true;
+      clearTimeout(timer);
+    };
+  }, [slotKey, active]);
 
   // The frames of the stack the photo on screen is in, as far as the viewer holds them.
   const inViewer = useMemo(() => new Set(viewer.ids), [viewer.ids]);
@@ -302,6 +354,8 @@ export function Viewer() {
   /** Puts the photo at `index` in one pane; the first pane is the viewer's own position. */
   const setSlot = useCallback(
     (slot: number, index: number) => {
+      // A photo chosen by hand is where the pages turn from; those still to turn are forgotten.
+      turns.current.steps = 0;
       if (index < 0 || index >= viewer.ids.length) return;
       if (slot === 0) useStore.getState().setViewerIndex(index);
       else setExtra((e) => e.map((v, i) => (i === slot - 1 ? index : v)));
@@ -309,23 +363,67 @@ export function Viewer() {
     [viewer.ids.length],
   );
 
-  /** Steps the pane that has the keyboard. */
-  const step = useCallback((delta: number) => setSlot(active, indices[active] + delta), [setSlot, active, indexKey]);
-
   /** Shows another photo in the pane that has the keyboard. */
   const show = useCallback((index: number) => setSlot(active, index), [setSlot, active]);
 
-  /** Leaves the stack on screen for the one after or before it; a photo on its own is a stack of one. */
-  const stepStack = (delta: number) => {
-    const ids = viewer.ids;
+  /** Where a step leaves the stack at `from` for the one after or before it; a photo on its own is a stack of one. */
+  const stackBeside = (ids: string[], from: number, delta: number) => {
     const key = (i: number) => (settings.stacks ? stackOf[ids[i]]?.[0] : undefined) ?? `one:${i}`;
-    const from = indices[active];
     let i = from + delta;
     while (i >= 0 && i < ids.length && key(i) === key(from)) i += delta;
     // Going back lands on the first frame of the stack before.
     while (delta < 0 && i > 0 && key(i - 1) === key(i)) i--;
-    show(i);
+    return i;
   };
+
+  // Makes the next page turn that was asked for, once the photo it leads to has arrived and the
+  // one on screen has been shown: holding a key or spinning the wheel passes no photo unseen and
+  // never shows an empty pane. The photos are fetched ahead, so a turn normally waits for nothing.
+  const extraNow = useRef(extra);
+  extraNow.current = extra;
+  pump.current = () => {
+    const q = turns.current;
+    const now = useStore.getState().viewer;
+    clearTimeout(q.timer);
+    if (!q.steps || !now) return;
+    const dir = q.steps > 0 ? 1 : -1;
+    const at = active === 0 ? now.index : extraNow.current[active - 1];
+    const to = q.stacks ? stackBeside(now.ids, at, dir) : at + dir;
+    const next = byId.get(now.ids[to]);
+    // The end of the folder.
+    if (!next) return void (q.steps = 0);
+    // Each of the two pictures is waited for, but not for ever.
+    const coming = fetchAhead(next);
+    const awaited = [...(coming.done ? [] : [coming.since]), ...(shown.current[active] === now.ids[at] ? [] : [placed.current.at])];
+    const wait = awaited.length ? Math.max(...awaited) + TURN_PATIENCE_MS - performance.now() : 0;
+    if (wait > 0) {
+      q.timer = window.setTimeout(() => pump.current(), wait);
+      return;
+    }
+    q.steps -= dir;
+    heading.current = dir;
+    placed.current = { id: next.id, at: performance.now() };
+    if (active === 0) useStore.getState().setViewerIndex(to);
+    else setExtra((extraNow.current = extraNow.current.map((v, i) => (i === active - 1 ? to : v))));
+    if (q.steps) q.timer = window.setTimeout(() => pump.current(), TURN_PATIENCE_MS);
+  };
+  useEffect(() => {
+    turns.current.steps = 0;
+  }, [active]);
+  useEffect(() => () => clearTimeout(turns.current.timer), []);
+
+  /** Turns a page in the pane that has the keyboard, or with `stacks` goes on to the next
+   * stack. Steps asked for one by one are all made, a few of them waiting their turn; a key
+   * that is `held` asks to keep going, not for a page per repeat. */
+  const step = useCallback((delta: number, held = false, stacks = false) => {
+    const q = turns.current;
+    const dir = delta > 0 ? 1 : -1;
+    // Turning the other way forgets what was still to come.
+    const onward = q.stacks === stacks && Math.sign(q.steps) === dir;
+    q.steps = !onward ? dir : held ? q.steps : Math.max(-TURNS_AHEAD, Math.min(TURNS_AHEAD, q.steps + dir));
+    q.stacks = stacks;
+    pump.current();
+  }, []);
 
   // Making a Live Photo from the burst on screen. A file that is a second copy
   // of an exposure is not a frame of it. Indices are into `liveSource`.
@@ -460,9 +558,13 @@ export function Viewer() {
   const cycleGuides = (delta: number) => setGuides((g) => (g + delta + GUIDE_MODES) % GUIDE_MODES);
   const rotateGuides = () => setFlip((f) => (f + 1) % 4);
 
-  /** After marking a photo, optionally move on (not while comparing). */
+  /** After marking a photo, optionally move on (not while comparing). The photo was looked at,
+   * and the next key is meant for the next one, so this page turns without waiting for its picture. */
   const advance = () => {
-    if (settings.autoAdvance && !compare) step(1);
+    const at = useStore.getState().viewer?.index;
+    if (!settings.autoAdvance || compare || at === undefined) return;
+    heading.current = 1;
+    setSlot(0, at + 1);
   };
 
   const setFlag = (value: number) => {
@@ -564,8 +666,8 @@ export function Viewer() {
       if (!action) {
         // Arrow keys always step, unless they were assigned to something.
         if (e.metaKey || e.ctrlKey || e.altKey) return;
-        if (e.key === "ArrowRight") return step(1);
-        if (e.key === "ArrowLeft") return step(-1);
+        if (e.key === "ArrowRight") return step(1, e.repeat);
+        if (e.key === "ArrowLeft") return step(-1, e.repeat);
         if (e.key === "?") return st.setSheet("help");
         return;
       }
@@ -578,13 +680,13 @@ export function Viewer() {
         case "tags":
           return openTags();
         case "next":
-          return step(1);
+          return step(1, e.repeat);
         case "prev":
-          return step(-1);
+          return step(-1, e.repeat);
         case "stackNext":
-          return stepStack(1);
+          return step(1, e.repeat, true);
         case "stackPrev":
-          return stepStack(-1);
+          return step(-1, e.repeat, true);
         case "pick":
           return setFlag(1);
         case "reject":
@@ -635,16 +737,19 @@ export function Viewer() {
   });
 
   if (!leftItem || !current) return null;
+  shown.current.length = indices.length;
+  if (placed.current.id !== current.id) placed.current = { id: current.id, at: performance.now() };
 
   const relay = (from: number) => (n: Nudge) => {
     if (compare && link) panes.forEach((p, i) => i !== from && i < indices.length && p.current?.nudge(n));
   };
-  const wheelZoom = settings.wheelZoom ?? info?.platform !== "macos";
   const sdk = !!info?.nikon_sdk;
   const paneProps = {
     insets,
     mobile,
-    wheelZoom,
+    wheel: wheelModeOf(settings, info?.platform),
+    notch: wheelNotch(info?.platform),
+    onBack: settings.doubleClick === "back" && !crop && !live ? () => useStore.getState().closeViewer() : undefined,
     // Zooming out of a photo that fits goes back to the grid, as zooming into the grid came here.
     onZoomOut: crop || live || mobile || compare ? undefined : () => useStore.getState().closeViewer(),
     autoDevelop: settings.autoDevelop,
@@ -751,6 +856,10 @@ export function Viewer() {
                     onSwipe={step}
                     onZoom={(percent, fit) => active === i && setZoom({ percent, fit })}
                     onStatus={reportStatus(i)}
+                    onShown={(id) => {
+                      shown.current[i] = id;
+                      pump.current();
+                    }}
                   />
                   {compare && !immersive && (
                     <SlotBar

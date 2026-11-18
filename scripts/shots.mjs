@@ -428,6 +428,276 @@ await session("trackpad", desktop, async (page) => {
   console.log(`[trackpad] pinch: ${fit}% -> ${zoomed}%; scrolling while zoomed keeps the photo: ${(await title()) === first}`);
 });
 
+// Mouse: what the wheel and a double click do in the viewer is chosen in Settings.
+await session("mouse", { ...desktop, platform: "windows" }, async (page, shot) => {
+  await openLibrary(page);
+  const settings = async (...choices) => {
+    await page.locator('[aria-label="更多"]').click();
+    await page.getByRole("menuitem", { name: "设置" }).click();
+    for (const name of choices) await page.locator(".sheet").getByRole("tab", { name, exact: true }).click();
+    const chosen = await page.locator('.sheet [role="tab"][aria-selected="true"]').allTextContents();
+    return chosen.slice(1).join(", ");
+  };
+  const position = async () => Number((await page.locator(".viewer-title span").first().textContent()).split("/")[0]);
+  const zoom = async () => Number((await page.locator(".zoom-pill").textContent()).replace("%", ""));
+  const open = async () => {
+    await page.locator(".cell").nth(4).dblclick();
+    await page.locator(".tier.full.ready").waitFor({ timeout: 20000 });
+    const box = await page.locator(".pane").boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    return [box.x + box.width / 2, box.y + box.height / 2];
+  };
+  const notches = async (n, dy, wait) => {
+    for (let i = 0; i < n; i++) {
+      await page.mouse.wheel(0, dy);
+      if (wait) await page.waitForTimeout(wait);
+    }
+    await page.waitForTimeout(250);
+  };
+
+  console.log(`[mouse] as installed on Windows: ${await settings()}`);
+  await page.keyboard.press("Escape");
+  let [x, y] = await open();
+  const fit = await zoom();
+  await notches(3, -100, 120);
+  console.log(`[mouse] wheel zooms: ${fit}% -> ${await zoom()}%, photo ${await position()} (stays 5)`);
+  await page.keyboard.press("Z");
+  await page.mouse.dblclick(x, y);
+  await page.waitForTimeout(300);
+  console.log(`[mouse] double click zooms: ${fit}% -> ${await zoom()}%, viewer open: ${(await page.locator(".viewer").count()) > 0}`);
+  await page.keyboard.press("Escape");
+
+  console.log(`[mouse] chosen: ${await settings("切换照片", "返回列表")}`);
+  await shot("settings");
+  await page.keyboard.press("Escape");
+  [x, y] = await open();
+  const seen = [await position()];
+  await notches(3, 100, 120);
+  seen.push(await position());
+  await notches(2, -100, 120);
+  seen.push(await position());
+  // Spun fast: every notch still counts (100 here is a notch on Windows whatever the display scale).
+  await notches(6, 100, 0);
+  seen.push(await position());
+  await notches(6, -100, 0);
+  seen.push(await position());
+  // Sped up by the system, as on a Mac: slow notches are small and each turns a page.
+  await notches(3, 4, 120);
+  seen.push(await position());
+  await notches(3, -4, 120);
+  seen.push(await position());
+  console.log(`[mouse] wheel turns pages: ${seen.join(" -> ")} (expected 5 -> 8 -> 6 -> 12 -> 6 -> 9 -> 6)`);
+  // A trackpad sends a dense stream of small steps: a page per notch of travel, not one per event.
+  await page.evaluate(async () => {
+    const pane = document.querySelector(".pane");
+    for (let i = 0; i < 40; i++) {
+      pane.dispatchEvent(new WheelEvent("wheel", { deltaY: 5, bubbles: true, cancelable: true }));
+      await new Promise((r) => setTimeout(r, 10));
+    }
+  });
+  await page.waitForTimeout(250);
+  console.log(`[mouse] forty small steps 10 ms apart, four notches of travel: ${seen.at(-1)} -> ${await position()} (4 photos, not 40)`);
+  await page.keyboard.down("Control");
+  await notches(8, -10, 0);
+  await page.keyboard.up("Control");
+  const before = await position();
+  console.log(`[mouse] Ctrl + wheel still zooms: ${fit}% -> ${await zoom()}%`);
+  await notches(2, 100, 120);
+  console.log(`[mouse] wheel turns pages from a zoomed photo too: ${before} -> ${await position()}`);
+  const name = await page.locator(".viewer-title strong").textContent();
+  await page.mouse.dblclick(x, y);
+  await page.waitForTimeout(400);
+  const cursor = await page.locator(".cell.selected, .cell.cursor").first().locator("img").first().getAttribute("src");
+  console.log(`[mouse] double click goes back: viewer open ${(await page.locator(".viewer").count()) > 0}, the grid is on ${name}: ${decodeURIComponent(cursor ?? "").includes(name)}`);
+  await page.locator(".cell.selected, .cell.cursor").first().dblclick();
+  await page.locator(".tier.full.ready").waitFor({ timeout: 20000 });
+  console.log(`[mouse] and a double click in the grid opens it again: ${(await page.locator(".viewer-title strong").textContent()) === name}`);
+  // Cropping keeps the double click for itself.
+  await page.keyboard.press("R");
+  await page.mouse.dblclick(x, y);
+  await page.waitForTimeout(300);
+  console.log(`[mouse] double click while cropping stays in the viewer: ${(await page.locator(".viewer").count()) > 0}`);
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  await page.locator('[aria-label="更多"]').click();
+  await page.getByRole("menuitem", { name: "帮助" }).click();
+  const rows = await page.locator(".key-list > div").allTextContents();
+  console.log(`[mouse] help lists: ${rows.filter((r) => /滚轮|双击/.test(r)).join(" | ")}`);
+  await shot("help");
+  await page.keyboard.press("Escape");
+
+  // A setting saved by 0.4.2, where the wheel either zoomed or did not.
+  await page.addInitScript(() => localStorage.setItem("sift.settings", JSON.stringify({ onboarded: true, wheelZoom: false })));
+  await page.reload();
+  await page.locator(".cell img").first().waitFor();
+  console.log(`[mouse] "wheel zooms" switched off in 0.4.2 becomes: ${await settings()}`);
+});
+
+// Turning pages: holding a key, or spinning a wheel set to turn them, passes no photo unseen and never
+// shows an empty pane, also when the pictures arrive slowly (SLOW=<ms> on each picture and its metadata).
+await session("hold", { ...desktop, platform: "windows" }, async (page) => {
+  await page.addInitScript(() => localStorage.setItem("sift.settings", JSON.stringify({ onboarded: true, wheel: "turn", autoAdvance: true })));
+  const slow = Number(process.env.SLOW ?? 150);
+  let heavy = 0;
+  page.on("request", (r) => /\/img\/(full|dev|orig|look|clip|live)\b/.test(r.url()) && heavy++);
+  const position = async () => Number((await page.locator(".viewer-title span").first().textContent()).split("/")[0]);
+  // A reload forgets the pictures the page holds; the folder, and the photo that was open, come back by themselves.
+  const open = async (first) => {
+    await page.reload();
+    await page.locator(".welcome button.primary, .cell img, .viewer").first().waitFor();
+    await page.locator(".welcome button.primary").click({ timeout: 1000 }).catch(() => {});
+    await page.locator(".cell img, .viewer").first().waitFor();
+    if (first && (await page.locator(".viewer").count())) await page.keyboard.press("Escape");
+    if (!(await page.locator(".viewer").count())) await page.locator(".cell").first().dblclick();
+    await page.locator(".tier.full.ready").waitFor({ timeout: 20000 });
+    const box = await page.locator(".pane").boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.waitForTimeout(600);
+  };
+  // What the pane shows, frame by frame: the photo the title names, whole, in its own shape.
+  const watch = (pane = 0) =>
+    page.evaluate((pane) => {
+      const log = (window.__turns = { frames: [], on: true });
+      const tick = () => {
+        const at = Number(document.querySelector(".viewer-title span")?.textContent.split("/")[0]);
+        const name = document.querySelector(".viewer-title strong")?.textContent ?? "";
+        const img = document.querySelectorAll(".pane")[pane]?.querySelector(".canvas .tier:not(.full):not(.clip)");
+        const full = img?.parentElement;
+        const there = !!img && img.complete && img.naturalWidth > 0 && decodeURIComponent(img.getAttribute("src")).includes(name);
+        const shaped = there && Math.abs(full.offsetWidth / full.offsetHeight / (img.naturalWidth / img.naturalHeight) - 1) < 0.02;
+        log.frames.push([at, there, shaped, performance.now()]);
+        if (log.on) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    }, pane);
+  const watched = async () => {
+    // Let the last page asked for arrive.
+    for (let last = -1, at = await position(); at !== last; last = at, at = await position()) await page.waitForTimeout(400 + slow * 2);
+    const frames = await page.evaluate(() => ((window.__turns.on = false), window.__turns.frames));
+    const passed = [...new Set(frames.map((f) => f[0]))];
+    const seen = new Set(frames.filter((f) => f[1] && f[2]).map((f) => f[0]));
+    const turning = frames.filter((f) => f[0] !== frames[0][0] && f[0] !== frames.at(-1)[0]);
+    const pace = turning.length > 1 ? ((passed.length - 2) / (turning.at(-1)[3] - turning[0][3])) * 1000 : 0;
+    const unseen = passed.filter((p) => !seen.has(p));
+    const text = `${passed[0]} to ${passed.at(-1)}, ${passed.length} photos, ${unseen.length} never shown${unseen.length ? ` (${unseen.join(" ")})` : ""}, ${frames.filter((f) => !f[1]).length} of ${frames.length} frames without the picture, ${frames.filter((f) => f[1] && !f[2]).length} out of shape, ${pace.toFixed(0)} photos a second`;
+    return { text, passed };
+  };
+  const hold = async (key, events) => {
+    for (let i = 0; i < events; i++) {
+      await page.keyboard.down(key);
+      await page.waitForTimeout(33);
+    }
+    await page.keyboard.up(key);
+  };
+  const spin = async (notches, dy, gap) => {
+    for (let i = 0; i < notches; i++) {
+      await page.mouse.wheel(0, dy);
+      await page.waitForTimeout(gap);
+    }
+  };
+  const pass = async (label, run, pane) => {
+    heavy = 0;
+    await watch(pane);
+    await run();
+    console.log(`[hold] ${label}: ${(await watched()).text}; ${heavy} full-size pictures asked for on the way`);
+  };
+
+  await open(true);
+  await pass("→ held, 24 repeats", () => hold("ArrowRight", 24));
+  await pass("← held, 24 repeats", () => hold("ArrowLeft", 24));
+  await pass("wheel, 12 notches", () => spin(12, 100, 40));
+
+  // The same with every picture and its metadata arriving late.
+  await page.route(/\/img\/(screen|thumb)|\/invoke\/read_meta/, async (route) => {
+    await new Promise((r) => setTimeout(r, slow));
+    await route.continue();
+  });
+  await open(true);
+  await pass(`→ held, 30 repeats, pictures ${slow} ms late`, () => hold("ArrowRight", 30));
+  await open();
+  await pass(`← held, 12 repeats, pictures ${slow} ms late`, () => hold("ArrowLeft", 12));
+  await open();
+  await pass(`wheel, 8 notches, pictures ${slow} ms late`, () => spin(8, 100, 40));
+  await pass(`wheel back, 5 notches a quarter second apart, pictures ${slow} ms late`, () => spin(5, -100, 250));
+  // A single press on a photo that was rested on turns at once: its neighbours are fetched ahead.
+  await page.waitForTimeout(800 + slow * 2);
+  const before = await position();
+  const took = await page.evaluate(
+    () =>
+      new Promise((done) => {
+        const title = document.querySelector(".viewer-title span");
+        const was = title.textContent;
+        const start = performance.now();
+        const look = () => (title.textContent !== was && document.querySelector(".pane .canvas .tier").complete ? done(Math.round(performance.now() - start)) : requestAnimationFrame(look));
+        window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+        look();
+      }),
+  );
+  console.log(`[hold] one press after a rest, pictures ${slow} ms late: ${before} -> ${await position()}, shown after ${took} ms`);
+
+  // Going from stack to stack waits for its pictures the same way.
+  await open(true);
+  await watch();
+  await hold("ArrowDown", 30);
+  const stacks = await watched();
+  console.log(`[hold] ↓ held, stack to stack, pictures ${slow} ms late: ${stacks.text}; stopped at ${stacks.passed.join(" ")}`);
+
+  // Comparing, the pane in use is the one that waits; the other keeps its photo.
+  await open(true);
+  await page.keyboard.press("C");
+  await page.keyboard.press("Tab");
+  await page.waitForTimeout(600 + slow * 2);
+  const names = () => page.locator(".slot-name span").allTextContents();
+  const [left] = await names();
+  await pass(`→ held in the second of two panes, pictures ${slow} ms late`, () => hold("ArrowRight", 12), 1);
+  console.log(`[hold] the first pane kept its photo: ${(await names())[0] === left}`);
+  await page.keyboard.press("Escape");
+
+  // Marking with "go to the next photo" switched on turns the page at once: the next key is for the next photo.
+  await page.waitForTimeout(600 + slow * 2);
+  const marked = await position();
+  for (let i = 0; i < 5; i++) {
+    await page.keyboard.press("P");
+    await page.waitForTimeout(50);
+  }
+  await page.waitForTimeout(300 + slow * 2);
+  const moved = await position();
+  const picks = [];
+  for (let i = 0; i < 5; i++) {
+    await page.keyboard.press("ArrowLeft");
+    await page.waitForTimeout(250 + slow);
+    picks.push(await page.locator(".dock .pick.on").count());
+  }
+  console.log(`[hold] P five times 50 ms apart, pictures ${slow} ms late: ${marked} -> ${moved}; picked, going back over them: ${picks.join(" ")} (want 1 1 1 1 1)`);
+
+  // A picture that cannot be had holds nothing up; one that never arrives holds the page for two seconds, not for ever.
+  const lost = { how: "", url: "" };
+  await page.route(/\/img\/screen/, (route) => {
+    const url = route.request().url();
+    if (lost.how && !lost.url) lost.url = url;
+    if (url !== lost.url) return route.fallback();
+    if (lost.how === "broken") return route.abort();
+  });
+  const lostName = () => decodeURIComponent(lost.url).match(/[^/\\]+(?=&v=)/)?.[0];
+  await page.waitForTimeout(600 + slow * 2);
+  lost.how = "broken";
+  await watch();
+  await hold("ArrowRight", 12);
+  const broken = await watched();
+  console.log(`[hold] → held past a picture that cannot be read (${lostName()}): ${broken.text}`);
+  await page.waitForTimeout(600 + slow * 2);
+  Object.assign(lost, { how: "stalled", url: "" });
+  const from = await position();
+  let start = Date.now();
+  await hold("ArrowRight", 12);
+  await page.waitForFunction((name) => document.querySelector(".viewer-title strong").textContent === name, lostName(), { timeout: 10000 });
+  const waited = Date.now() - start;
+  const stuck = await position();
+  start = Date.now();
+  await page.keyboard.press("ArrowRight");
+  await page.waitForFunction((was) => !document.querySelector(".viewer-title span").textContent.startsWith(`${was} `), stuck, { timeout: 10000 });
+  console.log(`[hold] → held into a picture that never arrives (${lostName()}): ${from} to ${stuck}, turned to after ${waited} ms; pressed again there, the page turned after ${Date.now() - start} ms to ${await position()}`);
+});
 // Touch: pinch keeps the point between the fingers in place, never turns the page, and a flick glides.
 await session("touch", phone, async (page, shot) => {
   await openLibrary(page);

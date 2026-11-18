@@ -3,13 +3,16 @@ import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { useT } from "../lib/i18n";
 import { ACTIONS, DEFAULT_KEYS, comboOf, keyCaps, type Action } from "../lib/shortcuts";
-import { useStore } from "../lib/store";
+import { useStore, wheelModeOf, type Settings, type WheelMode } from "../lib/store";
 import { Row, Segmented, Sheet, Toggle } from "../ui/controls";
 import { UpdateSettings } from "./Update";
 
 const REPO = "https://github.com/kinyokun/sift";
 /** What Nikon asks of everyone using the engine that official builds include. */
 const NIKON_SDK_TERMS = `${REPO}/blob/main/NIKON_SDK_TERMS.md`;
+
+const WHEEL_MODES: WheelMode[] = ["zoom", "turn", "pan"];
+const DOUBLE_CLICKS: Settings["doubleClick"][] = ["zoom", "back"];
 
 function openLink(url: string) {
   openUrl(url).catch((e) => useStore.getState().notify(String(e)));
@@ -69,7 +72,7 @@ export function SettingsSheet({ onClose }: { onClose: () => void }) {
     return () => window.removeEventListener("keydown", onKey, true);
   }, [capturing, settings.keys]);
 
-  const wheelZoom = settings.wheelZoom ?? info?.platform !== "macos";
+  const wheel = wheelModeOf(settings, info?.platform);
 
   return (
     <Sheet title={t.settings} onClose={capturing ? () => setCapturing(null) : onClose}>
@@ -130,12 +133,25 @@ export function SettingsSheet({ onClose }: { onClose: () => void }) {
           <Row label={t.autoDevelop} hint={t.autoDevelopHint}>
             <Toggle checked={settings.autoDevelop} onChange={(autoDevelop) => setSettings({ autoDevelop })} />
           </Row>
-          {!mobile && (
-            <Row label={t.wheelZoom}>
-              <Toggle checked={wheelZoom} onChange={(v) => setSettings({ wheelZoom: v })} />
-            </Row>
-          )}
         </div>
+
+        {!mobile && (
+          <>
+            <h4>{t.mouse}</h4>
+            <div className="group">
+              <Row label={t.wheelMode} hint={t.wheelHints[wheel]}>
+                <Segmented value={wheel} options={WHEEL_MODES.map((value) => ({ value, label: t.wheelModes[value] }))} onChange={(wheel) => setSettings({ wheel })} />
+              </Row>
+              <Row label={t.doubleClick}>
+                <Segmented
+                  value={settings.doubleClick}
+                  options={DOUBLE_CLICKS.map((value) => ({ value, label: t.doubleClicks[value] }))}
+                  onChange={(doubleClick) => setSettings({ doubleClick })}
+                />
+              </Row>
+            </div>
+          </>
+        )}
 
         {!mobile && (
           <>
@@ -230,6 +246,8 @@ export function HelpSheet({ onClose }: { onClose: () => void }) {
   const keys = useStore((s) => s.settings.keys);
   const onboarded = useStore((s) => s.settings.onboarded);
   const mobile = useStore((s) => !!s.info?.mobile);
+  const wheel = useStore((s) => wheelModeOf(s.settings, s.info?.platform));
+  const doubleClick = useStore((s) => s.settings.doubleClick);
   const finish = () => {
     useStore.getState().setSettings({ onboarded: true });
     onClose();
@@ -246,6 +264,8 @@ export function HelpSheet({ onClose }: { onClose: () => void }) {
     [<KeyCap>Esc</KeyCap>, t.fixedKeys.esc],
     [t.mouseRight, t.fixedKeys.rightHold],
     [t.pinchOrCtrl, t.fixedKeys.pinch],
+    [t.mouseWheel, t.wheelModes[wheel]],
+    [t.mouseDouble, t.doubleClicks[doubleClick]],
   ];
   return (
     <Sheet

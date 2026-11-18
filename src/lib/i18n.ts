@@ -254,7 +254,16 @@ const zh = {
   shortcutClash: (name: string) => `已与“${name}”互换`,
   autoDevelop: "预览过小时自动解码 RAW",
   autoDevelopHint: "部分相机只内嵌 1080P 预览，解码后才能看清焦点",
-  wheelZoom: "滚轮直接缩放",
+  mouse: "鼠标",
+  wheelMode: "看图时滚动滚轮",
+  wheelModes: { zoom: "缩放", turn: "切换照片", pan: "移动画面" },
+  wheelHints: {
+    zoom: "以指针所在位置为中心放大、缩小",
+    turn: "滚一格换一张，Ctrl + 滚轮缩放",
+    pan: "适合触控板：放大后双指滑动移动画面，没放大时左右滑动换照片；Ctrl + 滚轮缩放",
+  },
+  doubleClick: "看图时双击照片",
+  doubleClicks: { zoom: "放大 / 还原", back: "返回列表" },
   shortcuts: "快捷键",
   pressKey: "按下新按键",
   resetShortcuts: "恢复默认",
@@ -353,6 +362,8 @@ const zh = {
   },
   mouseRight: "鼠标右键",
   pinchOrCtrl: "双指捏合 / Ctrl+滚轮",
+  mouseWheel: "滚轮",
+  mouseDouble: "双击照片",
 };
 
 type Dict = typeof zh;
@@ -607,7 +618,16 @@ const en: Dict = {
   shortcutClash: (name) => `Swapped with “${name}”`,
   autoDevelop: "Decode RAW when the preview is small",
   autoDevelopHint: "Some cameras embed only a 1080p preview; decoding shows real detail",
-  wheelZoom: "Scroll wheel zooms",
+  mouse: "Mouse",
+  wheelMode: "Scroll wheel in the viewer",
+  wheelModes: { zoom: "Zoom", turn: "Next photo", pan: "Pan" },
+  wheelHints: {
+    zoom: "Scrolling zooms in and out where the pointer is",
+    turn: "One notch, one photo. Ctrl + scroll zooms",
+    pan: "For trackpads: two fingers move a zoomed photo, a sideways swipe turns the page. Ctrl + scroll zooms",
+  },
+  doubleClick: "Double-click in the viewer",
+  doubleClicks: { zoom: "Zoom in / fit", back: "Back to the grid" },
   shortcuts: "Shortcuts",
   pressKey: "Press a key",
   resetShortcuts: "Restore defaults",
@@ -705,6 +725,8 @@ const en: Dict = {
   },
   mouseRight: "Right mouse button",
   pinchOrCtrl: "Pinch / Ctrl+scroll",
+  mouseWheel: "Scroll wheel",
+  mouseDouble: "Double-click",
 };
 
 export function resolveLang(setting: "auto" | "zh" | "en"): "zh" | "en" {

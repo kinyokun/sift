@@ -1,5 +1,6 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { NO_LOOK, imageUrl, isNefPath, isRawPath, type CropBox, type Item, type Meta } from "../lib/api";
+import type { WheelMode } from "../lib/store";
 import { ZOOM_PAST, ZOOM_REST_MS } from "../lib/wheelSize";
 import { Overlay, type Crop } from "./Overlay";
 
@@ -24,7 +25,11 @@ type Props = {
   dimmed: boolean;
   insets: { top: number; bottom: number };
   mobile: boolean;
-  wheelZoom: boolean;
+  wheel: WheelMode;
+  /** How far one notch of the wheel scrolls (`wheelNotch`). */
+  notch: number;
+  /** A double click leaves the photo instead of zooming into it. */
+  onBack?: () => void;
   autoDevelop: boolean;
   /** Nikon's SDK is installed: NEF looks come from it. */
   nikon: boolean;
@@ -48,6 +53,8 @@ type Props = {
   /** Ctrl + wheel or a pinch went on zooming out of a photo that already fits. */
   onZoomOut?: () => void;
   onStatus?: (status: PaneStatus) => void;
+  /** The photo's picture has been on screen for a frame, or will never be. */
+  onShown?: (id: string) => void;
 };
 
 export type PaneStatus = "developing" | "original" | "look" | "failed" | null;
@@ -73,6 +80,9 @@ export function fullUrlOf(item: Item, meta: Meta | null, opts: { mobile: boolean
 }
 
 const SCREEN_EDGE = 2048;
+
+/** The picture a photo is first shown with: quick to get, and what the viewer fetches ahead of a page turn. */
+export const screenUrlOf = (item: Item) => imageUrl("screen", item.id, item.mtime, SCREEN_EDGE);
 const MOBILE_FULL_EDGE = 4096;
 const NIKON_SCREEN_EDGE = 2560;
 const MAX_SCALE = 8;
@@ -84,11 +94,20 @@ const DOUBLE_TAP_SLOP = 36;
 const WHEEL_SWIPE_DISTANCE = 70;
 /** A trackpad scroll (and its momentum tail) ends after this much silence. */
 const WHEEL_QUIET_MS = 160;
+/** Wheel events further apart than this are separate notches; a trackpad sends one every frame. */
+const WHEEL_NOTCH_MS = 40;
+
+/** How far one notch of a mouse wheel scrolls, in the page's pixels. Windows does not speed
+ * the wheel up and reports a notch as 100 pixels of the screen, so fewer on a scaled display;
+ * macOS reports points, and a hundred of them is a fair page for a trackpad too. */
+export function wheelNotch(platform: string | undefined): number {
+  return platform === "macos" ? 100 : 100 / devicePixelRatio;
+}
 /** Glide after a flick: speed halves roughly every 225 ms and stops below this (px/ms). */
 const GLIDE_DECAY_MS = 325;
 const GLIDE_MIN_SPEED = 0.03;
 const GLIDE_START_SPEED = 0.15;
-/** Wait this long on a photo before fetching full resolution, so fast flipping stays light. */
+/** Wait this long on a photo before fetching full resolution (and the clipping mask), so fast flipping stays light. */
 const FULL_RES_DELAY_MS = 140;
 
 function orientedSize(meta: Meta): { w: number; h: number } | null {
@@ -111,26 +130,29 @@ export const Pane = forwardRef<PaneHandle, Props>(function Pane(props, ref) {
   );
   const [view, setViewState] = useState<View>({ scale: 1, tx: 0, ty: 0 });
   const [fitMode, setFitMode] = useState(true);
-  const [wantFull, setWantFull] = useState(false);
+  // The photo whose full-size picture is wanted. Kept by photo, so the one after it never starts
+  // out wanted for a render and fetches a picture nobody waited for.
+  const [fullOf, setFullOf] = useState<string | null>(null);
+  const wantFull = fullOf === item.id;
   // Which full-size image has arrived (or failed). Keyed by URL, so switching
   // photo or look can never leave a stale "ready" or "loading" behind.
   const [readyUrl, setReadyUrl] = useState<string | null>(null);
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
   // `view` and `fitMode` in here run ahead of the painted state during a
   // gesture, so a render must not write the older state values back.
-  const live = useRef({ view, dims, fullDims, frame, size, fitMode, insets });
-  Object.assign(live.current, { dims, fullDims, frame, size, insets });
+  const live = useRef({ view, dims, fullDims, frame, size, fitMode, insets, id: item.id });
+  Object.assign(live.current, { dims, fullDims, frame, size, insets, id: item.id });
 
   const original = props.look === NO_LOOK && item.paths.some(isRawPath);
   const styled = !!props.look && props.look !== NO_LOOK;
   const develop = original || styled || (!!meta?.raw && meta.low_res && props.autoDevelop);
-  const screenUrl = imageUrl("screen", item.id, item.mtime, SCREEN_EDGE);
+  const screenUrl = screenUrlOf(item);
   const fullUrl = fullUrlOf(item, meta, props);
   const fullReady = readyUrl === fullUrl;
   // The clipping warning is taken from what is on screen; a look still
   // rendering is not asked for a second time.
   const clipFrom = original || styled ? { ...lookSource(item, props), look: props.look! } : { path: item.id, edge: 0, look: undefined };
-  const clipUrl = props.clip && (fullReady || !(original || styled)) ? imageUrl("clip", clipFrom.path, item.mtime, clipFrom.edge, clipFrom.look) : null;
+  const clipUrl = props.clip && wantFull && (fullReady || !(original || styled)) ? imageUrl("clip", clipFrom.path, item.mtime, clipFrom.edge, clipFrom.look) : null;
 
   useLayoutEffect(() => {
     const el = box.current;
@@ -185,7 +207,7 @@ export const Pane = forwardRef<PaneHandle, Props>(function Pane(props, ref) {
       if (!d) return;
       const v = clamp(next);
       const isFit = v.scale <= fitView(d, s, ins).scale * 1.001;
-      if (!isFit) setWantFull(true);
+      if (!isFit) setFullOf(live.current.id);
       live.current.view = v;
       live.current.fitMode = isFit;
       if (!paint.current) paint.current = requestAnimationFrame(() => flush.current());
@@ -216,13 +238,13 @@ export const Pane = forwardRef<PaneHandle, Props>(function Pane(props, ref) {
     [apply],
   );
 
-  // New photo: reset to fit and take the size from metadata.
-  useEffect(() => {
-    setWantFull(false);
+  // New photo: reset to fit and take the size from metadata, before it is painted in the
+  // shape and place of the photo before.
+  useLayoutEffect(() => {
     setFitMode(true);
     live.current.fitMode = true;
     setDims(meta ? orientedSize(meta) : null);
-    const timer = setTimeout(() => setWantFull(true), FULL_RES_DELAY_MS);
+    const timer = setTimeout(() => setFullOf(item.id), FULL_RES_DELAY_MS);
     return () => clearTimeout(timer);
   }, [item.id, meta]);
 
@@ -241,10 +263,22 @@ export const Pane = forwardRef<PaneHandle, Props>(function Pane(props, ref) {
     }
   }, [dims, size.w, size.h, insets.top, insets.bottom]);
 
-  // A look is shown as soon as it is chosen, without waiting for the usual delay.
+  // A look is shown as soon as it is chosen, without waiting for the usual delay; one that
+  // comes with the photo waits like any full-size picture.
+  const chosen = useRef({ id: item.id, look: props.look });
   useEffect(() => {
-    if (props.look) setWantFull(true);
-  }, [props.look]);
+    if (props.look && chosen.current.id === item.id && chosen.current.look !== props.look) setFullOf(item.id);
+    chosen.current = { id: item.id, look: props.look };
+  }, [item.id, props.look]);
+
+  // The viewer turns the page only after this photo was shown: tell it once a frame with the picture is out.
+  const shown = useRef(0);
+  useEffect(() => () => cancelAnimationFrame(shown.current), []);
+  const onPicture = () => {
+    const id = item.id;
+    cancelAnimationFrame(shown.current);
+    shown.current = requestAnimationFrame(() => setTimeout(() => props.onShown?.(id)));
+  };
 
   // What the pane is busy with, for the viewer's status pill.
   const busy: PaneStatus = !develop ? null : failedUrl === fullUrl ? "failed" : wantFull && !fullReady ? (styled ? "look" : original ? "original" : "developing") : null;
@@ -286,6 +320,9 @@ export const Pane = forwardRef<PaneHandle, Props>(function Pane(props, ref) {
   const onZoomOut = useRef(props.onZoomOut);
   onZoomOut.current = props.onZoomOut;
 
+  /** The wheel turning pages: when it last moved, which way, and how far since the last page. */
+  const turning = useRef({ last: -Infinity, direction: 0, travel: 0 });
+
   // Wheel and trackpad gestures need non-passive listeners.
   useEffect(() => {
     const el = box.current;
@@ -323,7 +360,23 @@ export const Pane = forwardRef<PaneHandle, Props>(function Pane(props, ref) {
         if (!pinching) zoomAt(x, y, v.scale * Math.exp(-e.deltaY * 0.012));
         return;
       }
-      if (props.wheelZoom) return zoomAt(x, y, v.scale * Math.exp(-e.deltaY * 0.0022));
+      if (props.wheel === "zoom") return zoomAt(x, y, v.scale * Math.exp(-e.deltaY * 0.0022));
+      if (props.wheel === "turn") {
+        const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+        if (!delta) return;
+        const turn = turning.current;
+        const direction = delta > 0 ? 1 : -1;
+        // A notch of a wheel arrives on its own and turns a page, however little it scrolls
+        // (macOS makes slow notches small). Otherwise a page is a notch of travel: in events
+        // that follow each other closely (a trackpad, a wheel spinning freely), and in one
+        // that stands for several notches (the browser adds up what it could not deliver).
+        const alone = e.timeStamp - turn.last > WHEEL_NOTCH_MS || direction !== turn.direction;
+        const travel = (alone ? 0 : turn.travel) + Math.abs(delta) * (e.deltaMode === 1 ? props.notch / 3 : e.deltaMode === 2 ? props.notch : 1);
+        const pages = Math.max(alone ? 1 : 0, Math.floor(travel / props.notch));
+        Object.assign(turn, { last: e.timeStamp, direction, travel: Math.max(0, travel - pages * props.notch) });
+        for (let i = 0; i < pages; i++) props.onSwipe?.(direction);
+        return;
+      }
       if (!scroll.quiet) Object.assign(scroll, { dx: 0, turned: false, startedFit: fit });
       clearTimeout(scroll.quiet);
       scroll.quiet = window.setTimeout(() => (scroll.quiet = 0), WHEEL_QUIET_MS);
@@ -375,7 +428,7 @@ export const Pane = forwardRef<PaneHandle, Props>(function Pane(props, ref) {
       el.removeEventListener("gesturechange", onGestureChange);
       el.removeEventListener("gestureend", onGestureEnd);
     };
-  }, [apply, zoomAt, props.wheelZoom, props.onSwipe]);
+  }, [apply, zoomAt, props.wheel, props.notch, props.onSwipe]);
 
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const gesture = useRef({
@@ -567,8 +620,6 @@ export const Pane = forwardRef<PaneHandle, Props>(function Pane(props, ref) {
     }
   };
 
-
-
   // Focus areas are recorded for the whole frame; move them into the crop.
   const afBoxes = useMemo(() => {
     const boxes = meta?.af?.boxes ?? null;
@@ -587,7 +638,7 @@ export const Pane = forwardRef<PaneHandle, Props>(function Pane(props, ref) {
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
       onLostPointerCapture={onPointerUp}
-      onDoubleClick={(e) => !gesture.current.touching && toggleAt(e)}
+      onDoubleClick={(e) => !gesture.current.touching && (props.onBack ? props.onBack() : toggleAt(e))}
       onContextMenu={(e) => e.preventDefault()}
     >
       {dims && fullDims ? (
@@ -599,7 +650,7 @@ export const Pane = forwardRef<PaneHandle, Props>(function Pane(props, ref) {
             className="canvas-full"
             style={{ width: fullDims.w, height: fullDims.h, left: -(frame?.[0] ?? 0) * fullDims.w, top: -(frame?.[1] ?? 0) * fullDims.h }}
           >
-          <img className="tier" src={screenUrl} alt="" draggable={false} decoding="async" />
+          <img className="tier" src={screenUrl} alt="" draggable={false} decoding="async" onLoad={onPicture} onError={onPicture} />
           {wantFull && (
             <img
               key={fullUrl}
@@ -616,7 +667,7 @@ export const Pane = forwardRef<PaneHandle, Props>(function Pane(props, ref) {
           </div>
         </div>
       ) : (
-        <img className="placeholder" src={imageUrl("thumb", item.id, item.mtime, 512)} alt="" draggable={false} />
+        <img className="placeholder" src={imageUrl("thumb", item.id, item.mtime, 512)} alt="" draggable={false} onLoad={onPicture} onError={onPicture} />
       )}
       {dims && (
         <Overlay
