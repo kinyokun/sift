@@ -6,10 +6,12 @@
 //! packet (`ast:XMLPackets`), next to every adjustment made there. A rating
 //! written into the photo alone leaves that copy behind, so both are brought
 //! in step with the file. Nothing else in the sidecar is touched, and one is
-//! never created.
+//! never created. The other way round, the stars given in Nikon's software
+//! are read from `nine:Rating` when a folder is listed ([`Sidecars`]).
 
 use crate::io::find;
 use crate::xmp::{self, Patch};
+use std::collections::HashMap;
 use std::fs;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
@@ -36,6 +38,46 @@ pub fn sync(photo: &Path, rating: u8) -> std::io::Result<bool> {
             Ok(true)
         }
         _ => Ok(false),
+    }
+}
+
+/// The rating Nikon's software keeps in a sidecar, when it has given one:
+/// none is `None`, like a sidecar without the field.
+pub fn rating(doc: &[u8]) -> Option<u8> {
+    let range = value(doc, b"<nine:Rating>", b"</nine:Rating>", 0)?;
+    let stars = std::str::from_utf8(&doc[range]).ok()?.trim().parse::<u8>().ok()?;
+    (1..=5).contains(&stars).then_some(stars)
+}
+
+/// The sidecars of the photos of one folder, from one listing of its
+/// `NKSC_PARAM`: asking for each photo's on its own is a round trip per
+/// photo on a network share.
+pub struct Sidecars {
+    /// By the photo's name without the extension, in lower case: the photo's name, and its sidecar.
+    by_stem: HashMap<String, Vec<(String, PathBuf)>>,
+}
+
+impl Sidecars {
+    /// `None` for a folder Nikon's software has kept nothing about.
+    pub fn of(dir: &Path) -> Option<Sidecars> {
+        let mut by_stem: HashMap<String, Vec<(String, PathBuf)>> = HashMap::new();
+        for entry in fs::read_dir(dir.join("NKSC_PARAM")).ok()?.flatten() {
+            let name = entry.file_name().to_string_lossy().to_lowercase();
+            let Some(photo) = name.strip_suffix(".nksc") else { continue };
+            let stem = Path::new(photo).file_stem().unwrap_or_default().to_string_lossy().into_owned();
+            by_stem.entry(stem).or_default().push((photo.to_string(), entry.path()));
+        }
+        (!by_stem.is_empty()).then_some(Sidecars { by_stem })
+    }
+
+    /// The stars `photo` was given in Nikon's software: in its own sidecar,
+    /// else in that of the other file of its pair, which is rated with it there.
+    pub fn rating(&self, photo: &Path) -> Option<u8> {
+        let name = photo.file_name()?.to_string_lossy().to_lowercase();
+        let alike = self.by_stem.get(Path::new(&name).file_stem()?.to_str()?)?;
+        let stars = |side: &PathBuf| fs::read(side).ok().and_then(|doc| rating(&doc));
+        let own = alike.iter().find(|(photo, _)| *photo == name).and_then(|(_, side)| stars(side));
+        own.or_else(|| alike.iter().filter(|(photo, _)| *photo != name).find_map(|(_, side)| stars(side)))
     }
 }
 
@@ -191,6 +233,34 @@ mod tests {
             .and_then(|r| std::str::from_utf8(&doc[r]).ok()?.parse().ok());
         let copied = packet(doc).and_then(|r| xmp::read_rating(&decode(&doc[r])?));
         (own, copied)
+    }
+
+    #[test]
+    fn the_stars_given_in_nikons_software_are_read() {
+        assert_eq!(rating(&sidecar(&camera_packet("0"), "<nine:Rating>4</nine:Rating>")), Some(4));
+        // No stars, no field, and a number that is not a rating all say nothing.
+        assert_eq!(rating(&sidecar(&camera_packet("3"), "<nine:Rating>0</nine:Rating>")), None);
+        assert_eq!(rating(&sidecar(&camera_packet("3"), "<nine:Label>2</nine:Label>")), None);
+        assert_eq!(rating(&sidecar(&camera_packet("3"), "<nine:Rating>9</nine:Rating>")), None);
+
+        let dir = std::env::temp_dir().join(format!("sift-nksc-read-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        assert!(Sidecars::of(&dir).is_none());
+        fs::create_dir_all(dir.join("NKSC_PARAM")).unwrap();
+        let keep = |photo: &str, stars: &str| fs::write(dir.join("NKSC_PARAM").join(format!("{photo}.nksc")), sidecar(&camera_packet("0"), &format!("<nine:Rating>{stars}</nine:Rating>"))).unwrap();
+        keep("DSC_0001.NEF", "5");
+        keep("DSC_0001.JPG", "0");
+        keep("DSC_0002.NEF", "2");
+        keep("DSC_0002.JPG", "3");
+        keep("DSC_0003.NEF", "0");
+        let sides = Sidecars::of(&dir).unwrap();
+        // The file's own sidecar first, then its pair's; names are matched without regard to case.
+        assert_eq!(sides.rating(&dir.join("DSC_0001.JPG")), Some(5));
+        assert_eq!(sides.rating(&dir.join("dsc_0002.jpg")), Some(3));
+        assert_eq!(sides.rating(&dir.join("DSC_0002.NEF")), Some(2));
+        assert_eq!(sides.rating(&dir.join("DSC_0003.NEF")), None);
+        assert_eq!(sides.rating(&dir.join("DSC_0004.NEF")), None);
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

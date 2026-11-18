@@ -476,23 +476,38 @@ export const useStore = create<State>((set, get) => {
     setSettings({ tagNames: [name, ...settings.tagNames.filter((n) => !sameName(n, name))].slice(0, MAX_TAG_NAMES) });
   };
 
-  const readRatings = async (path: string, items: Item[]) => {
-    // Ratings and capture times live in the files; read them in the background in batches.
+  /** Reads ratings and capture times from the files, in batches. `again` is for photos read before: stars that
+   * are no longer there are taken away, and a file that cannot be read is passed over. False when the folder
+   * was left meanwhile. */
+  const readBriefs = async (path: string, items: Item[], again = false): Promise<boolean> => {
     const BATCH = 200;
     for (let i = 0; i < items.length; i += BATCH) {
       const part = items.slice(i, i + BATCH);
-      const values = await api.readBriefs(part.map((it) => it.id));
-      if (get().folder !== path) return;
+      const before = get().ratings;
+      const ids = part.map((it) => it.id);
+      const values = await (again ? api.readBriefs(ids).catch(() => []) : api.readBriefs(ids));
+      if (get().folder !== path) return false;
       const ratings = { ...get().ratings };
       const dates = { ...get().dates };
       part.forEach((it, k) => {
-        if (values[k]?.rating) ratings[it.id] = values[k].rating;
-        if (values[k]?.date) dates[it.id] = values[k].date;
+        const value = values[k];
+        if (!value) return;
+        // Stars given while the files were being read are the newer ones.
+        if (ratings[it.id] === before[it.id]) {
+          if (value.rating) ratings[it.id] = value.rating;
+          else if (again) delete ratings[it.id];
+        }
+        if (value.date) dates[it.id] = value.date;
       });
       set({ ratings, dates });
     }
-    // Every file has been read by now, so the stacks cost no second pass.
-    await group(path, items);
+    return true;
+  };
+
+  const readRatings = async (path: string, items: Item[]) => {
+    // Ratings and capture times live in the files; they are read in the background.
+    // Every file has been read by the end, so the stacks cost no second pass.
+    if (await readBriefs(path, items)) await group(path, items);
   };
 
   /** Finds the bursts and pixel-shift series among `items`. */
@@ -513,25 +528,10 @@ export const useStore = create<State>((set, get) => {
     return run;
   };
 
-  /** Lists the open folder again and takes over what is different. */
-  const relist = async (manual: boolean) => {
-    const folder = get().folder;
-    if (!folder || get().loading) return;
-    // The first reading of the folder ends with stacks made from its own list of photos.
-    await reading;
-    if (get().folder !== folder) return;
-    const { settings, deep } = get();
-    let items: Item[];
-    let stamp: string;
-    try {
-      stamp = await api.folderChanges(folder, deep);
-      items = await api.scanFolder(folder, settings.pair, settings.preferRaw, deep);
-      if (get().folder !== folder) return;
-    } catch (e) {
-      // A share that dropped off for a moment says nothing about the photos.
-      if (manual) get().notify(String(e));
-      return;
-    }
+  /** Takes over a new list of the folder's photos: what is known about the ones that are gone or were written
+   * again is dropped, and cursor, selection and viewer move to the nearest photo that is still there. `lost`
+   * says the photo on screen in the viewer was among the ones that went. */
+  const adopt = (items: Item[]) => {
     const old = get().items;
     const before = new Map(old.map((it) => [it.id, it]));
     const now = new Set(items.map((it) => it.id));
@@ -542,11 +542,7 @@ export const useStore = create<State>((set, get) => {
       const was = before.get(it.id);
       return was && (was.mtime !== it.mtime || was.size !== it.size || was.paths.length !== it.paths.length || (was.live ?? null) !== (it.live ?? null));
     });
-    seen = { folder, deep, stamp, unsettled: unsettled([...added, ...changed]) };
-    if (!added.length && !removed.length && !changed.length) {
-      if (manual) get().notify("refreshedSame");
-      return;
-    }
+    if (!added.length && !removed.length && !changed.length) return { added, removed, changed, lost: false };
     const stale = new Set([...removed, ...changed].map((it) => it.id));
     const fresh = <T,>(known: Record<string, T>) => Object.fromEntries(Object.entries(known).filter(([id]) => !stale.has(id)));
     // A photo that is gone hands its place to the next one that is still there, else the one before.
@@ -568,19 +564,42 @@ export const useStore = create<State>((set, get) => {
     const subfolder = get().subfolder;
     const narrowed = subfolder != null && items.some((it) => it.dir === subfolder) ? subfolder : null;
     set({ items, subfolder: narrowed, ratings: fresh(ratings), dates: fresh(dates), metas: fresh(metas), viewer: shown, selection: kept.length ? kept : at ? [at] : [], cursor: at });
-    // Photos arriving from a card come in over many looks at the folder; only a refresh that was asked for reports.
-    if (manual) get().notify(`refreshed:${added.length},${removed.length}`);
-    else if (viewer && !now.has(viewer.ids[viewer.index])) get().notify("photoGone");
-    const reread = [...added, ...changed];
-    const briefs = await api.readBriefs(reread.map((it) => it.id)).catch(() => []);
+    return { added, removed, changed, lost: !!viewer && !now.has(viewer.ids[viewer.index]) };
+  };
+
+  /** Lists the open folder again and takes over what is different. */
+  const relist = async (manual: boolean) => {
+    const folder = get().folder;
+    if (!folder || get().loading) return;
+    // The first reading of the folder ends with stacks made from its own list of photos.
+    await reading;
     if (get().folder !== folder) return;
-    const next = { ratings: { ...get().ratings }, dates: { ...get().dates } };
-    reread.forEach((it, k) => {
-      if (briefs[k]?.rating) next.ratings[it.id] = briefs[k].rating;
-      if (briefs[k]?.date) next.dates[it.id] = briefs[k].date!;
-    });
-    set(next);
-    await group(folder, get().items);
+    const { settings, deep } = get();
+    let items: Item[];
+    let stamp: string;
+    try {
+      stamp = await api.folderChanges(folder, deep);
+      items = await api.scanFolder(folder, settings.pair, settings.preferRaw, deep);
+      if (get().folder !== folder) return;
+    } catch (e) {
+      // A share that dropped off for a moment says nothing about the photos.
+      if (manual) get().notify(String(e));
+      return;
+    }
+    const { added, removed, changed, lost } = adopt(items);
+    const reread = [...added, ...changed];
+    seen = { folder, deep, stamp, unsettled: unsettled(reread) };
+    const same = !reread.length && !removed.length;
+    // Photos arriving from a card come in over many looks at the folder; only a refresh that was asked for reports.
+    if (manual) get().notify(same ? "refreshedSame" : `refreshed:${added.length},${removed.length}`);
+    else if (lost) get().notify("photoGone");
+    if (reread.length && !(await readBriefs(folder, reread, true))) return;
+    if (!same) await group(folder, get().items);
+    // A refresh that was asked for also reads the stars of the photos that look the same: another program may
+    // have given some since, and Nikon's keeps them in a file of its own, which the listing says nothing about.
+    // Nothing waits for it.
+    const known = new Set(reread.map((it) => it.id));
+    if (manual) void readBriefs(folder, items.filter((it) => !known.has(it.id)), true);
   };
 
   /** The grid cell a photo is in. */

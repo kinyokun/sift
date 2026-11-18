@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use sift_core::af::AfBox;
 use sift_core::export::{self, CopyReport, Progress};
 use sift_core::frame::FrameOptions;
-use sift_core::{face, formats, frame, meta, preview, rating, stack};
+use sift_core::{face, formats, frame, meta, nksc, preview, rating, stack};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fs;
@@ -251,11 +251,21 @@ pub fn briefs_of(state: &AppState, paths: &[String]) -> Vec<meta::Brief> {
     let workers = std::thread::available_parallelism().map_or(4, |n| n.get()).min(8);
     let chunk = files.len().div_ceil(workers).max(1);
     let mut out = vec![meta::Brief::default(); files.len()];
+    // What Nikon's software keeps about each folder: one listing each, and none where it has kept nothing.
+    let mut sidecars: HashMap<&Path, Option<nksc::Sidecars>> = HashMap::new();
+    for dir in files.iter().flatten().filter_map(|f| f.parent()) {
+        sidecars.entry(dir).or_insert_with(|| nksc::Sidecars::of(dir));
+    }
+    let sidecars = &sidecars;
     std::thread::scope(|s| {
         for (slots, part) in out.chunks_mut(chunk).zip(files.chunks(chunk)) {
             s.spawn(move || {
                 for (slot, f) in slots.iter_mut().zip(part) {
-                    *slot = f.as_ref().and_then(|f| meta::brief(f).ok()).unwrap_or_default();
+                    let Some(f) = f else { continue };
+                    *slot = meta::brief(f).unwrap_or_default();
+                    // Stars given in Nikon's software are only in its sidecar, so they are the newer word.
+                    let given = f.parent().and_then(|dir| sidecars.get(dir)?.as_ref()).and_then(|kept| kept.rating(f));
+                    slot.rating = given.unwrap_or(slot.rating);
                 }
             });
         }
