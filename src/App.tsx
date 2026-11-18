@@ -3,7 +3,8 @@ import { useEffect } from "react";
 import { Library } from "./components/Library";
 import { Viewer } from "./components/Viewer";
 import { Welcome } from "./components/Welcome";
-import { useT } from "./lib/i18n";
+import { api } from "./lib/api";
+import { resolveLang, useT } from "./lib/i18n";
 import { actionFor, isTyping } from "./lib/shortcuts";
 import { useStore } from "./lib/store";
 import { DeleteSheet } from "./sheets/Delete";
@@ -60,6 +61,12 @@ export function App() {
   const viewer = useStore((s) => s.viewer);
   const sheet = useStore((s) => s.sheet);
   const setSheet = useStore((s) => s.setSheet);
+  const lang = useStore((s) => s.settings.lang);
+
+  // The menu bar on macOS is made outside the window.
+  useEffect(() => {
+    api.setMenuLanguage(resolveLang(lang)).catch(() => {});
+  }, [lang]);
 
   useEffect(() => {
     useStore.getState().init();

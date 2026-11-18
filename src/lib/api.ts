@@ -239,4 +239,6 @@ export const api = {
    * ("cancelled" after `updateCancel`). Progress arrives as `update-progress` events. */
   updateInstall: () => invoke<void>("update_install"),
   updateCancel: () => invoke<void>("update_cancel"),
+  /** Tells the macOS menu bar which language the app is shown in. */
+  setMenuLanguage: (lang: "zh" | "en") => invoke<void>("set_menu_language", { lang }),
 };

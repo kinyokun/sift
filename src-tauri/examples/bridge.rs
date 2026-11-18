@@ -102,7 +102,7 @@ fn run(state: &AppState, cmd: &str, args: &Value) -> Result<Response, String> {
             state.looks.lock().unwrap().clear();
             ok(Value::Null)
         }
-        "clear_cache" | "cancel_task" | "transfer_stop" | "develop_raw" => ok(Value::Null),
+        "clear_cache" | "cancel_task" | "transfer_stop" | "develop_raw" | "set_menu_language" => ok(Value::Null),
         "list_albums" => ok(json!([])),
         "export_framed" => json(&commands::frame_files(state, &arg(args, "request")?, |_| {})?),
         "transfer_start" => {

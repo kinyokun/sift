@@ -1,4 +1,5 @@
 pub mod commands;
+pub mod menu;
 pub mod photos;
 pub mod protocol;
 pub mod state;
@@ -51,6 +52,7 @@ pub fn run() {
             std::fs::create_dir_all(&cache)?;
             std::fs::create_dir_all(&data)?;
             app.manage(AppState::new(cache, data));
+            menu::restore(app.handle());
             #[cfg(all(desktop, debug_assertions))]
             update::unattended(app.handle());
             Ok(())
@@ -105,6 +107,7 @@ pub fn run() {
             update::update_cancel,
             transfer_start,
             transfer_stop,
+            menu::set_menu_language,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Sift");
