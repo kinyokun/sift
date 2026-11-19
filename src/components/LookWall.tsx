@@ -25,12 +25,14 @@ type Props = {
   looks: LookInfo[];
   /** Look of the photo now: a library look, `NO_LOOK`, or null for as shot. */
   current: string | null;
+  /** Quarter turns clockwise the photo was given. */
+  turn: number;
   onChoose: (look: string | null) => void;
   onClose: () => void;
 };
 
 /** One photo in every look of the library, side by side; a click picks one. */
-export function LookWall({ item, source, looks, current, onChoose, onClose }: Props) {
+export function LookWall({ item, source, looks, current, turn, onChoose, onClose }: Props) {
   const t = useT();
   const tileSize = useStore((s) => s.settings.wallTile);
   const setTile = (wallTile: number) => useStore.getState().setSettings({ wallTile });
@@ -101,7 +103,10 @@ export function LookWall({ item, source, looks, current, onChoose, onClose }: Pr
               onChoose(tile.id);
             }}
           >
-            <span className={`look-tile-image ${settled[tile.url] ? "" : "loading"}`}>
+            <span
+              className={`look-tile-image ${turn ? `turned ${turn % 2 ? "quarter" : ""}` : ""} ${settled[tile.url] ? "" : "loading"}`}
+              style={turn ? ({ "--turn": `${turn * 90}deg` } as CSSProperties) : undefined}
+            >
               {i < done + AT_ONCE && <img src={tile.url} alt="" draggable={false} decoding="async" onLoad={() => settle(tile.url)} onError={() => settle(tile.url)} />}
             </span>
             <span className="look-tile-name">{tile.name}</span>

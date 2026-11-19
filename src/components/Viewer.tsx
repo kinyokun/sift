@@ -1075,6 +1075,7 @@ export function Viewer() {
           source={lookFrom}
           looks={library}
           current={currentLook}
+          turn={turnOf(quarters, current)}
           onChoose={(id) => {
             chooseLook(id);
             setWall(false);
