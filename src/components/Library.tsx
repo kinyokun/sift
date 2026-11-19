@@ -313,6 +313,19 @@ export function Library() {
 
   const rowAt = useCallback((top: number) => Math.max(0, Math.floor((top - pad) / pitch)), [pad, pitch]);
   useLayoutEffect(() => setRow(rowAt(scroller.current?.scrollTop ?? 0)), [rowAt, items]);
+  /** The photo at the top of the view and how far down it the view starts, so the grid
+   * still shows it when the window changes size (null: the grid is at its very top). */
+  const topOf = useRef<{ index: number; part: number } | null>(null);
+  /** Where the grid was put back after a resize; scrolling there names no new photo for the
+   * top, or going to full screen and back a few times would creep up the folder. */
+  const placed = useRef<number | null>(null);
+  const onScroll = (top: number) => {
+    setRow(rowAt(top));
+    if (placed.current !== null && Math.abs(top - placed.current) < 1) return;
+    placed.current = null;
+    const at = (top - pad) / pitch;
+    topOf.current = top <= 0 ? null : { index: Math.max(0, Math.floor(at)) * cols, part: Math.max(0, at - Math.floor(at)) };
+  };
 
   const selected = useMemo(() => new Set(s.selection), [s.selection]);
   const indexOf = useCallback((id: string | null) => (id ? items.findIndex((it) => it.id === id) : -1), [items]);
@@ -335,7 +348,6 @@ export function Library() {
   };
   /** The cell the wheel is resizing the grid around, to be put back under the pointer. */
   const held = useRef<{ index: number; part: number; y: number } | null>(null);
-  const settled = useRef(false);
   useWheelSize(scroller, {
     get: () => useStore.getState().settings.thumb,
     set: (thumb, at) => {
@@ -354,11 +366,15 @@ export function Library() {
   });
   useLayoutEffect(() => {
     const el = scroller.current;
-    const at = held.current;
+    // Resized by the wheel, the grid keeps the photo under the pointer where it is;
+    // resized with the window (full screen and back), the photo at the top.
+    const wheel = held.current;
+    const at = wheel ?? (topOf.current && { ...topOf.current, y: box.head });
     held.current = null;
     if (!el || !at) return;
     el.scrollTop = box.head + pad + (Math.floor(at.index / cols) + at.part) * pitch - at.y;
-    settled.current = true;
+    placed.current = wheel ? null : el.scrollTop;
+    setRow(rowAt(el.scrollTop));
   }, [cols, pitch]);
   // A turn of the wheel that left the rows as they were holds nothing.
   useEffect(() => void (held.current = null));
@@ -527,17 +543,24 @@ export function Library() {
     window.addEventListener("pointercancel", up);
   };
 
-  // Keep the cursor cell on screen.
+  // Keep the cursor cell on screen: a step past the edge scrolls a row, a photo farther away
+  // (and the one the viewer is left on) comes to the middle. Resizing alone keeps the grid
+  // where it is, which may be far from the cursor.
+  const wasViewing = useRef(s.viewing);
   useEffect(() => {
+    const back = wasViewing.current && !s.viewing;
+    wasViewing.current = s.viewing;
     const i = indexOf(s.cursor);
     const el = scroller.current;
-    // The wheel has just put the grid where the pointer is.
-    if (settled.current) return void (settled.current = false);
-    if (i < 0 || !el || dragged.current) return;
+    if (s.viewing || i < 0 || !el || dragged.current) return;
     const top = box.head + Math.floor(i / cols) * pitch;
-    if (top < el.scrollTop + box.head) el.scrollTop = top - box.head;
-    else if (top + pitch + pad * 2 > el.scrollTop + el.clientHeight) el.scrollTop = top + pitch + pad * 2 - el.clientHeight;
-  }, [s.cursor, cols, pitch, indexOf, pad, box.head]);
+    const view = el.clientHeight - box.head;
+    const above = el.scrollTop + box.head - top;
+    const below = top + pitch + pad * 2 - (el.scrollTop + el.clientHeight);
+    if (above <= 0 && below <= 0) return;
+    if (!back && Math.max(above, below) <= pitch) el.scrollTop = above > 0 ? top - box.head : top + pitch + pad * 2 - el.clientHeight;
+    else el.scrollTop = top + pad + size / 2 - box.head - view / 2;
+  }, [s.cursor, s.viewing, indexOf]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -785,7 +808,7 @@ export function Library() {
         )}
       </header>
 
-      <div className="grid-scroller" ref={scroller} onScroll={(e) => setRow(rowAt(e.currentTarget.scrollTop))} onPointerDown={mobile ? undefined : onPointerDown}>
+      <div className="grid-scroller" ref={scroller} onScroll={(e) => onScroll(e.currentTarget.scrollTop)} onPointerDown={mobile ? undefined : onPointerDown}>
         <div
           className={`grid ${bar ? "selecting" : ""}`}
           ref={gridRef}
