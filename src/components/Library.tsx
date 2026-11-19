@@ -609,6 +609,14 @@ export function Library() {
             st.openViewer(items[at].item.id);
           }
           return;
+        // Space opens the photo the keys act on, wherever the grid has been scrolled to,
+        // unless it has been given to something the grid does.
+        case " ":
+          if (at >= 0 && !e.shiftKey && (!action || action === "immersive")) {
+            e.preventDefault();
+            st.openViewer(items[at].item.id);
+          }
+          if (!action || action === "immersive") return;
       }
       // The tags open from the bar for several photos while it is up, else from the toolbar.
       const openTags = () => (e.preventDefault(), (barTags.current ?? toolbarTags.current)?.open());

@@ -375,6 +375,7 @@ const zh = {
   fixedKeys: {
     arrows: "上一张 / 下一张",
     enter: "打开照片 / 确认裁剪",
+    space: "网格里打开当前照片，滚到别处也一样",
     swipeV: "切换滤镜",
     esc: "返回",
     rightHold: "按住临时放大",
@@ -757,6 +758,7 @@ const en: Dict = {
   fixedKeys: {
     arrows: "Previous / next",
     enter: "Open photo / apply crop",
+    space: "In the grid, open the current photo, even when scrolled away",
     swipeV: "Switch look",
     esc: "Back",
     rightHold: "Hold to zoom in briefly",

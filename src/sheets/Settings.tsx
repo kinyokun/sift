@@ -261,6 +261,7 @@ export function HelpSheet({ onClose }: { onClose: () => void }) {
   const fixed: [React.ReactNode, string][] = [
     [<><KeyCap>←</KeyCap><KeyCap>→</KeyCap></>, t.fixedKeys.arrows],
     [<KeyCap>↩</KeyCap>, t.fixedKeys.enter],
+    ...(mobile ? [] : [[<KeyCap>Space</KeyCap>, t.fixedKeys.space] as [React.ReactNode, string]]),
     [<KeyCap>Esc</KeyCap>, t.fixedKeys.esc],
     [t.mouseRight, t.fixedKeys.rightHold],
     [t.pinchOrCtrl, t.fixedKeys.pinch],
