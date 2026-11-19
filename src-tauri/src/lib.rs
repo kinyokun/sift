@@ -1,4 +1,5 @@
 pub mod commands;
+pub mod handoff;
 pub mod menu;
 pub mod photos;
 pub mod protocol;
@@ -91,7 +92,9 @@ pub fn run() {
             commands::remove_look,
             commands::histogram,
             commands::export_framed,
-            commands::preview_framed,
+            commands::preview_export,
+            commands::set_watermark,
+            commands::watermark,
             commands::find_raws,
             commands::load_session,
             commands::save_session,
@@ -108,6 +111,8 @@ pub fn run() {
             transfer_start,
             transfer_stop,
             menu::set_menu_language,
+            handoff::open_with,
+            handoff::drag_out,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Sift");

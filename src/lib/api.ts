@@ -127,7 +127,17 @@ export function isNefPath(path: string): boolean {
 /** Look id meaning "no look at all" (the plain rendering of the RAW). */
 export const NO_LOOK = "original";
 export type ExportKind = "all" | "raw" | "jpeg";
-export type CropBox = [number, number, number, number];
+/** A crop as normalised [x, y, width, height] of the photo as turned, and the angle in degrees (clockwise)
+ * the photo is straightened by before it is cut, when it is. */
+export type CropBox = [number, number, number, number, number?];
+/** Where on a picture the watermark goes: a corner, the middle of a side, or the centre. */
+export type MarkPlace = "nw" | "n" | "ne" | "w" | "c" | "e" | "sw" | "s" | "se";
+/** The watermark (a PNG kept by the app) on exported pictures: `size` is its width as a share of the
+ * picture's shorter side, `opacity` 0 to 1. */
+export type Watermark = { place: MarkPlace; size: number; opacity: number };
+/** How exported pictures come out. `size` is the long edge (0: as they are); any size or a watermark
+ * renders every photo again, at `quality`. With `strip`, nothing the camera recorded is kept. */
+export type Output = { size: number; quality: number; strip: boolean; watermark: Watermark | null };
 export type Rename = { template: string; start: number };
 /** A label for sorting photos into piles: a person, a client, a use. `color` is a place in the palette. */
 export type Tag = { id: string; name: string; color: number };
@@ -147,6 +157,8 @@ export type Session = {
   looks?: Record<string, string>;
   /** File name -> confirmed crop as normalised [x, y, width, height]. */
   crops?: Record<string, CropBox>;
+  /** File name -> quarter turns clockwise (1 to 3) the photo was given. */
+  turns?: Record<string, number>;
   /** The folder inside the opened one the grid was narrowed to. */
   subfolder?: string | null;
   /** The tags of this folder, in the order they were made. */
@@ -199,14 +211,17 @@ export const api = {
     rename: Rename | null,
     looks: Record<string, string>,
     crops: Record<string, CropBox>,
-    folders: TagFolder[] = [],
-  ) => invoke<CopyReport>("export_files", { shots, dest, plan: { kind, rename, looks, crops, folders } }),
+    folders: TagFolder[],
+    turns: Record<string, number>,
+    output: Output,
+  ) => invoke<CopyReport>("export_files", { shots, dest, plan: { kind, rename, looks, crops, folders, turns, output } }),
   listLooks: () => invoke<LookInfo[]>("list_looks"),
   importLooks: (sources: string[]) => invoke<LookInfo[]>("import_looks", { sources }),
   removeLook: (id: string) => invoke<LookInfo[]>("remove_look", { id }),
   /** Saves the Picture Control a photo was shot with to the look library; resolves to its id. */
   saveCameraLook: (path: string) => invoke<string>("save_camera_look", { path }),
-  histogram: (path: string, look: string | null, edge: number, crop: CropBox | null) => invoke<Histogram>("histogram", { path, look, edge, crop }),
+  /** `crop` is a rectangle of the upright photo. */
+  histogram: (path: string, look: string | null, edge: number, crop: [number, number, number, number] | null) => invoke<Histogram>("histogram", { path, look, edge, crop }),
   exportNames: (shots: string[][], rename: Rename) => invoke<string[]>("export_names", { shots, rename }),
   exportFramed: (
     files: string[],
@@ -217,9 +232,21 @@ export const api = {
     looks: Record<string, string>,
     sources: Record<string, string>,
     crops: Record<string, CropBox>,
-    folders: TagFolder[] = [],
-  ) => invoke<CopyReport>("export_framed", { request: { files, dest, options, max_edge: maxEdge, rename, looks, sources, crops, folders } }),
-  previewFramed: (path: string, options: FrameOptions) => invoke<ArrayBuffer>("preview_framed", { path, options }),
+    folders: TagFolder[],
+    turns: Record<string, number>,
+    output: Output,
+  ) => invoke<CopyReport>("export_framed", { request: { files, dest, options, max_edge: maxEdge, rename, looks, sources, crops, folders, turns, output } }),
+  /** A small JPEG of a photo as it will be exported: turned, cropped, watermarked and, given frame options, framed. */
+  previewExport: (path: string, options: FrameOptions | null, output: Output, turn: number, crop: CropBox | null) =>
+    invoke<ArrayBuffer>("preview_export", { path, options, output, turn, crop }),
+  /** Opens files in another program (an `.app` on macOS, an `.exe` on Windows). */
+  openWith: (paths: string[], program: string) => invoke<void>("open_with", { paths, program }),
+  /** Starts dragging files out of the window while the mouse button is down (macOS, Windows). */
+  dragOut: (paths: string[], icon: string, turn: number) => invoke<void>("drag_out", { paths, icon, turn }),
+  /** Makes a PNG (a path from the file dialog) the watermark the app keeps. */
+  setWatermark: (source: string) => invoke<void>("set_watermark", { source }),
+  /** The watermark kept, as PNG bytes; none when there is none. */
+  watermark: () => invoke<ArrayBuffer>("watermark"),
   findRaws: (picked: string, raws: string, dest: string, loose: boolean) =>
     invoke<CopyReport>("find_raws", { picked, raws, dest, loose }),
   loadSession: (folder: string) => invoke<Partial<Session> | null>("load_session", { folder }),

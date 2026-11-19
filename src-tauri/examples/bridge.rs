@@ -63,10 +63,18 @@ fn run(state: &AppState, cmd: &str, args: &Value) -> Result<Response, String> {
             commands::forget_last(state);
             ok(Value::Null)
         }
-        "preview_framed" => {
-            let jpeg = commands::framed_preview(state, &arg::<String>(args, "path")?, &arg(args, "options")?)?;
+        "preview_export" => {
+            let options = arg::<Option<sift_core::frame::FrameOptions>>(args, "options")?;
+            let crop = arg::<Option<commands::Crop>>(args, "crop")?;
+            let jpeg = commands::export_preview(state, &arg::<String>(args, "path")?, options.as_ref(), &arg(args, "output")?, arg(args, "turn")?, crop.as_ref())?;
             Ok(([(header::CONTENT_TYPE, "image/jpeg")], jpeg).into_response())
         }
+        "set_watermark" => {
+            let data = std::fs::read(arg::<String>(args, "source")?).map_err(|e| e.to_string())?;
+            commands::keep_watermark(state, &data)?;
+            ok(Value::Null)
+        }
+        "watermark" => Ok(([(header::CONTENT_TYPE, "image/png")], commands::watermark_png(state).unwrap_or_default()).into_response()),
         "export_files" => {
             let plan = arg(args, "plan")?;
             json(&commands::export_shots(state, &arg::<Vec<Vec<String>>>(args, "shots")?, &arg::<String>(args, "dest")?, &plan, |_| {})?)
@@ -100,6 +108,11 @@ fn run(state: &AppState, cmd: &str, args: &Value) -> Result<Response, String> {
                 let _ = std::fs::remove_dir_all(entry.path()).or_else(|_| std::fs::remove_file(entry.path()));
             }
             state.looks.lock().unwrap().clear();
+            ok(Value::Null)
+        }
+        // Nothing is opened or dragged from here; what would have been is printed.
+        "open_with" | "drag_out" => {
+            println!("{cmd} {}", serde_json::to_string(args).unwrap_or_default());
             ok(Value::Null)
         }
         "clear_cache" | "cancel_task" | "transfer_stop" | "develop_raw" | "set_menu_language" => ok(Value::Null),

@@ -1,6 +1,7 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
+import { chooseEditor, editorName } from "../lib/editor";
 import { useT } from "../lib/i18n";
 import { ACTIONS, DEFAULT_KEYS, comboOf, keyCaps, type Action } from "../lib/shortcuts";
 import { useStore, wheelModeOf, type Settings, type WheelMode } from "../lib/store";
@@ -134,6 +135,33 @@ export function SettingsSheet({ onClose }: { onClose: () => void }) {
             <Toggle checked={settings.autoDevelop} onChange={(autoDevelop) => setSettings({ autoDevelop })} />
           </Row>
         </div>
+
+        {!mobile && (
+          <>
+            <h4>{t.editing}</h4>
+            <div className="group">
+              <Row label={t.editorApp} hint={settings.editor ? editorName(settings.editor) : t.notChosen} onClick={() => void chooseEditor()}>
+                {settings.editor ? (
+                  <button
+                    className="link"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSettings({ editor: null });
+                    }}
+                  >
+                    {t.remove}
+                  </button>
+                ) : (
+                  <span className="link">{t.choose}</span>
+                )}
+              </Row>
+              <Row label={t.editorRaw} hint={t.editorRawHint}>
+                <Toggle checked={settings.editorRaw} onChange={(editorRaw) => setSettings({ editorRaw })} />
+              </Row>
+            </div>
+            {(info?.platform === "macos" || info?.platform === "windows") && <p className="note">{t.dragOutNote(info.platform === "macos")}</p>}
+          </>
+        )}
 
         {!mobile && (
           <>

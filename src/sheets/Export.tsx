@@ -2,9 +2,9 @@ import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, isRawPath, type CropBox, type CopyReport, type ExportKind, type FrameOptions, type FrameStyle, type Item, type Progress, type Rename, type TagFolder } from "../lib/api";
+import { api, isRawPath, type CropBox, type CopyReport, type ExportKind, type FrameOptions, type FrameStyle, type Item, type MarkPlace, type Output, type Progress, type Rename, type TagFolder, type Watermark } from "../lib/api";
 import { useT } from "../lib/i18n";
-import { cropOf, flagOf, folderName, framesOf, lookOf, tagsOf, useStore, visibleEntries } from "../lib/store";
+import { cropOf, flagOf, folderName, framesOf, lookOf, tagsOf, turnOf, useStore, visibleEntries } from "../lib/store";
 import { TagDot } from "../components/Tags";
 import { Row, Segmented, Sheet, Toggle } from "../ui/controls";
 
@@ -16,7 +16,45 @@ const LAST_TAG_RENAME_KEY = "sift.exportRenameTag";
 const DEFAULT_TAG_TEMPLATE = "{tag}_{seq}";
 /** What stands for "photos without a tag" among the tags to export. */
 const UNTAGGED = "";
-const SIZES = [0, 4096, 2560, 2048];
+const SIZES = [0, 4096, 3000, 2560, 2048, 1600, 1080];
+const OUTPUT_KEY = "sift.exportOutput";
+const PLACES: MarkPlace[] = ["nw", "n", "ne", "w", "c", "e", "sw", "s", "se"];
+/** How pictures come out, remembered between exports; the watermark's settings stay while it is off. */
+type Saved = { size: number; quality: number; strip: boolean; mark: Watermark; marked: boolean };
+const SAVED: Saved = { size: 0, quality: 93, strip: false, mark: { place: "se", size: 0.2, opacity: 0.8 }, marked: false };
+
+function savedOutput(): Saved {
+  try {
+    const s = { ...SAVED, ...JSON.parse(localStorage.getItem(OUTPUT_KEY) || "{}") };
+    return { ...s, mark: { ...SAVED.mark, ...s.mark } };
+  } catch {
+    return SAVED;
+  }
+}
+
+/** The watermark the app keeps, as an object URL; null while there is none. */
+function useWatermark(): [string | null, () => void] {
+  const [url, setUrl] = useState<string | null>(null);
+  const [version, setVersion] = useState(0);
+  useEffect(() => {
+    let made: string | null = null;
+    let stale = false;
+    api
+      .watermark()
+      .then((png) => {
+        if (stale) return;
+        if (!png.byteLength) return setUrl(null);
+        made = URL.createObjectURL(new Blob([png], { type: "image/png" }));
+        setUrl(made);
+      })
+      .catch(() => !stale && setUrl(null));
+    return () => {
+      stale = true;
+      if (made) URL.revokeObjectURL(made);
+    };
+  }, [version]);
+  return [url, () => setVersion((v) => v + 1)];
+}
 
 type Scope = "picked" | "selection" | "shown";
 
@@ -97,7 +135,15 @@ export function ExportSheet({ onClose }: { onClose: () => void }) {
   const [mode, setMode] = useState<"copy" | "frame">(mobile ? "frame" : "copy");
   const [dest, setDest] = useState(() => (mobile ? `${folder}/Export` : localStorage.getItem(LAST_DEST_KEY) || ""));
   const [options, setOptions] = useState<FrameOptions>({ style: "bar", dark: false, camera: true, lens: true, params: true, date: true, caption: "" });
-  const [maxEdge, setMaxEdge] = useState(0);
+  const [saved, setSaved] = useState(savedOutput);
+  const keep = (patch: Partial<Saved>) => {
+    const next = { ...saved, ...patch };
+    setSaved(next);
+    localStorage.setItem(OUTPUT_KEY, JSON.stringify(next));
+  };
+  const [markUrl, reloadMark] = useWatermark();
+  const marked = saved.marked && !!markUrl;
+  const output: Output = { size: saved.size, quality: saved.quality, strip: saved.strip, watermark: marked ? saved.mark : null };
   const [kind, setKind] = useState<ExportKind>("all");
   const [renaming, setRenaming] = useState(false);
   const [plainTemplate, setPlainTemplate] = useState(() => localStorage.getItem(LAST_RENAME_KEY) || DEFAULT_TEMPLATE);
@@ -136,17 +182,21 @@ export function ExportSheet({ onClose }: { onClose: () => void }) {
   // Looks chosen while culling are applied on export.
   const chosen = useStore((s) => s.looks);
   const cropped = useStore((s) => s.crops);
+  const turned = useStore((s) => s.turns);
   const looks: Record<string, string> = {};
   const sources: Record<string, string> = {};
   const crops: Record<string, CropBox> = {};
+  const turns: Record<string, number> = {};
   let styled = 0;
   for (const it of items) {
     const look = lookOf(chosen, it);
     const crop = cropOf(cropped, it);
-    if (look || crop) styled++;
+    const turn = turnOf(turned, it);
+    if (look || crop || turn) styled++;
     for (const p of it.paths) {
       if (look) looks[p] = look;
       if (crop) crops[p] = crop;
+      if (turn) turns[p] = turn;
     }
     if (look) sources[it.id] = it.paths.find(isRawPath) ?? it.id;
   }
@@ -175,14 +225,18 @@ export function ExportSheet({ onClose }: { onClose: () => void }) {
     };
   }, [renaming, template, start, named]);
 
-  // Live preview of the frame on the first photo.
+  // Live preview of the first photo with its frame or watermark.
+  const previewing = mode === "frame" || (marked && kind !== "raw");
+  const sampleItem = items[0];
+  const sampleTurn = sampleItem ? turnOf(turned, sampleItem) : 0;
+  const sampleCrop = sampleItem ? cropOf(cropped, sampleItem) : null;
   useEffect(() => {
-    if (mode !== "frame" || !sample) return;
+    if (!previewing || !sample) return;
     let url: string | null = null;
     let stale = false;
     const timer = setTimeout(async () => {
       try {
-        const bytes = await api.previewFramed(sample, options);
+        const bytes = await api.previewExport(sample, mode === "frame" ? options : null, output, sampleTurn, sampleCrop);
         if (stale) return;
         url = URL.createObjectURL(new Blob([bytes], { type: "image/jpeg" }));
         setPreview(url);
@@ -195,7 +249,20 @@ export function ExportSheet({ onClose }: { onClose: () => void }) {
       clearTimeout(timer);
       if (url) URL.revokeObjectURL(url);
     };
-  }, [mode, sample, JSON.stringify(options)]);
+  }, [previewing, mode, sample, JSON.stringify(options), JSON.stringify(output.watermark), markUrl, sampleTurn, JSON.stringify(sampleCrop)]);
+
+  const chooseMark = async () => {
+    const file = await open({ multiple: false, filters: [{ name: "PNG", extensions: ["png"] }] });
+    if (typeof file !== "string") return;
+    try {
+      await api.setWatermark(file);
+      keep({ marked: true });
+      reloadMark();
+    } catch (e) {
+      useStore.getState().notify(String(e));
+    }
+  };
+  const setMark = (patch: Partial<Watermark>) => keep({ mark: { ...saved.mark, ...patch } });
 
   const run = async () => {
     setBusy(true);
@@ -205,8 +272,8 @@ export function ExportSheet({ onClose }: { onClose: () => void }) {
       if (rename) localStorage.setItem(byTag ? LAST_TAG_RENAME_KEY : LAST_RENAME_KEY, rename.template);
       const result =
         mode === "copy"
-          ? await api.exportFiles(wanted, dest, kind, rename, looks, crops, folders)
-          : await api.exportFramed(shots.map((shot) => shot[0]), dest, options, maxEdge, rename, looks, sources, crops, folders);
+          ? await api.exportFiles(wanted, dest, kind, rename, looks, crops, folders, turns, output)
+          : await api.exportFramed(shots.map((shot) => shot[0]), dest, options, output.size, rename, looks, sources, crops, folders, turns, output);
       setReport(result);
     } catch (e) {
       useStore.getState().notify(String(e));
@@ -236,7 +303,7 @@ export function ExportSheet({ onClose }: { onClose: () => void }) {
     <Sheet
       title={t.exportTitle}
       onClose={onClose}
-      wide={mode === "frame"}
+      wide={previewing}
       footer={
         busy ? (
           <>
@@ -259,7 +326,7 @@ export function ExportSheet({ onClose }: { onClose: () => void }) {
       {report ? (
         <Report report={report} dest={dest} />
       ) : (
-        <div className={mode === "frame" ? "split" : ""}>
+        <div className={previewing ? "split" : ""}>
           <div className="form">
             <Segmented value={scope} options={scopeOptions} onChange={setScope} />
             {!mobile && (
@@ -344,18 +411,56 @@ export function ExportSheet({ onClose }: { onClose: () => void }) {
                       <Toggle checked={options.dark} onChange={(dark) => set({ dark })} />
                     </Row>
                   )}
-                  <Row label={t.outputSize}>
-                    <select value={maxEdge} onChange={(e) => setMaxEdge(Number(e.target.value))}>
-                      {SIZES.map((n) => (
-                        <option key={n} value={n}>
-                          {n ? `${n} px` : t.sizeOriginal}
-                        </option>
-                      ))}
-                    </select>
-                  </Row>
                 </>
               )}
             </div>
+            {(mode === "frame" || kind !== "raw") && (
+              <div className="group">
+                <Row label={t.outputSize} hint={mode === "copy" && saved.size ? t.sizeRenders : undefined}>
+                  <select value={saved.size} onChange={(e) => keep({ size: Number(e.target.value) })}>
+                    {SIZES.map((n) => (
+                      <option key={n} value={n}>
+                        {n ? `${n} px` : t.sizeOriginal}
+                      </option>
+                    ))}
+                  </select>
+                </Row>
+                <Row label={t.quality} hint={t.qualityHint}>
+                  <span className="slider-value">
+                    <input className="size-slider" type="range" min={50} max={100} step={1} value={saved.quality} onChange={(e) => keep({ quality: Number(e.target.value) })} aria-label={t.quality} />
+                    <output>{saved.quality}</output>
+                  </span>
+                </Row>
+                <Row label={t.stripMeta} hint={t.stripHint}>
+                  <Toggle checked={saved.strip} onChange={(strip) => keep({ strip })} />
+                </Row>
+                <Row label={t.watermark} hint={markUrl ? undefined : t.watermarkNone}>
+                  <Toggle checked={marked} onChange={(on) => (on && !markUrl ? chooseMark() : keep({ marked: on }))} />
+                </Row>
+                {marked && (
+                  <div className="row watermark">
+                    <button className="mark-pick" onClick={chooseMark} title={t.watermarkChange}>
+                      <img src={markUrl!} alt="" />
+                    </button>
+                    <div className="mark-places" role="radiogroup" aria-label={t.watermarkPlace}>
+                      {PLACES.map((p) => (
+                        <button key={p} role="radio" aria-checked={saved.mark.place === p} className={saved.mark.place === p ? "on" : ""} onClick={() => setMark({ place: p })} />
+                      ))}
+                    </div>
+                    <div className="mark-sliders">
+                      <label>
+                        {t.watermarkSize}
+                        <input className="size-slider" type="range" min={0.05} max={0.6} step={0.01} value={saved.mark.size} onChange={(e) => setMark({ size: Number(e.target.value) })} />
+                      </label>
+                      <label>
+                        {t.watermarkOpacity}
+                        <input className="size-slider" type="range" min={0.1} max={1} step={0.05} value={saved.mark.opacity} onChange={(e) => setMark({ opacity: Number(e.target.value) })} />
+                      </label>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
             {mode === "frame" && (
               <>
                 <div className="chips">
@@ -377,10 +482,11 @@ export function ExportSheet({ onClose }: { onClose: () => void }) {
             {untaggedLeft > 0 && <p className="note">{t.exportUntaggedLeft(untaggedLeft)}</p>}
             {byTag && shots.length > 0 && !folders.length && <p className="note bad">{t.exportNoTagged}</p>}
             {styled > 0 && kind !== "raw" && <p className="note">{t.lookOnExport}</p>}
+            {mode === "copy" && kind !== "raw" && marked && <p className="note">{t.markRenders}</p>}
             {!items.length && <p className="note">{t.nothingToExport}</p>}
             {items.length > 0 && !shots.length && <p className="note bad">{t.nothingOfKind}</p>}
           </div>
-          {mode === "frame" && <div className="frame-preview">{preview && <img src={preview} alt="" />}</div>}
+          {previewing && <div className="frame-preview">{preview && <img src={preview} alt="" />}</div>}
         </div>
       )}
     </Sheet>

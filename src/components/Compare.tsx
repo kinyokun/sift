@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { imageUrl, type Item } from "../lib/api";
 import { useT } from "../lib/i18n";
-import { flagOf, useStore } from "../lib/store";
+import { flagOf, turnOf, useStore } from "../lib/store";
 import { Icon } from "../ui/Icon";
 
 /** Photos the viewer can put side by side. */
@@ -72,6 +72,7 @@ type PickerProps = {
 export function ComparePicker({ items, current, marks, top, bottom, onChoose, onClose }: PickerProps) {
   const t = useT();
   const flags = useStore((s) => s.flags);
+  const turns = useStore((s) => s.turns);
   const root = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -90,19 +91,23 @@ export function ComparePicker({ items, current, marks, top, bottom, onChoose, on
 
   return (
     <div className="compare-picker solid" ref={root} style={{ top: top + SLOT_BAR + 4, bottom: bottom + 8 }} role="listbox" aria-label={t.compareChoose}>
-      {items.map((it) => (
-        <button
-          key={it.id}
-          role="option"
-          aria-selected={it.id === current}
-          className={`${it.id === current ? "on" : ""} ${flagOf(flags, it) === -1 ? "rejected" : ""}`}
-          title={it.name}
-          onClick={() => onChoose(it.id)}
-        >
-          <img src={imageUrl("thumb", it.id, it.mtime, 512)} alt="" loading="lazy" decoding="async" draggable={false} />
-          {marks[it.id] && <i>{marks[it.id].join(" ")}</i>}
-        </button>
-      ))}
+      {items.map((it) => {
+        const turn = turnOf(turns, it);
+        return (
+          <button
+            key={it.id}
+            role="option"
+            aria-selected={it.id === current}
+            className={`${it.id === current ? "on" : ""} ${flagOf(flags, it) === -1 ? "rejected" : ""} ${turn ? "turned" : ""} ${turn % 2 ? "quarter" : ""}`}
+            style={turn ? ({ "--turn": `${turn * 90}deg` } as React.CSSProperties) : undefined}
+            title={it.name}
+            onClick={() => onChoose(it.id)}
+          >
+            <img src={imageUrl("thumb", it.id, it.mtime, 512)} alt="" loading="lazy" decoding="async" draggable={false} />
+            {marks[it.id] && <i>{marks[it.id].join(" ")}</i>}
+          </button>
+        );
+      })}
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, type CropBox, type Histogram as Data } from "../lib/api";
+import { api, type Histogram as Data } from "../lib/api";
 import { useT } from "../lib/i18n";
 
 const WIDTH = 256;
@@ -32,7 +32,8 @@ function peakOf(channels: number[][]): number {
 type Props = {
   /** File, look and size as in the viewer's image request; `null` while that image is still rendering. */
   request: { path: string; look: string | null; edge: number } | null;
-  crop: CropBox | null;
+  /** A rectangle of the upright photo. */
+  crop: [number, number, number, number] | null;
 };
 
 export function Histogram({ request, crop }: Props) {

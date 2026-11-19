@@ -71,8 +71,12 @@ w.__TAURI_INTERNALS__ = {
     }
     if (cmd.startsWith("plugin:event|")) return 0;
     if (cmd === "plugin:dialog|open") {
-      // A dialog with file filters is the look picker; anything else picks the photo folder.
+      // A dialog with file filters is the look picker, the watermark's (`&mark=`) or the editor's (`&editor=`);
+      // anything else picks the photo folder.
       const filters = (args as { options?: { filters?: { extensions: string[] }[] } })?.options?.filters ?? [];
+      const extensions = filters.flatMap((f) => f.extensions);
+      if (extensions.includes("app") || extensions.includes("exe")) return params.get("editor");
+      if (extensions.join() === "png") return params.get("mark");
       return filters.length ? params.getAll("look") : params.get("pick");
     }
     if (cmd.startsWith("plugin:")) return null;

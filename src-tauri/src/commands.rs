@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use sift_core::af::AfBox;
 use sift_core::export::{self, CopyReport, Progress};
 use sift_core::frame::FrameOptions;
-use sift_core::{face, formats, frame, meta, nksc, preview, rating, remove, stack};
+use sift_core::{edit, face, formats, frame, meta, nksc, preview, rating, remove, stack};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fs;
@@ -518,29 +518,91 @@ fn checked_shots(state: &AppState, shots: &[Vec<String>]) -> CmdResult<Vec<Vec<P
     shots.iter().map(|shot| shot.iter().map(|f| state.check(f)).collect()).collect()
 }
 
-/// Cuts an image down to a normalised `[x, y, width, height]` rectangle.
-fn crop_to(img: image::RgbImage, c: &[f32; 4]) -> image::RgbImage {
-    let (iw, ih) = (img.width(), img.height());
-    let x = ((c[0] * iw as f32).round() as u32).min(iw.saturating_sub(1));
-    let y = ((c[1] * ih as f32).round() as u32).min(ih.saturating_sub(1));
-    let w = ((c[2] * iw as f32).round() as u32).clamp(1, iw - x);
-    let h = ((c[3] * ih as f32).round() as u32).clamp(1, ih - y);
-    image::imageops::crop_imm(&img, x, y, w, h).to_image()
+/// A crop as it comes from the webview: normalised `[x, y, width, height]`
+/// of the photo as turned, then the angle in degrees (clockwise) it is
+/// straightened by, when it is.
+pub type Crop = Vec<f32>;
+
+fn crop_parts(c: &Crop) -> Option<([f32; 4], f32)> {
+    let rect: [f32; 4] = c.get(..4)?.try_into().ok()?;
+    Some((rect, c.get(4).copied().unwrap_or(0.0)))
 }
 
-/// Upright full-size pixels of a shot the way the user set it up while
-/// culling: with its look applied and cut to its crop.
-fn styled_pixels(state: &AppState, shot: &[PathBuf], look: Option<&String>, crop: Option<&[f32; 4]>) -> CmdResult<image::RgbImage> {
-    let img = match look {
-        Some(look) => protocol::look_pixels(state, look_source(shot).ok_or("empty shot")?, look, 0)?,
+/// The watermark on exported pictures: where, its width as a share of the
+/// picture's shorter side, and how opaque.
+#[derive(Deserialize, Clone, Copy)]
+pub struct Mark {
+    pub place: edit::Place,
+    pub size: f32,
+    pub opacity: f32,
+}
+
+/// How exported pictures come out.
+#[derive(Deserialize, Clone)]
+#[serde(default)]
+pub struct Output {
+    /// Long edge in pixels; 0 keeps the size.
+    pub size: u32,
+    pub quality: u8,
+    /// Leave out what the camera recorded (EXIF, XMP, place).
+    pub strip: bool,
+    pub watermark: Option<Mark>,
+}
+
+impl Default for Output {
+    fn default() -> Self {
+        Output { size: 0, quality: FRAMED_QUALITY, strip: false, watermark: None }
+    }
+}
+
+fn watermark_file(state: &AppState) -> PathBuf {
+    state.data_dir.join("watermark.png")
+}
+
+/// The watermark picture and how to lay it, when the output asks for one.
+fn mark_of(state: &AppState, output: &Output) -> CmdResult<Option<(image::RgbaImage, Mark)>> {
+    let Some(mark) = output.watermark else { return Ok(None) };
+    let img = image::open(watermark_file(state)).map_err(|e| format!("watermark: {e}"))?;
+    Ok(Some((img.to_rgba8(), mark)))
+}
+
+/// Upright full-size pixels of a shot with its look applied.
+fn looked_pixels(state: &AppState, shot: &[PathBuf], look: Option<&String>) -> CmdResult<image::RgbImage> {
+    match look {
+        Some(look) => protocol::look_pixels(state, look_source(shot).ok_or("empty shot")?, look, 0),
         None => {
             let path = shot.first().ok_or("empty shot")?;
-            best_pixels(state, path, &meta::read(path).map_err(err)?).map_err(err)?
+            best_pixels(state, path, &meta::read(path).map_err(err)?).map_err(err)
         }
-    };
-    Ok(match crop {
-        Some(c) => crop_to(img, c),
+    }
+}
+
+/// Upright pixels the way the user set them up while culling: turned, then
+/// straightened and cut to the crop.
+fn shaped(img: image::RgbImage, turn: u8, crop: Option<([f32; 4], f32)>) -> image::RgbImage {
+    let img = edit::turn(img, turn);
+    match crop {
+        Some((rect, angle)) => edit::cut(&img, rect, angle),
         None => img,
+    }
+}
+
+/// Made the size the output asks for, and watermarked.
+fn finished(img: image::RgbImage, output: &Output, mark: Option<&(image::RgbaImage, Mark)>) -> image::RgbImage {
+    let mut img = edit::shrink(img, output.size);
+    if let Some((png, m)) = mark {
+        edit::watermark(&mut img, png, m.place, m.size, m.opacity);
+    }
+    img
+}
+
+/// A JPEG of `img` at the output's quality, carrying what `source` records
+/// about the shot unless the output leaves that out.
+fn encoded(img: &image::RgbImage, output: &Output, source: Option<&Path>) -> CmdResult<Vec<u8>> {
+    let jpeg = preview::encode_jpeg(img, output.quality.clamp(1, 100)).map_err(err)?;
+    Ok(match source {
+        Some(source) if !output.strip => sift_core::live::described(jpeg, source),
+        _ => jpeg,
     })
 }
 
@@ -554,12 +616,42 @@ pub struct ExportPlan {
     /// First path of a shot -> look id.
     #[serde(default)]
     pub looks: HashMap<String, String>,
-    /// First path of a shot -> normalised `[x, y, width, height]` crop.
+    /// First path of a shot -> crop.
     #[serde(default)]
-    pub crops: HashMap<String, [f32; 4]>,
+    pub crops: HashMap<String, Crop>,
+    /// First path of a shot -> quarter turns clockwise.
+    #[serde(default)]
+    pub turns: HashMap<String, u8>,
+    #[serde(default)]
+    pub output: Output,
     /// Sorted by tag: one folder for each of these inside the destination.
     #[serde(default)]
     pub folders: Vec<export::TagFolder>,
+}
+
+/// What becomes of a shot on export.
+enum Job {
+    /// Its files are copied as they are.
+    Plain,
+    /// Its JPEG is copied with another orientation or without its metadata;
+    /// the picture is not encoded again.
+    Rewrite(PathBuf),
+    /// A JPEG is rendered of it.
+    Render,
+}
+
+/// A copy of a JPEG turned on by `turn` quarter turns (0 to 3) and, with
+/// `strip`, without its metadata; `None` when that cannot be done without
+/// encoding it again.
+fn rewritten(data: &[u8], turn: u8, strip: bool) -> Option<Vec<u8>> {
+    let o = edit::turned_orientation(edit::orientation_of(data), turn);
+    if strip {
+        edit::stripped(data, o)
+    } else if turn != 0 {
+        edit::reoriented(data, o)
+    } else {
+        Some(data.to_vec())
+    }
 }
 
 /// Progress of one of several folders as progress of the whole export.
@@ -580,9 +672,10 @@ fn look_source(shot: &[PathBuf]) -> Option<&PathBuf> {
 /// with a look or crop assigned (keyed by the first path of the shot) get a
 /// JPEG rendered that way instead of a copy of the camera's JPEG.
 pub fn export_shots(state: &AppState, shots: &[Vec<String>], dest: &str, plan: &ExportPlan, mut on_progress: impl FnMut(Progress)) -> CmdResult<CopyReport> {
-    let ExportPlan { kind, looks, crops, .. } = plan;
+    let ExportPlan { kind, looks, crops, turns, output, .. } = plan;
     let kind = *kind;
     let all = checked_shots(state, shots)?;
+    let mark = if kind == export::Kind::Raw { None } else { mark_of(state, output)? };
     state.cancel.store(false, AtomicOrdering::Relaxed);
     let parts = export::parts(Path::new(dest), &plan.folders, plan.rename.as_ref(), all.len());
     let mut report = CopyReport::default();
@@ -596,9 +689,27 @@ pub fn export_shots(state: &AppState, shots: &[Vec<String>], dest: &str, plan: &
         // Files that are copied as they are, with the name their shot was given.
         let (mut plain, mut names) = (Vec::new(), Vec::new());
         for (n, (&i, shot)) in part.shots.iter().zip(&picked).enumerate() {
-            let look = shots[i].first().and_then(|p| looks.get(p));
-            let crop = shots[i].first().and_then(|p| crops.get(p));
-            if kind == export::Kind::Raw || (look.is_none() && crop.is_none()) {
+            let first = shots[i].first();
+            let look = first.and_then(|p| looks.get(p));
+            let crop = first.and_then(|p| crops.get(p)).and_then(crop_parts);
+            let turn = first.and_then(|p| turns.get(p)).map_or(0, |t| t % 4);
+            // RAW files are never changed; anything else that cannot be done to the JPEG's bytes is rendered.
+            let picture = shot.iter().find(|p| !formats::is_raw(p) && formats::is_supported(p));
+            let job = if kind == export::Kind::Raw {
+                Job::Plain
+            } else if look.is_some() || crop.is_some() || output.size > 0 || mark.is_some() {
+                Job::Render
+            } else if turn == 0 && !output.strip {
+                Job::Plain
+            } else {
+                match picture {
+                    Some(p) if formats::is_jpeg(p) => Job::Rewrite(p.clone()),
+                    Some(_) => Job::Render,
+                    None if turn != 0 => Job::Render,
+                    None => Job::Plain,
+                }
+            };
+            if matches!(job, Job::Plain) {
                 plain.push(shot.clone());
                 names.push(stems[n].clone());
                 continue;
@@ -608,24 +719,48 @@ pub fn export_shots(state: &AppState, shots: &[Vec<String>], dest: &str, plan: &
                 return Ok(report);
             }
             step(Progress { done: n, total: picked.len(), name: stems[n].clone() });
-            let target = part.dir.join(format!("{}.jpg", stems[n]));
-            let written = match rendered.get(&i) {
-                Some(first) => export::copy_file(first, &target, &state.cancel).map_err(err),
-                None => styled_pixels(state, shot, look, crop)
-                    .and_then(|img| preview::encode_jpeg(&img, FRAMED_QUALITY).map_err(err))
+            let ext = |p: &Path| p.extension().and_then(|e| e.to_str()).unwrap_or("jpg").to_string();
+            let (target, made) = match &job {
+                Job::Rewrite(jpeg) => {
+                    let target = part.dir.join(format!("{}.{}", stems[n], ext(jpeg)));
+                    let bytes = fs::read(jpeg).map_err(err).map(|data| rewritten(&data, turn, output.strip));
+                    match bytes {
+                        Ok(Some(bytes)) => (target, Ok(bytes)),
+                        // An EXIF block without an orientation in it: rendered instead.
+                        Ok(None) => (part.dir.join(format!("{}.jpg", stems[n])), Err(None)),
+                        Err(e) => (target, Err(Some(e))),
+                    }
+                }
+                _ => (part.dir.join(format!("{}.jpg", stems[n])), Err(None)),
+            };
+            let written = match (rendered.get(&i), made) {
+                (Some(first), _) => export::copy_file(first, &target, &state.cancel).map_err(err),
+                (None, Ok(bytes)) => fs::write(&target, bytes).map_err(err),
+                (None, Err(Some(e))) => Err(e),
+                (None, Err(None)) => looked_pixels(state, shot, look)
+                    .map(|img| finished(shaped(img, turn, crop), output, mark.as_ref()))
+                    .and_then(|img| encoded(&img, output, look_source(shot).map(PathBuf::as_path)))
                     .and_then(|jpeg| fs::write(&target, jpeg).map_err(err)),
             };
             match written {
                 Ok(()) => {
                     report.copied += 1;
-                    rendered.entry(i).or_insert(target);
+                    rendered.entry(i).or_insert(target.clone());
                 }
                 Err(e) => report.failed.push(format!("{}: {e}", stems[n])),
             }
-            // The RAW still travels along unchanged when RAW files are wanted.
-            let raws: Vec<PathBuf> = shot.iter().filter(|p| formats::is_raw(p)).cloned().collect();
-            if kind == export::Kind::All && !raws.is_empty() {
-                plain.push(raws);
+            // The other files travel along unchanged: the RAW when RAW files are wanted, and next to
+            // a JPEG copied as it was, the movie of a Live Photo.
+            let rest: Vec<PathBuf> = shot
+                .iter()
+                .filter(|p| match &job {
+                    Job::Rewrite(jpeg) => *p != jpeg,
+                    _ => formats::is_raw(p) && kind == export::Kind::All,
+                })
+                .cloned()
+                .collect();
+            if !rest.is_empty() {
+                plain.push(rest);
                 names.push(stems[n].clone());
             }
         }
@@ -802,12 +937,18 @@ pub struct FramedRequest {
     /// File -> the file its look is rendered from (the RAW of a pair).
     #[serde(default)]
     sources: HashMap<String, String>,
-    /// File -> normalised `[x, y, width, height]` crop.
+    /// File -> crop.
     #[serde(default)]
-    crops: HashMap<String, [f32; 4]>,
+    crops: HashMap<String, Crop>,
+    /// File -> quarter turns clockwise.
+    #[serde(default)]
+    turns: HashMap<String, u8>,
     /// Sorted by tag: one folder for each of these inside the destination.
     #[serde(default)]
     folders: Vec<export::TagFolder>,
+    /// Quality, metadata and watermark; a size here outranks `max_edge`.
+    #[serde(default)]
+    output: Output,
 }
 
 /// Full-resolution upright pixels: the embedded preview, or a development
@@ -827,6 +968,8 @@ pub fn frame_files(state: &AppState, request: &FramedRequest, mut on_progress: i
     let all = checked_shots(state, &shots)?;
     let parts = export::parts(Path::new(&request.dest), &request.folders, request.rename.as_ref(), all.len());
     let total: usize = parts.iter().map(|part| part.shots.len()).sum();
+    let output = Output { size: if request.output.size > 0 { request.output.size } else { request.max_edge }, ..request.output.clone() };
+    let mark = mark_of(state, &output)?;
     let mut done = 0;
     // A photo that goes into several folders is framed once; the others get a copy of that file.
     let mut framed: HashMap<usize, PathBuf> = HashMap::new();
@@ -855,16 +998,11 @@ pub fn frame_files(state: &AppState, request: &FramedRequest, mut on_progress: i
                         }
                         None => best_pixels(state, path, &m)?,
                     };
-                    if let Some(c) = request.crops.get(f) {
-                        img = crop_to(img, c);
-                    }
-                    if request.max_edge > 0 && img.width().max(img.height()) > request.max_edge {
-                        let k = request.max_edge as f32 / img.width().max(img.height()) as f32;
-                        let (w, h) = ((img.width() as f32 * k).round() as u32, (img.height() as f32 * k).round() as u32);
-                        img = image::imageops::resize(&img, w.max(1), h.max(1), image::imageops::FilterType::Lanczos3);
-                    }
+                    let turn = request.turns.get(f).map_or(0, |t| t % 4);
+                    img = finished(shaped(img, turn, request.crops.get(f).and_then(crop_parts)), &output, mark.as_ref());
                     let picture = frame::render(&img, &m.exif, &request.options);
-                    fs::write(&target, preview::encode_jpeg(&picture, FRAMED_QUALITY)?)?;
+                    let jpeg = encoded(&picture, &output, Some(path)).map_err(sift_core::Error::Decode)?;
+                    fs::write(&target, jpeg)?;
                     Ok(())
                 })(),
             };
@@ -886,17 +1024,58 @@ pub async fn export_framed(app: AppHandle, request: FramedRequest) -> CmdResult<
     blocking(move || frame_files(&app.state::<AppState>(), &request, progress(&app))).await
 }
 
-/// A small framed rendition for the export sheet's live preview, as JPEG bytes.
-pub fn framed_preview(state: &AppState, path: &str, options: &FrameOptions) -> CmdResult<Vec<u8>> {
+/// Long edge of the export sheet's preview.
+const PREVIEW_EDGE: u32 = 1200;
+
+/// A small rendition of a photo as it will be exported, for the export
+/// sheet's preview, as JPEG bytes: turned, cut to its crop, watermarked
+/// and, given frame options, framed.
+pub fn export_preview(state: &AppState, path: &str, options: Option<&FrameOptions>, output: &Output, turn: u8, crop: Option<&Crop>) -> CmdResult<Vec<u8>> {
     let file = state.check(path)?;
-    let m = meta::read(&file).map_err(err)?;
-    let img = preview::pixels(&file, 1200).map_err(err)?;
-    preview::encode_jpeg(&frame::render(&img, &m.exif, options), 88).map_err(err)
+    let img = shaped(preview::pixels(&file, PREVIEW_EDGE).map_err(err)?, turn % 4, crop.and_then(crop_parts));
+    let shown = Output { size: PREVIEW_EDGE, ..output.clone() };
+    let mut img = finished(img, &shown, mark_of(state, output)?.as_ref());
+    if let Some(options) = options {
+        img = frame::render(&img, &meta::read(&file).map_err(err)?.exif, options);
+    }
+    preview::encode_jpeg(&img, 88).map_err(err)
 }
 
 #[tauri::command]
-pub async fn preview_framed(app: AppHandle, path: String, options: FrameOptions) -> CmdResult<tauri::ipc::Response> {
-    blocking(move || framed_preview(&app.state::<AppState>(), &path, &options).map(tauri::ipc::Response::new)).await
+pub async fn preview_export(app: AppHandle, path: String, options: Option<FrameOptions>, output: Output, turn: u8, crop: Option<Crop>) -> CmdResult<tauri::ipc::Response> {
+    blocking(move || export_preview(&app.state::<AppState>(), &path, options.as_ref(), &output, turn, crop.as_ref()).map(tauri::ipc::Response::new)).await
+}
+
+/// Keeps `data` (a PNG) as the watermark, after checking that it decodes.
+pub fn keep_watermark(state: &AppState, data: &[u8]) -> CmdResult<()> {
+    image::load_from_memory_with_format(data, image::ImageFormat::Png).map_err(|e| format!("watermark: {e}"))?;
+    write_atomic(&watermark_file(state), data).map_err(err)
+}
+
+/// The watermark kept, as PNG bytes; `None` when there is none.
+pub fn watermark_png(state: &AppState) -> Option<Vec<u8>> {
+    fs::read(watermark_file(state)).ok()
+}
+
+/// Makes the PNG at `source` (a path or a URL the file dialog gave) the watermark.
+#[tauri::command]
+pub async fn set_watermark(app: AppHandle, source: String) -> CmdResult<()> {
+    blocking(move || {
+        use std::io::Read;
+        use tauri_plugin_fs::{FilePath, FsExt, OpenOptions};
+        let mut opts = OpenOptions::new();
+        opts.read(true);
+        let mut data = Vec::new();
+        app.fs().open(source.parse::<FilePath>().map_err(err)?, opts).map_err(err)?.read_to_end(&mut data).map_err(err)?;
+        keep_watermark(&app.state::<AppState>(), &data)
+    })
+    .await
+}
+
+/// The watermark as PNG bytes, none when there is none.
+#[tauri::command]
+pub async fn watermark(app: AppHandle) -> CmdResult<tauri::ipc::Response> {
+    blocking(move || Ok(tauri::ipc::Response::new(watermark_png(&app.state::<AppState>()).unwrap_or_default()))).await
 }
 
 /// Writes a file so that a crash or power cut leaves either the old or the

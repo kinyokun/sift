@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { imageUrl, type Item, type StackKind } from "../lib/api";
 import { useT } from "../lib/i18n";
-import { flagOf, useStore } from "../lib/store";
+import { flagOf, turnOf, useStore } from "../lib/store";
 import { Icon } from "../ui/Icon";
 
 /** Same rendition as the grid, so the thumbnails are already cached. */
@@ -23,6 +23,7 @@ export function StackStrip({ kind, frames, current, marks, onChoose, onLivePhoto
   const t = useT();
   const flags = useStore((s) => s.flags);
   const ratings = useStore((s) => s.ratings);
+  const turns = useStore((s) => s.turns);
   const list = useRef<HTMLDivElement>(null);
   const at = frames.findIndex((f) => f.id === current);
 
@@ -42,8 +43,17 @@ export function StackStrip({ kind, frames, current, marks, onChoose, onLivePhoto
       <div className="stack-strip-frames" ref={list}>
         {frames.map((f) => {
           const flag = flagOf(flags, f);
+          const turn = turnOf(turns, f);
           return (
-            <button key={f.id} className={`${f.id === current ? "on" : ""} ${flag === -1 ? "rejected" : ""}`} title={f.name} aria-label={f.name} aria-current={f.id === current} onClick={() => onChoose(f.id)}>
+            <button
+              key={f.id}
+              className={`${f.id === current ? "on" : ""} ${flag === -1 ? "rejected" : ""} ${turn ? "turned" : ""} ${turn % 2 ? "quarter" : ""}`}
+              style={turn ? ({ "--turn": `${turn * 90}deg` } as React.CSSProperties) : undefined}
+              title={f.name}
+              aria-label={f.name}
+              aria-current={f.id === current}
+              onClick={() => onChoose(f.id)}
+            >
               <img src={imageUrl("thumb", f.id, f.mtime, THUMB_EDGE)} alt="" loading="lazy" decoding="async" draggable={false} />
               {/\.nefx$/i.test(f.id) && <i className="merged">{t.merged}</i>}
               {flag === 1 && <i className="pick" />}

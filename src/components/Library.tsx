@@ -1,9 +1,10 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { NO_LOOK, imageUrl, isRawPath, type Item, type StackKind } from "../lib/api";
+import { NO_LOOK, api, imageUrl, isRawPath, type Item, type StackKind } from "../lib/api";
+import { editIn } from "../lib/editor";
 import { useT } from "../lib/i18n";
 import { actionFor, isTyping, keyOf, ratingOf, tagOf } from "../lib/shortcuts";
 import { useShallow } from "zustand/react/shallow";
-import { flagOf, folderName, framesOf, lookOf, tagsOf, useStore, visibleEntries, type Entry, type FlagFilter, type SortBy } from "../lib/store";
+import { flagOf, folderName, framesOf, lookOf, tagsOf, turnOf, useStore, visibleEntries, type Entry, type FlagFilter, type SortBy } from "../lib/store";
 import { IconButton, Menu, Segmented, Stars, type MenuItem } from "../ui/controls";
 import { Icon } from "../ui/Icon";
 import { useWheelSize } from "../lib/wheelSize";
@@ -61,6 +62,8 @@ const Cell = memo(function Cell(props: {
   look: string;
   /** The photo's tags, one to a line: place in the palette, a tab, the name. */
   tags: string;
+  /** Quarter turns clockwise the photo was given. */
+  turn: number;
   selected: boolean;
   /** The photo the keyboard acts on when nothing is selected. */
   cursor: boolean;
@@ -93,7 +96,15 @@ const Cell = memo(function Cell(props: {
   const tags = props.tags ? props.tags.split("\n").map((line) => line.split("\t")) : [];
   const named = size >= TAG_NAMES_FROM && tags.length <= NAMED_TAGS;
   const inner = size - CELL_INSET * 2;
-  const frame = ratio ? { width: ratio >= 1 ? inner : inner * ratio, height: ratio >= 1 ? inner / ratio : inner } : { width: inner, height: inner };
+  // `ratio` is the upright thumbnail's; a photo turned a quarter is the other way round.
+  const turn = props.turn;
+  const shown = ratio && turn % 2 ? 1 / ratio : ratio;
+  const frame = shown ? { width: shown >= 1 ? inner : inner * shown, height: shown >= 1 ? inner / shown : inner } : { width: inner, height: inner };
+  const turned: React.CSSProperties | undefined = !turn
+    ? undefined
+    : turn % 2
+      ? { position: "absolute", left: "50%", top: "50%", width: frame.height, height: frame.width, transform: `translate(-50%, -50%) rotate(${turn * 90}deg)` }
+      : { transform: "rotate(180deg)" };
   const { onHold } = props;
   const touch = onHold && {
     onPointerDown: (e: React.PointerEvent) => {
@@ -111,6 +122,7 @@ const Cell = memo(function Cell(props: {
   };
   return (
     <div
+      data-id={id}
       className={`cell ${selected ? "selected" : ""} ${props.cursor && !selected ? "cursor" : ""} ${flag === -1 ? "rejected" : ""} ${folded ? "stacked" : ""}`}
       style={{ width: size, height: size, transform: `translate(${props.left}px, ${props.top}px)` }}
       onClick={(e) => {
@@ -128,6 +140,7 @@ const Cell = memo(function Cell(props: {
             alt=""
             decoding="async"
             draggable={false}
+            style={turned}
             onLoad={(e) => {
               const r = e.currentTarget.naturalWidth / Math.max(1, e.currentTarget.naturalHeight);
               ratios.set(item.id, r);
@@ -234,6 +247,7 @@ export function Library() {
       dates: st.dates,
       flags: st.flags,
       looks: st.looks,
+      turns: st.turns,
       library: st.library,
       tags: st.tags,
       tagged: st.tagged,
@@ -471,7 +485,13 @@ export function Library() {
     const start = { x: e.clientX - origin.left, y: e.clientY - origin.top };
     const additive = e.shiftKey || e.metaKey || e.ctrlKey;
     const base = additive ? useStore.getState().selection : [];
-    const onCell = !!target.closest(".cell");
+    const cell = target.closest<HTMLElement>(".cell");
+    const onCell = !!cell;
+    // Dragging a selected photo hands its files to whatever it is dropped on, as in the Finder.
+    const held = cell?.dataset.id;
+    const st0 = useStore.getState();
+    const platform = st0.info?.platform;
+    const carry = !additive && !!held && st0.selection.includes(held) && (platform === "macos" || platform === "windows");
     let at = { x: e.clientX, y: e.clientY };
     let active = false;
     let raf = 0;
@@ -518,6 +538,18 @@ export function Library() {
       at = { x: ev.clientX, y: ev.clientY };
       if (!active) {
         if (Math.hypot(at.x - e.clientX, at.y - e.clientY) < DRAG_SLOP) return;
+        if (carry) {
+          // The system's drag swallows the release, so nothing waits for it.
+          window.removeEventListener("pointermove", move);
+          window.removeEventListener("pointerup", up);
+          window.removeEventListener("pointercancel", up);
+          const st = useStore.getState();
+          const members = frames(st.selection);
+          const files = ev.altKey ? members.flatMap((m) => (m.live ? [...m.paths, m.live] : m.paths)) : members.map((m) => m.id);
+          const shown = members.find((m) => m.id === held) ?? members[0];
+          if (shown) api.dragOut(files, shown.id, turnOf(st.turns, shown)).catch((err) => console.warn("drag out:", err));
+          return;
+        }
         active = true;
         dragged.current = true;
         raf = requestAnimationFrame(step);
@@ -581,6 +613,15 @@ export function Library() {
       if (action === "delete") {
         e.preventDefault();
         return st.deletePhotos(frames(st.selection.length ? st.selection : st.cursor ? [st.cursor] : []).map((m) => m.id));
+      }
+      if (action === "rotateLeft" || action === "rotateRight") {
+        e.preventDefault();
+        const ids = frames(st.selection.length ? st.selection : st.cursor ? [st.cursor] : []).map((m) => m.id);
+        return st.turn(ids, action === "rotateLeft" ? -1 : 1);
+      }
+      if (action === "editor") {
+        e.preventDefault();
+        return void editIn(frames(st.selection.length ? st.selection : st.cursor ? [st.cursor] : []));
       }
       if (mod || !items.length) return;
       const at = indexOf(st.cursor);
@@ -840,6 +881,7 @@ export function Library() {
                 flag={flagOf(s.flags, item)}
                 look={lookLabel(lookOf(s.looks, item))}
                 tags={tagLine(item)}
+                turn={turnOf(s.turns, item)}
                 selected={selected.has(entry.id)}
                 cursor={entry.id === s.cursor}
                 size={size}
@@ -887,6 +929,8 @@ export function Library() {
           </span>
           <Menu label={t.lookApply} items={lookItems} button={<Icon name="look" />} up />
           <TagMenu ref={barTags} label={t.tagApply} targets={barTargets} up />
+          <IconButton icon="rotate" label={t.actions.rotateRight} onClick={() => act.turn(chosen, 1)} />
+          {!mobile && <IconButton icon="openIn" label={t.actions.editor} onClick={() => void editIn(frames(s.selection))} />}
           {s.info?.save_to_photos && <IconButton icon="save" label={t.saveToPhotos} onClick={() => act.saveToPhotos(frames(s.selection))} />}
           {chosen.length > 1 && chosen.length <= MAX_PANES && (
             <IconButton icon="compare" label={t.compareSelected} onClick={() => act.openViewer(chosen[0], chosen)} />

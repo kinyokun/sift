@@ -1,8 +1,9 @@
 import { useRef } from "react";
 import type { AfBox } from "../lib/api";
+import { towards } from "../lib/turn";
 
-/** Crop rectangle in normalised image coordinates. */
-export type Crop = { x: number; y: number; w: number; h: number };
+/** Crop rectangle in normalised image coordinates, and how far (degrees clockwise) the photo is straightened under it. */
+export type Crop = { x: number; y: number; w: number; h: number; angle?: number };
 
 /** Guide modes that have more than one orientation. */
 export const ROTATABLE_GUIDES = [3, 5];
@@ -120,6 +121,8 @@ type Props = {
   guides: number;
   flip: number;
   crop: Crop | null;
+  /** The photo is straightened by this many degrees: the crop stays on it. */
+  angle: number;
   cropRatio: number | null;
   onCrop: (crop: Crop) => void;
   style?: React.CSSProperties;
@@ -142,8 +145,11 @@ export function Overlay(props: Props) {
     const dx = (e.clientX - d.startX) / W;
     const dy = (e.clientY - d.startY) / H;
     const b = d.base;
+    const size = { w: W, h: H };
     if (d.kind === "move") {
-      props.onCrop({ ...b, x: Math.min(1 - b.w, Math.max(0, b.x + dx)), y: Math.min(1 - b.h, Math.max(0, b.y + dy)) });
+      // Each way on its own, so the crop slides along an edge it has run into.
+      const across = towards(b, { ...b, x: Math.min(1 - b.w, Math.max(0, b.x + dx)) }, props.angle, size);
+      props.onCrop(towards(across, { ...across, y: Math.min(1 - b.h, Math.max(0, b.y + dy)) }, props.angle, size));
       return;
     }
     // Resize from a corner; the opposite corner stays put.
@@ -164,7 +170,7 @@ export function Overlay(props: Props) {
       w = Math.min(Math.max(w, h * r), maxW, maxH * r);
       h = w / r;
     }
-    props.onCrop({ x: left ? ax - w : ax, y: top ? ay - h : ay, w, h });
+    props.onCrop(towards(b, { ...b, x: left ? ax - w : ax, y: top ? ay - h : ay, w, h }, props.angle, size));
   };
   const end = (e: React.PointerEvent) => {
     if (drag.current) e.stopPropagation();

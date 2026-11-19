@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { NO_LOOK, api, fileName, imageUrl, isHeifPath, isRawPath, type CropBox, type Item, type Meta, type Tag } from "../lib/api";
+import { NO_LOOK, api, fileName, imageUrl, isHeifPath, isRawPath, type Item, type Meta, type Tag } from "../lib/api";
+import { editIn } from "../lib/editor";
 import { useT } from "../lib/i18n";
 import { actionFor, isTyping, ratingOf, tagOf } from "../lib/shortcuts";
-import { cropOf, flagOf, lookOf, useStore, wheelModeOf } from "../lib/store";
+import { cropOf, flagOf, lookOf, turnOf, useStore, wheelModeOf } from "../lib/store";
+import { fitCrop, turnRect, turnedSize } from "../lib/turn";
 import { IconButton, Menu, Stars, type MenuItem } from "../ui/controls";
 import { Icon } from "../ui/Icon";
 import { CROP_RATIOS, GUIDE_MODES, ROTATABLE_GUIDES, centeredCrop, type Crop } from "./Overlay";
@@ -32,11 +34,21 @@ export function exposureLine(meta: Meta): string {
     .join("  ");
 }
 
+/** A photo's size in pixels as it is shown: upright, then turned. */
+function shownSize(meta: Meta, turn: number): { w: number; h: number } {
+  const upright = meta.orientation >= 5 ? { w: meta.preview_height, h: meta.preview_width } : { w: meta.preview_width, h: meta.preview_height };
+  return turnedSize({ w: upright.w || 3, h: upright.h || 2 }, turn);
+}
+
+/** Unconfirmed crops of the photos left while one was being drawn, by photo: going back finds it as it was. */
+const drafts = new Map<string, { crop: Crop; ratio: string }>();
+
 type InfoProps = {
   item: Item;
   meta: Meta | null;
   docked: boolean;
-  crop: CropBox | null;
+  /** The confirmed crop, as a rectangle of the upright photo. */
+  crop: [number, number, number, number] | null;
   tags: Tag[];
   /** What the histogram is taken from; `null` while a look is still rendering. */
   histogram: { path: string; look: string | null; edge: number } | null;
@@ -140,6 +152,7 @@ export function Viewer() {
   const looks = useStore((s) => s.looks);
   const library = useStore((s) => s.library);
   const crops = useStore((s) => s.crops);
+  const quarters = useStore((s) => s.turns);
   const tags = useStore((s) => s.tags);
   const tagged = useStore((s) => s.tagged);
   const settings = useStore((s) => s.settings);
@@ -340,11 +353,26 @@ export function Viewer() {
     eyed.current = slotItems.map((it) => it?.id);
   }, [eye, slotKey]);
 
-  // An unconfirmed crop belongs to the photo it was started on.
+  // An unconfirmed crop belongs to the photo it was started on, and is still there when the viewer comes back to it.
+  const cropNow = useRef({ crop, ratio: cropRatio });
+  cropNow.current = { crop, ratio: cropRatio };
+  const cropFor = useRef<string | undefined>(undefined);
+  const keepDraft = () => {
+    const { crop: c, ratio } = cropNow.current;
+    const id = cropFor.current;
+    if (!id) return;
+    if (c && ratio) drafts.set(id, { crop: c, ratio });
+    else drafts.delete(id);
+  };
   useEffect(() => {
-    setCrop(null);
-    setCropRatio(null);
+    if (cropFor.current === current?.id) return;
+    keepDraft();
+    cropFor.current = current?.id;
+    const back = current ? drafts.get(current.id) : undefined;
+    setCrop(back?.crop ?? null);
+    setCropRatio(back?.ratio ?? null);
   }, [current?.id]);
+  useEffect(() => keepDraft, []);
 
   const toggleEye = () => {
     if (eye) panes.forEach((p) => p.current?.fit());
@@ -528,18 +556,37 @@ export function Viewer() {
     setCropRatio(id);
     const meta = current ? metas[current.id] : null;
     if (!id || !meta || !current) return setCrop(null);
-    const swap = meta.orientation >= 5;
-    const [w, h] = swap ? [meta.preview_height, meta.preview_width] : [meta.preview_width, meta.preview_height];
+    const size = shownSize(meta, turnOf(quarters, current));
     const saved = cropOf(crops, current);
     const keep = id === "free" || (saved && !cropRatio);
-    setCrop(saved && keep ? { x: saved[0], y: saved[1], w: saved[2], h: saved[3] } : centeredCrop(w || 3, h || 2, CROP_RATIOS.find((r) => r.id === id)!.ratio));
+    // A photo that is being straightened stays so with another shape of crop.
+    const angle = crop?.angle ?? saved?.[4] ?? 0;
+    const box = saved && keep ? { x: saved[0], y: saved[1], w: saved[2], h: saved[3] } : centeredCrop(size.w, size.h, CROP_RATIOS.find((r) => r.id === id)!.ratio);
+    setCrop({ ...fitCrop(box, angle, size), angle });
   };
 
   const confirmCrop = () => {
     if (!current || !crop) return;
-    const whole = crop.w > 0.999 && crop.h > 0.999;
-    useStore.getState().setCrop([current.id], whole ? null : [crop.x, crop.y, crop.w, crop.h]);
+    const angle = Math.round((crop.angle ?? 0) * 10) / 10;
+    const whole = crop.w > 0.999 && crop.h > 0.999 && !angle;
+    useStore.getState().setCrop([current.id], whole ? null : angle ? [crop.x, crop.y, crop.w, crop.h, angle] : [crop.x, crop.y, crop.w, crop.h]);
     chooseCrop(null);
+  };
+
+  /** The crop being drawn when the straightening began: the photo turns under it, and it shrinks only as far as it must. */
+  const straightenFrom = useRef<Crop | null>(null);
+  const straighten = (angle: number) => {
+    const meta = current ? metas[current.id] : null;
+    if (!crop || !meta || !current) return;
+    const from = straightenFrom.current ?? crop;
+    setCrop({ ...fitCrop({ ...from }, angle, shownSize(meta, turnOf(quarters, current))), angle });
+  };
+
+  /** Turns the photo on screen by quarter turns, clockwise for positive `by`; a crop being drawn turns with it. */
+  const rotate = (by: number) => {
+    if (!current) return;
+    useStore.getState().turn([current.id], by);
+    if (crop) setCrop(turnRect(crop, by));
   };
 
   const resetCrop = () => {
@@ -721,6 +768,12 @@ export function Viewer() {
           return rotateGuides();
         case "crop":
           return chooseCrop(cropRatio ? null : current && cropOf(crops, current) ? "free" : "original");
+        case "rotateLeft":
+          return rotate(-1);
+        case "rotateRight":
+          return rotate(1);
+        case "editor":
+          return void editIn([current]);
         case "compare":
           return toggleCompare();
         case "panes":
@@ -772,10 +825,16 @@ export function Viewer() {
     ...(ROTATABLE_GUIDES.includes(guides) ? (["divider", { label: t.guidesRotate, onSelect: rotateGuides }] as MenuItem[]) : []),
   ];
   const savedCrop = cropOf(crops, current);
+  // The info panel shows the crop on the upright photo, and the histogram counts what is inside it (straightening left aside).
+  const unturned = savedCrop && turnRect({ x: savedCrop[0], y: savedCrop[1], w: savedCrop[2], h: savedCrop[3] }, -turnOf(quarters, current));
+  const uprightCrop: [number, number, number, number] | null = unturned && [unturned.x, unturned.y, unturned.w, unturned.h];
   const currentTags = tagsOn(tags, tagged, current);
   const cropItems: MenuItem[] = [
     { label: t.guideNames[0], checked: !cropRatio, onSelect: () => chooseCrop(null) },
     ...(savedCrop ? [{ label: t.cropReset, onSelect: resetCrop } as MenuItem] : []),
+    "divider",
+    { label: t.actions.rotateLeft, onSelect: () => rotate(-1) },
+    { label: t.actions.rotateRight, onSelect: () => rotate(1) },
     "divider",
     ...CROP_RATIOS.map((r) => ({
       label: r.id === "original" ? t.cropOriginal : r.id === "free" ? t.cropFree : r.id,
@@ -851,6 +910,7 @@ export function Viewer() {
                     dimmed={flagOf(flags, item) === -1}
                     look={lookOf(looks, item)}
                     frame={crop ? null : cropOf(crops, item)}
+                    turn={turnOf(quarters, item)}
                     onSwipeV={cycleLook}
                     {...paneProps}
                     insets={insetsOf(i)}
@@ -948,6 +1008,22 @@ export function Viewer() {
           )}
           {crop && (
             <div className="crop-bar glass">
+              <label className="straighten" title={t.straightenHint}>
+                <span>{t.straighten}</span>
+                <input
+                  type="range"
+                  min={-45}
+                  max={45}
+                  step={0.1}
+                  value={crop.angle ?? 0}
+                  aria-label={t.straighten}
+                  onPointerDown={() => (straightenFrom.current = crop)}
+                  onPointerUp={() => (straightenFrom.current = null)}
+                  onChange={(e) => straighten(Number(e.target.value))}
+                  onDoubleClick={() => straighten(0)}
+                />
+                <output>{(crop.angle ?? 0).toFixed(1)}°</output>
+              </label>
               <button onClick={() => chooseCrop(null)}>{t.cancel}</button>
               {savedCrop && <button onClick={resetCrop}>{t.cropReset}</button>}
               <button className="primary" onClick={confirmCrop}>
@@ -969,6 +1045,8 @@ export function Viewer() {
             <Menu label={t.looks} up className={currentLook ? "on" : ""} items={lookItems} button={<Icon name="look" />} />
             <Menu label={t.guides} up className={guides ? "on" : ""} items={guideItems} button={<Icon name="guides" />} />
             <Menu label={t.crop} up className={cropRatio || savedCrop ? "on" : ""} items={cropItems} button={<Icon name="crop" />} />
+            <IconButton icon="rotate" label={t.actions.rotateRight} onClick={() => rotate(1)} />
+            {!mobile && <IconButton icon="openIn" label={t.actions.editor} onClick={() => void editIn([current])} />}
             <IconButton icon="clip" label={t.clipping} active={settings.clipping} onClick={toggleClipping} />
             <IconButton icon="compare" label={t.compare} active={compare} onClick={toggleCompare} />
             {compare && <IconButton icon="link" label={t.link} active={link} onClick={() => setLink(!link)} />}
@@ -987,9 +1065,9 @@ export function Viewer() {
         </div>
       </div>
 
-      {docked && <InfoPanel item={current} meta={currentMeta} docked crop={savedCrop} tags={currentTags} histogram={histogramOf} onSaveLook={saveLook} />}
+      {docked && <InfoPanel item={current} meta={currentMeta} docked crop={uprightCrop} tags={currentTags} histogram={histogramOf} onSaveLook={saveLook} />}
       {showInfo && mobile && !immersive && (
-        <InfoPanel item={current} meta={currentMeta} docked={false} crop={savedCrop} tags={currentTags} histogram={histogramOf} onSaveLook={saveLook} />
+        <InfoPanel item={current} meta={currentMeta} docked={false} crop={uprightCrop} tags={currentTags} histogram={histogramOf} onSaveLook={saveLook} />
       )}
       {wall && (
         <LookWall

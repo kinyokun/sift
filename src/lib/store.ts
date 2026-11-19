@@ -16,6 +16,7 @@ import {
   type UpdateProgress,
 } from "./api";
 import { DEFAULT_KEYS, resolveKeys, type Action } from "./shortcuts";
+import { quarter, turnRect } from "./turn";
 
 export type FlagFilter = "all" | "picked" | "unflagged" | "rejected";
 export type SortBy = "name" | "time" | "rating" | "size";
@@ -82,11 +83,15 @@ export type Settings = {
   skippedUpdate: string | null;
   /** Names of the tags made lately, newest first, offered again in other folders. */
   tagNames: string[];
+  /** The program photos are edited in (an `.app` or `.exe`); unset, it is asked for the first time. */
+  editor: string | null;
+  /** Hand the editor the RAW of a pair rather than its JPEG. */
+  editorRaw: boolean;
 };
 
 const SETTINGS_KEY = "sift.settings";
 const MAX_RECENTS = 6;
-const KEYS_VERSION = 8;
+const KEYS_VERSION = 9;
 /** The colours a tag can have; a tag keeps its place in this list. */
 export const TAG_COLORS = ["#ff453a", "#ff9f0a", "#ffd60a", "#30d158", "#64d2ff", "#0a84ff", "#bf5af2", "#ff6eb4"];
 const MAX_TAG_NAME = 40;
@@ -127,13 +132,15 @@ const defaults: Settings = {
   checkUpdates: true,
   skippedUpdate: null,
   tagNames: [],
+  editor: null,
+  editorRaw: true,
 };
 
 function loadSettings(): Settings {
   try {
     const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
     let keys = { ...DEFAULT_KEYS };
-    // Versions 4 to 8 only added actions; bindings saved since version 3 carry over.
+    // Versions 4 to 9 only added actions; bindings saved since version 3 carry over.
     if (saved.keysVersion >= 3 && saved.keysVersion <= KEYS_VERSION) keys = resolveKeys(saved.keys || {});
     else if (saved.keysVersion === 2) {
       // Version 2 put "original" on the letter O, which reads like the 0 of
@@ -173,6 +180,9 @@ type State = {
   looks: Record<string, string>;
   /** File name -> confirmed crop; saved with the folder's progress and used on export. */
   crops: Record<string, CropBox>;
+  /** File name -> quarter turns clockwise the photo was given (absent: as the camera says); saved with the
+   * folder's progress and used on export. */
+  turns: Record<string, number>;
   /** Looks imported into the app. */
   library: LookInfo[];
   /** The tags of this folder, in the order they were made; saved with its progress. */
@@ -243,6 +253,8 @@ type State = {
   setLibrary: (library: LookInfo[]) => void;
   /** Confirms a crop for photos; `null` restores the full frame. */
   setCrop: (ids: string[], crop: CropBox | null) => void;
+  /** Turns photos by quarter turns (clockwise for positive `by`); their crops turn with them. */
+  turn: (ids: string[], by: number) => void;
   loadMeta: (id: string) => Promise<Meta | null>;
   setSheet: (sheet: SheetName | null) => void;
   notify: (text: string) => void;
@@ -269,6 +281,15 @@ export function cropOf(crops: Record<string, CropBox>, item: Item): CropBox | nu
     if (c) return c;
   }
   return null;
+}
+
+/** How many quarter turns clockwise a shot was given, 0 to 3. */
+export function turnOf(turns: Record<string, number>, item: Item): number {
+  for (const p of item.paths) {
+    const q = turns[shotKey(item.dir, p)];
+    if (q) return quarter(q);
+  }
+  return 0;
 }
 
 /** The look chosen for a shot, if any. */
@@ -470,9 +491,9 @@ export const useStore = create<State>((set, get) => {
 
   const saveNow = () => {
     clearTimeout(saveTimer);
-    const { folder, flags, looks, crops, viewer, filter, minStars, loading, subfolder, tags, tagged, tagFilter } = get();
+    const { folder, flags, looks, crops, turns, viewer, filter, minStars, loading, subfolder, tags, tagged, tagFilter } = get();
     if (!folder || loading) return;
-    const session: Session = { flags, looks, crops, cursor: position(), viewer: !!viewer, filter, minStars, subfolder, tags, tagged, tagFilter };
+    const session: Session = { flags, looks, crops, turns, cursor: position(), viewer: !!viewer, filter, minStars, subfolder, tags, tagged, tagFilter };
     api.saveSession(folder, session).catch(() => {});
   };
 
@@ -669,6 +690,7 @@ export const useStore = create<State>((set, get) => {
     metas: {},
     looks: {},
     crops: {},
+    turns: {},
     library: [],
     tags: [],
     tagged: {},
@@ -723,7 +745,7 @@ export const useStore = create<State>((set, get) => {
 
     openFolder: async (path) => {
       saveNow();
-      set({ loading: true, folder: path, deep: false, subfolder: null, items: [], ratings: {}, dates: {}, flags: {}, looks: {}, crops: {}, tags: [], tagged: {}, tagFilter: [], metas: {}, stacks: [], stackOf: {}, expanded: [], selection: [], cursor: null, viewer: null });
+      set({ loading: true, folder: path, deep: false, subfolder: null, items: [], ratings: {}, dates: {}, flags: {}, looks: {}, crops: {}, turns: {}, tags: [], tagged: {}, tagFilter: [], metas: {}, stacks: [], stackOf: {}, expanded: [], selection: [], cursor: null, viewer: null });
       try {
         const [{ items, deep, found }, saved] = await Promise.all([scanFolder(path), api.loadSession(path)]);
         if (get().folder !== path) return;
@@ -737,6 +759,7 @@ export const useStore = create<State>((set, get) => {
           flags: saved?.flags ?? {},
           looks: saved?.looks ?? {},
           crops: saved?.crops ?? {},
+          turns: saved?.turns ?? {},
           tags,
           tagged: saved?.tagged ?? {},
           tagFilter: (saved?.tagFilter ?? []).filter((id) => tags.some((tag) => tag.id === id)),
@@ -989,6 +1012,27 @@ export const useStore = create<State>((set, get) => {
         }
       }
       set({ crops: next });
+      save();
+    },
+
+    turn: (ids, by) => {
+      const { items, crops, turns } = get();
+      const [nextTurns, nextCrops] = [{ ...turns }, { ...crops }];
+      const wanted = new Set(ids);
+      for (const item of items) {
+        if (!wanted.has(item.id)) continue;
+        const q = quarter(turnOf(turns, item) + by);
+        const crop = cropOf(crops, item);
+        // The crop was drawn on the photo as it was turned, and stays on the same part of it.
+        const moved = crop && turnRect({ x: crop[0], y: crop[1], w: crop[2], h: crop[3] }, by);
+        for (const p of item.paths) {
+          const key = shotKey(item.dir, p);
+          if (q) nextTurns[key] = q;
+          else delete nextTurns[key];
+          if (crop && moved) nextCrops[key] = crop[4] ? [moved.x, moved.y, moved.w, moved.h, crop[4]] : [moved.x, moved.y, moved.w, moved.h];
+        }
+      }
+      set({ turns: nextTurns, crops: nextCrops });
       save();
     },
 

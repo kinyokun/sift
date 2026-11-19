@@ -2,6 +2,7 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffec
 import { NO_LOOK, imageUrl, isNefPath, isRawPath, type CropBox, type Item, type Meta } from "../lib/api";
 import type { WheelMode } from "../lib/store";
 import { ZOOM_PAST, ZOOM_REST_MS } from "../lib/wheelSize";
+import { spin, turnPoint, turnRect, turnStyle, turnedSize } from "../lib/turn";
 import { Overlay, type Crop } from "./Overlay";
 
 export type View = { scale: number; tx: number; ty: number };
@@ -37,6 +38,8 @@ type Props = {
   look: string | null;
   /** Confirmed crop: only this part of the photo is shown. */
   frame: CropBox | null;
+  /** Quarter turns clockwise the photo was given. */
+  turn: number;
   onSwipeV?: (direction: 1 | -1) => void;
   showAf: boolean;
   /** Mark blown highlights and crushed shadows on the photo. */
@@ -121,8 +124,13 @@ export const Pane = forwardRef<PaneHandle, Props>(function Pane(props, ref) {
   const { item, meta, insets } = props;
   const box = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
-  const [fullDims, setDims] = useState<{ w: number; h: number } | null>(null);
+  // The size of the pictures as they arrive (upright), and of the photo once turned.
+  const [upright, setDims] = useState<{ w: number; h: number } | null>(null);
+  const turn = props.turn;
+  const fullDims = useMemo(() => upright && turnedSize(upright, turn), [upright, turn]);
   const frame = props.frame;
+  // A straightened photo turns about its centre, confirmed or while its crop is being drawn.
+  const angle = frame?.[4] ?? props.crop?.angle ?? 0;
   // Everything below works on the visible part of the photo: the whole frame, or its confirmed crop.
   const dims = useMemo(
     () => (fullDims && frame ? { w: fullDims.w * frame[2], h: fullDims.h * frame[3] } : fullDims),
@@ -140,8 +148,8 @@ export const Pane = forwardRef<PaneHandle, Props>(function Pane(props, ref) {
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
   // `view` and `fitMode` in here run ahead of the painted state during a
   // gesture, so a render must not write the older state values back.
-  const live = useRef({ view, dims, fullDims, frame, size, fitMode, insets, id: item.id });
-  Object.assign(live.current, { dims, fullDims, frame, size, insets, id: item.id });
+  const live = useRef({ view, dims, upright, fullDims, frame, turn, angle, size, fitMode, insets, id: item.id });
+  Object.assign(live.current, { dims, upright, fullDims, frame, turn, angle, size, insets, id: item.id });
 
   const original = props.look === NO_LOOK && item.paths.some(isRawPath);
   const styled = !!props.look && props.look !== NO_LOOK;
@@ -299,8 +307,10 @@ export const Pane = forwardRef<PaneHandle, Props>(function Pane(props, ref) {
         if (fit) zoomAt(s.w / 2, s.h / 2, closeScale());
         else apply(fitView(d, s, ins), true);
       },
-      zoomTo: (nx, ny) => {
-        const f = live.current.frame;
+      zoomTo: (ux, uy) => {
+        const { frame: f, turn: q, angle: a, fullDims: full } = live.current;
+        const [tx, ty] = turnPoint(ux, uy, q);
+        const [nx, ny] = full ? spin(tx, ty, a, full) : [tx, ty];
         const inside = (v: number, start: number, len: number) => Math.min(1, Math.max(0, (v - start) / len));
         centreOn(f ? inside(nx, f[0], f[2]) : nx, f ? inside(ny, f[1], f[3]) : ny, 1, false);
       },
@@ -609,7 +619,7 @@ export const Pane = forwardRef<PaneHandle, Props>(function Pane(props, ref) {
   const onFullLoad = (e: React.SyntheticEvent<HTMLImageElement>, url: string) => {
     const img = e.currentTarget;
     setReadyUrl(url);
-    const d = live.current.fullDims;
+    const d = live.current.upright;
     // A developed RAW can differ slightly from the size the metadata promised.
     if (d && img.naturalWidth && (Math.abs(img.naturalWidth - d.w) > 2 || Math.abs(img.naturalHeight - d.h) > 2)) {
       const k = d.w / img.naturalWidth;
@@ -620,14 +630,21 @@ export const Pane = forwardRef<PaneHandle, Props>(function Pane(props, ref) {
     }
   };
 
-  // Focus areas are recorded for the whole frame; move them into the crop.
+  // Focus areas are recorded for the whole upright frame; turn them with the photo and move them into the crop.
   const afBoxes = useMemo(() => {
-    const boxes = meta?.af?.boxes ?? null;
-    if (!boxes || !frame) return boxes;
+    let boxes = meta?.af?.boxes ?? null;
+    if (!boxes) return boxes;
+    if (turn) boxes = boxes.map((b) => turnRect(b, turn));
+    if (angle && fullDims)
+      boxes = boxes.map((b) => {
+        const [cx, cy] = spin(b.x + b.w / 2, b.y + b.h / 2, angle, fullDims);
+        return { ...b, x: cx - b.w / 2, y: cy - b.h / 2 };
+      });
+    if (!frame) return boxes;
     return boxes
       .map((b) => ({ ...b, x: (b.x - frame[0]) / frame[2], y: (b.y - frame[1]) / frame[3], w: b.w / frame[2], h: b.h / frame[3] }))
       .filter((b) => b.x + b.w / 2 > 0 && b.x + b.w / 2 < 1 && b.y + b.h / 2 > 0 && b.y + b.h / 2 < 1);
-  }, [meta, frame?.[0], frame?.[1], frame?.[2], frame?.[3]]);
+  }, [meta, turn, angle, fullDims, frame?.[0], frame?.[1], frame?.[2], frame?.[3]]);
 
   return (
     <div
@@ -641,15 +658,22 @@ export const Pane = forwardRef<PaneHandle, Props>(function Pane(props, ref) {
       onDoubleClick={(e) => !gesture.current.touching && (props.onBack ? props.onBack() : toggleAt(e))}
       onContextMenu={(e) => e.preventDefault()}
     >
-      {dims && fullDims ? (
+      {dims && fullDims && upright ? (
         <div
           className="canvas"
           style={{ width: dims.w, height: dims.h, transform: `translate3d(${view.tx}px, ${view.ty}px, 0) scale(${view.scale})` }}
         >
           <div
             className="canvas-full"
-            style={{ width: fullDims.w, height: fullDims.h, left: -(frame?.[0] ?? 0) * fullDims.w, top: -(frame?.[1] ?? 0) * fullDims.h }}
+            style={{
+              width: fullDims.w,
+              height: fullDims.h,
+              left: -(frame?.[0] ?? 0) * fullDims.w,
+              top: -(frame?.[1] ?? 0) * fullDims.h,
+              transform: angle ? `rotate(${angle}deg)` : undefined,
+            }}
           >
+          <div style={turnStyle(turn, upright)}>
           <img className="tier" src={screenUrl} alt="" draggable={false} decoding="async" onLoad={onPicture} onError={onPicture} />
           {wantFull && (
             <img
@@ -665,9 +689,18 @@ export const Pane = forwardRef<PaneHandle, Props>(function Pane(props, ref) {
           )}
           {clipUrl && <img key={clipUrl} className="tier clip" src={clipUrl} alt="" draggable={false} decoding="async" />}
           </div>
+          </div>
         </div>
       ) : (
-        <img className="placeholder" src={imageUrl("thumb", item.id, item.mtime, 512)} alt="" draggable={false} onLoad={onPicture} onError={onPicture} />
+        <img
+          className="placeholder"
+          src={imageUrl("thumb", item.id, item.mtime, 512)}
+          alt=""
+          draggable={false}
+          style={turn ? { transform: `rotate(${turn * 90}deg)` } : undefined}
+          onLoad={onPicture}
+          onError={onPicture}
+        />
       )}
       {dims && (
         <Overlay
@@ -680,6 +713,7 @@ export const Pane = forwardRef<PaneHandle, Props>(function Pane(props, ref) {
           guides={props.guides}
           flip={props.flip}
           crop={props.crop}
+          angle={angle}
           cropRatio={props.cropRatio}
           onCrop={props.onCrop}
         />

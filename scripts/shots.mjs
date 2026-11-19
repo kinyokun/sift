@@ -316,11 +316,21 @@ await session("select", desktop, async (page, shot) => {
   const during = await picked();
   await page.mouse.up();
   console.log(`[select] dragged over 4 columns x 2 rows: ${during}, after release: ${await picked()} (want 8)`);
+  // A drag that starts on a photo that is not selected selects; one on a selected photo carries the files out.
+  await page.keyboard.press("Escape");
   await page.mouse.move(a.x + 30, a.y + 30);
   await page.mouse.down();
   await page.mouse.move(b.x + 30, a.y + 40, { steps: 6 });
   await page.mouse.up();
   console.log(`[select] a drag that starts on a photo: ${await picked()} (want 4)`);
+  const handed = page.waitForRequest((r) => r.url().endsWith("/invoke/drag_out"), { timeout: 3000 }).catch(() => null);
+  const from = await cell(1).boundingBox();
+  await page.mouse.move(from.x + 30, from.y + 30);
+  await page.mouse.down();
+  await page.mouse.move(from.x + 30, from.y + 200, { steps: 6 });
+  await page.mouse.up();
+  const out = await handed;
+  console.log(`[select] a drag from a selected photo hands out ${out ? JSON.parse(out.postData()).paths.length : 0} files (want 4), still ${await picked()} (want 4)`);
   await page.locator(".selection-bar .stars button").nth(3).click();
   await page.locator(".selection-bar .flag-button.pick").click();
   console.log(`[select] bar: ${await page.locator(".cell-stars").count()} rated, ${await page.locator(".cell-flag.pick").count()} picked (want 4, 4)`);
