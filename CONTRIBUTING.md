@@ -34,7 +34,7 @@ cargo clippy --workspace
 pnpm typecheck
 ```
 
-样张测试需要先 `bash samples/fetch.sh`（约 1.3 GB，来自 raw.pixls.us）；没有样张时这些测试直接通过。
+样张测试需要先 `bash samples/fetch.sh`（约 2.3 GB，来自 raw.pixls.us）；没有样张时这些测试直接通过。
 
 ## 约定
 

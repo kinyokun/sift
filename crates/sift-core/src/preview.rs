@@ -1,11 +1,11 @@
 //! Display images: the embedded full-size JPEG passed through untouched,
 //! plus scaled renditions for grids and small screens.
 
-use crate::container::{self, Format};
+use crate::container::{self, Format, RecordedCrop};
 use crate::io::Src;
 use crate::tiff::{Tiff, T_ORIENTATION};
 use crate::{exif, formats, jpeg, Error, Result};
-use image::{imageops, DynamicImage, RgbImage};
+use image::{imageops, DynamicImage, ImageBuffer, Pixel, RgbImage};
 use std::io::Cursor;
 use std::path::Path;
 
@@ -54,8 +54,24 @@ pub fn full(path: &Path) -> Result<Vec<u8>> {
                 return Err(Error::NoPreview);
             };
             let data = src.read(j.offset, j.len as usize).ok_or(Error::Malformed)?;
+            let data = match p.recorded_crop().filter(|c| c.fits(j.width, j.height)) {
+                Some(c) => encode_jpeg(&recorded(decode_jpeg(&data, u32::MAX)?, Some(c)), 92)?,
+                None => data,
+            };
             Ok(tag_orientation(data, exif::orientation(&p)))
         }
+    }
+}
+
+/// The part of an unrotated image of the whole sensor area that the camera
+/// recorded as the picture (see [`RecordedCrop`]); any other image as it is.
+pub fn recorded<P: Pixel + 'static>(img: ImageBuffer<P, Vec<P::Subpixel>>, crop: Option<RecordedCrop>) -> ImageBuffer<P, Vec<P::Subpixel>> {
+    match crop.filter(|c| c.fits(img.width(), img.height())) {
+        Some(c) => {
+            let (x, y, w, h) = c.rect(img.width(), img.height());
+            imageops::crop_imm(&img, x, y, w, h).to_image()
+        }
+        None => img,
     }
 }
 
@@ -148,13 +164,16 @@ pub fn fit(img: RgbImage, edge: u32) -> RgbImage {
 pub fn pixels(path: &Path, edge: u32) -> Result<RgbImage> {
     let src = Src::open(path)?;
     let p = container::parse(&src);
-    let (img, orientation) = match p.preview_for(edge) {
+    let crop = p.recorded_crop();
+    // Cut down to the recorded picture, a preview has a shorter long edge than it had.
+    let need = crop.map_or(edge, |c| (edge as f64 / c.kept()).ceil().min(u32::MAX as f64) as u32);
+    let (img, orientation) = match p.preview_for(need) {
         // The JPEG a camera puts in a HEIF is a small one: good for the sizes it covers only.
         Some(j) if p.format == Format::Heif && j.width.max(j.height) < edge => return crate::heif::decode(path, edge),
         None if p.format == Format::Heif => return crate::heif::decode(path, edge),
         Some(j) => {
             let data = src.read(j.offset, j.len as usize).ok_or(Error::Malformed)?;
-            (decode_jpeg(&data, edge)?, exif::orientation(&p))
+            (recorded(decode_jpeg(&data, need)?, crop), exif::orientation(&p))
         }
         None if !formats::is_raw(path) => (image::open(path)?.to_rgb8(), 1),
         None => return Err(Error::NoPreview),
@@ -172,10 +191,13 @@ pub fn scaled(path: &Path, edge: u32, quality: u8) -> Result<Vec<u8>> {
 pub fn embedded_screen(path: &Path, edge: u32) -> Result<Option<Vec<u8>>> {
     let src = Src::open(path)?;
     let p = container::parse(&src);
+    let crop = p.recorded_crop();
     Ok(p.previews
         .iter()
         // Close enough to the requested size: 70% to 125% of it.
         .find(|j| (edge * 7 / 10..=edge + edge / 4).contains(&j.width.max(j.height)))
+        // One that shows more than the picture would have to be cut first.
+        .filter(|j| crop.is_none_or(|c| !c.fits(j.width, j.height)))
         .and_then(|j| src.read(j.offset, j.len as usize))
         .map(|data| tag_orientation(data, exif::orientation(&p))))
 }

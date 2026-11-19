@@ -119,6 +119,15 @@ pub fn read(path: &Path) -> Result<Meta> {
     };
     let raw = formats::is_raw(path);
     let (mut pw, mut ph) = p.largest_preview().map_or((0, 0), |j| (j.width, j.height));
+    // Every rendition of an RW2 shot in another aspect ratio than the sensor's is cut to the picture.
+    if let Some(crop) = p.recorded_crop() {
+        let cut = |w: u32, h: u32| if crop.fits(w, h) { let (_, _, w, h) = crop.rect(w, h); (w, h) } else { (w, h) };
+        (pw, ph) = cut(pw, ph);
+        if let (Some(w), Some(h)) = (exif.width, exif.height) {
+            let (w, h) = cut(w, h);
+            (exif.width, exif.height) = (Some(w), Some(h));
+        }
+    }
     if let Some(heif) = p.heif {
         (pw, ph) = (heif.width, heif.height);
         exif.width = Some(pw);

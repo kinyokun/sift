@@ -75,6 +75,65 @@ impl<'a> Parsed<'a> {
             .or(self.previews.last())
             .copied()
     }
+
+    /// The part of the sensor a Panasonic RW2 records when it was shot in
+    /// another aspect ratio than the sensor's (16:9, 3:2, 1:1 on a 4:3 sensor).
+    pub fn recorded_crop(&self) -> Option<RecordedCrop> {
+        if self.format != Format::Tiff {
+            return None;
+        }
+        let (t, ifd0) = self.ifd0.as_ref()?;
+        // Panasonic's TIFF variant; elsewhere these low tag numbers mean nothing.
+        if t.src.read(0, 4)?.as_slice() != b"IIU\0" {
+            return None;
+        }
+        let edges = |tags: [u16; 4]| -> Option<[u32; 4]> {
+            let v = tags.map(|tag| ifd0.get(tag).and_then(|e| t.uint(e)));
+            Some([v[0]?, v[1]?, v[2]?, v[3]?]).filter(|[l, t, r, b]| r > l && b > t)
+        };
+        // SensorLeft/Top/Right/BottomBorder and CropLeft/Top/Right/Bottom.
+        let sensor = edges([0x0005, 0x0004, 0x0007, 0x0006])?;
+        let crop = edges([0x0030, 0x002F, 0x0032, 0x0031])?;
+        let inside = crop[0] >= sensor[0] && crop[1] >= sensor[1] && crop[2] <= sensor[2] && crop[3] <= sensor[3];
+        (inside && crop != sensor).then_some(RecordedCrop { sensor, crop })
+    }
+}
+
+/// The picture an RW2 records (`crop`) inside the sensor area (`sensor`),
+/// both as left, top, right, bottom in sensor pixels. Its embedded JPEGs and
+/// its decoded sensor data show the whole sensor area; the camera's own
+/// JPEG, Apple's RAW engine and the AF area only the picture.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RecordedCrop {
+    pub sensor: [u32; 4],
+    pub crop: [u32; 4],
+}
+
+impl RecordedCrop {
+    /// Whether an unrotated `w` x `h` image shows the sensor area (the same shape
+    /// within 1%), rather than the picture already.
+    pub fn fits(&self, w: u32, h: u32) -> bool {
+        let [l, t, r, b] = self.sensor;
+        let (sensor, image) = ((r - l) as f64 / (b - t) as f64, w as f64 / h.max(1) as f64);
+        w > 0 && h > 0 && (sensor / image - 1.0).abs() < 0.01
+    }
+
+    /// The picture inside a `w` x `h` image of the sensor area: x, y, width, height.
+    pub fn rect(&self, w: u32, h: u32) -> (u32, u32, u32, u32) {
+        let [sl, st, sr, sb] = self.sensor;
+        let [cl, ct, cr, cb] = self.crop;
+        let x = |v: u32| ((v - sl) as f64 * w as f64 / (sr - sl) as f64).round() as u32;
+        let y = |v: u32| ((v - st) as f64 * h as f64 / (sb - st) as f64).round() as u32;
+        let (x0, y0, x1, y1) = (x(cl), y(ct), x(cr).min(w), y(cb).min(h));
+        (x0, y0, x1.saturating_sub(x0).max(1), y1.saturating_sub(y0).max(1))
+    }
+
+    /// The picture's long edge as a share of the sensor area's.
+    pub fn kept(&self) -> f64 {
+        let [sl, st, sr, sb] = self.sensor;
+        let [cl, ct, cr, cb] = self.crop;
+        (cr - cl).max(cb - ct) as f64 / (sr - sl).max(sb - st) as f64
+    }
 }
 
 thread_local! {
@@ -230,7 +289,13 @@ fn parse_tiff(src: &Src) -> Option<Parsed<'_>> {
     if let Some(e) = ifd0.get(T_XMP) {
         p.xmp = Some(XmpRegion { pos: tiff.data_pos(e), len: tiff.byte_len(e) });
     }
-    attach_exif(&mut p, tiff, ifd0);
+    attach_exif(&mut p, tiff, ifd0.clone());
+    // Panasonic RW2 has its MakerNote only in the EXIF block of the embedded JpgFromRaw.
+    if p.maker.is_none() {
+        if let Some(e) = ifd0.get(0x002E).filter(|e| e.typ == 7 && e.count > 4) {
+            p.maker = jpeg_maker(src, tiff.data_pos(e));
+        }
+    }
 
     // Nikon keeps a mid-size preview in its MakerNote (PreviewIFD, tag 0x0011).
     if let Some(mn) = p.maker {
@@ -244,6 +309,14 @@ fn parse_tiff(src: &Src) -> Option<Parsed<'_>> {
     }
     p.previews.sort_by_key(|j| (j.width as u64 * j.height as u64, j.len));
     Some(p)
+}
+
+/// The MakerNote in the EXIF block of the JPEG stream at `offset`.
+fn jpeg_maker(src: &Src, offset: u64) -> Option<MakerNote<'_>> {
+    let (tiff, off) = Tiff::open(src, jpeg::scan(src, offset)?.exif_base?)?;
+    let mut inner = Parsed::empty(Format::Jpeg);
+    attach_exif(&mut inner, tiff, tiff.ifd(off)?);
+    inner.maker
 }
 
 /// Nikon type-3 MakerNote: `Nikon\0\x02..` followed by an embedded TIFF header.
@@ -748,5 +821,45 @@ pub(crate) mod tests {
         let clap = |w: u32, h: u32| [w.to_be_bytes(), 1u32.to_be_bytes(), h.to_be_bytes(), 1u32.to_be_bytes(), [0; 4], [0, 0, 0, 1], [0; 4], [0, 0, 0, 1]].concat();
         assert_eq!(of(&[(b"clap", &clap(5996, 3998)), (b"irot", &[1])]), Heif { width: 5996, height: 3998, orientation: 8 });
         assert_eq!(of(&[(b"irot", &[1]), (b"clap", &clap(3998, 5996))]), Heif { width: 5996, height: 3998, orientation: 8 });
+    }
+
+    /// An RW2 header and an IFD0 of SHORT values only.
+    fn rw2(entries: &[(u16, u16)]) -> Vec<u8> {
+        let mut out = b"IIU\0\x08\0\0\0".to_vec();
+        out.extend((entries.len() as u16).to_le_bytes());
+        for (tag, v) in entries {
+            out.extend(tag.to_le_bytes());
+            out.extend([3, 0, 1, 0, 0, 0]);
+            out.extend(v.to_le_bytes());
+            out.extend([0, 0]);
+        }
+        out.extend([0; 4]);
+        out
+    }
+
+    #[test]
+    fn an_rw2_shot_in_another_aspect_ratio_says_which_part_it_records() {
+        // A DC-GH6 file shot in 16:9: the sensor area, then the picture inside it.
+        let gh6 = [(0x04, 8), (0x05, 8), (0x06, 4344), (0x07, 5784), (0x2F, 552), (0x30, 8), (0x31, 3800), (0x32, 5784)];
+        let src = Src::mem(rw2(&gh6));
+        let c = parse(&src).recorded_crop().expect("crop");
+        assert_eq!(c, RecordedCrop { sensor: [8, 8, 5784, 4344], crop: [8, 552, 5784, 3800] });
+        // The embedded JPEG (1920 x 1440) and the decoded sensor data show the whole sensor area.
+        assert!(c.fits(1920, 1440) && c.fits(5776, 4336));
+        assert!(!c.fits(1920, 1080) && !c.fits(1440, 1920));
+        assert_eq!(c.rect(5776, 4336), (0, 544, 5776, 3248));
+        assert_eq!(c.rect(1920, 1440), (0, 181, 1920, 1078));
+        assert_eq!(c.kept(), 1.0);
+        // 1:1 keeps the middle of the long edge.
+        let square = [(0x04, 8), (0x05, 8), (0x06, 4344), (0x07, 5784), (0x2F, 8), (0x30, 728), (0x31, 4344), (0x32, 5064)];
+        let c = parse(&Src::mem(rw2(&square))).recorded_crop().expect("crop");
+        assert_eq!(c.rect(5776, 4336), (720, 0, 4336, 4336));
+        assert!((c.kept() - 4336.0 / 5776.0).abs() < 1e-9);
+        // Shot in the sensor's own shape, or not an RW2 at all.
+        let whole = [(0x04, 8), (0x05, 8), (0x06, 4344), (0x07, 5784), (0x2F, 8), (0x30, 8), (0x31, 4344), (0x32, 5784)];
+        assert_eq!(parse(&Src::mem(rw2(&whole))).recorded_crop(), None);
+        let mut tiff = rw2(&gh6);
+        tiff[2] = 0x2A;
+        assert_eq!(parse(&Src::mem(tiff)).recorded_crop(), None);
     }
 }

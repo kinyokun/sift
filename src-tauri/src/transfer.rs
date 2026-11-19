@@ -150,7 +150,7 @@ async fn thumb(State(ctx): Ctx, headers: HeaderMap, UrlPath(index): UrlPath<usiz
     }
     let Some(path) = file_at(&ctx, index).cloned() else { return StatusCode::NOT_FOUND.into_response() };
     let cache_dir = ctx.cache_dir.clone();
-    let made = tokio::task::spawn_blocking(move || cached(&cache_file(&cache_dir, "thumb", &path, 320), || preview::scaled(&path, 320, 80))).await;
+    let made = tokio::task::spawn_blocking(move || cached(&cache_file(&cache_dir, "thumb2", &path, 320), || preview::scaled(&path, 320, 80))).await;
     match made {
         Ok(Ok(data)) => ([(header::CONTENT_TYPE, "image/jpeg"), (header::CACHE_CONTROL, "private, max-age=3600")], data).into_response(),
         _ => StatusCode::NOT_FOUND.into_response(),

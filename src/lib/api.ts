@@ -169,7 +169,7 @@ export type Session = {
   tagFilter?: string[];
 };
 
-const RAW_EXT = /\.(cr3|cr2|nef|nefx|nrw|arw|sr2|srf|dng|raf|orf|rw2|pef|3fr|iiq|erf|srw)$/i;
+const RAW_EXT = /\.(cr3|cr2|nef|nefx|nrw|arw|sr2|srf|dng|raf|orf|rw2|rwl|pef|3fr|iiq|erf|srw)$/i;
 export const isRawPath = (path: string) => RAW_EXT.test(path);
 export const isHeifPath = (path: string) => /\.(heic|heif|hif)$/i.test(path);
 export const fileName = (path: string) => path.split(/[\\/]/).pop() ?? path;

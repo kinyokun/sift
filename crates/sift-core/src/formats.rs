@@ -1,7 +1,7 @@
 use std::path::Path;
 
 pub const RAW_EXTS: &[&str] = &[
-    "cr3", "cr2", "nef", "nefx", "nrw", "arw", "sr2", "srf", "dng", "raf", "orf", "rw2", "pef", "3fr", "iiq", "erf", "srw",
+    "cr3", "cr2", "nef", "nefx", "nrw", "arw", "sr2", "srf", "dng", "raf", "orf", "rw2", "rwl", "pef", "3fr", "iiq", "erf", "srw",
 ];
 /// HEIF pictures: `.heic` from phones, `.hif` from cameras.
 pub const HEIF_EXTS: &[&str] = &["heic", "heif", "hif"];
@@ -68,6 +68,8 @@ pub fn sniff_ext(path: &Path) -> Option<&'static str> {
                 "PENTAX" | "RICOH" => "pef",
                 "OLYMPUS" | "OM" => "orf",
                 "PANASONIC" => "rw2",
+                // Leica's cameras made by Panasonic; Leica's own write DNG.
+                "LEICA" if head.starts_with(b"IIU\0") => "rwl",
                 _ if p.previews.is_empty() => "tif",
                 _ => "dng",
             }

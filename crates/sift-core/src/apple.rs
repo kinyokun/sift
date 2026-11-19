@@ -52,6 +52,7 @@ extern "C" {
     fn CGColorSpaceCreateWithName(name: CFStringRef) -> CFTypeRef;
     fn CGImageGetWidth(image: CFTypeRef) -> usize;
     fn CGImageGetHeight(image: CFTypeRef) -> usize;
+    fn CGImageCreateWithImageInRect(image: CFTypeRef, rect: CGRect) -> CFTypeRef;
     fn CGBitmapContextCreate(data: *mut std::ffi::c_void, width: usize, height: usize, bits: usize, row_bytes: usize, space: CFTypeRef, info: u32) -> CFTypeRef;
     fn CGContextDrawImage(context: CFTypeRef, rect: CGRect, image: CFTypeRef);
     fn CGBitmapContextCreateImage(context: CFTypeRef) -> CFTypeRef;
@@ -78,18 +79,24 @@ impl Drop for Owned {
 /// Decodes the image data of `path` (for RAW: the sensor data, not an
 /// embedded preview) with the system decoder and returns a full-size sRGB
 /// JPEG. The pixels stay in sensor orientation; `orientation` is recorded in
-/// the JPEG's EXIF so viewers show it upright.
+/// the JPEG's EXIF so viewers show it upright. `crop` is the picture the file
+/// records, for an RW2 the system develops whole (some it cuts itself).
 ///
 /// The system develops RAW files into Display P3. They are drawn into sRGB,
 /// like camera JPEGs, because everything here that reads pixels (looks, the
 /// histogram, thumbnails) ignores embedded profiles and takes them as sRGB.
-pub fn render_jpeg(path: &Path, orientation: u8, quality: f32) -> Result<Vec<u8>> {
+pub fn render_jpeg(path: &Path, orientation: u8, crop: Option<crate::container::RecordedCrop>, quality: f32) -> Result<Vec<u8>> {
     let url = CFURL::from_path(path, false).ok_or(Error::Malformed)?;
     // SAFETY: every pointer passed below is a live Core Foundation object owned
     // by this function, and each created object is released by `Owned`.
     unsafe {
         let source = Owned::new(CGImageSourceCreateWithURL(url.as_concrete_TypeRef(), ptr::null()), "cannot open file")?;
-        let decoded = Owned::new(CGImageSourceCreateImageAtIndex(source.0, 0, ptr::null()), "format not supported")?;
+        let mut decoded = Owned::new(CGImageSourceCreateImageAtIndex(source.0, 0, ptr::null()), "format not supported")?;
+        if let Some(c) = crop.filter(|c| c.fits(CGImageGetWidth(decoded.0) as u32, CGImageGetHeight(decoded.0) as u32)) {
+            let (x, y, w, h) = c.rect(CGImageGetWidth(decoded.0) as u32, CGImageGetHeight(decoded.0) as u32);
+            let rect = CGRect { x: x as f64, y: y as f64, width: w as f64, height: h as f64 };
+            decoded = Owned::new(CGImageCreateWithImageInRect(decoded.0, rect), "cannot crop")?;
+        }
         let srgb = Owned::new(CGColorSpaceCreateWithName(kCGColorSpaceSRGB), "no sRGB colour space")?;
         let (width, height) = (CGImageGetWidth(decoded.0), CGImageGetHeight(decoded.0));
         let canvas = Owned::new(CGBitmapContextCreate(ptr::null_mut(), width, height, 8, 0, srgb.0, RGBX), "out of memory")?;

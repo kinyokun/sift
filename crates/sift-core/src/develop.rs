@@ -44,6 +44,12 @@ fn match_lut(src_hist: &[u64], ref_hist: &[u64; 256]) -> Vec<f32> {
         .collect()
 }
 
+/// The part of the sensor the camera recorded as the picture (rawler keeps
+/// the whole sensor area of an RW2 shot in 16:9, 3:2 or 1:1).
+fn recorded_crop(path: &Path) -> Option<crate::container::RecordedCrop> {
+    crate::container::parse_metadata(&crate::io::Src::open(path).ok()?).recorded_crop()
+}
+
 /// Decodes and demosaics `path` to 16-bit sRGB at full sensor resolution.
 fn linear(path: &Path) -> Result<(u32, u32, Vec<u16>)> {
     let err = |e: rawler::RawlerError| Error::Decode(e.to_string());
@@ -54,6 +60,7 @@ fn linear(path: &Path) -> Result<(u32, u32, Vec<u16>)> {
         .to_dynamic_image()
         .ok_or(Error::Malformed)?
         .into_rgb16();
+    let developed = preview::recorded(developed, recorded_crop(path));
     let (w, h) = developed.dimensions();
     Ok((w, h, developed.into_raw()))
 }
@@ -145,5 +152,6 @@ fn reference(path: &Path) -> Option<RgbImage> {
     let src = crate::io::Src::open(path).ok()?;
     let p = crate::container::parse(&src);
     let j = p.preview_for(REFERENCE_EDGE)?;
-    preview::decode_jpeg(&src.read(j.offset, j.len as usize)?, REFERENCE_EDGE).ok()
+    let img = preview::decode_jpeg(&src.read(j.offset, j.len as usize)?, REFERENCE_EDGE).ok()?;
+    Some(preview::recorded(img, p.recorded_crop()))
 }

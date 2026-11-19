@@ -1,7 +1,7 @@
 //! Checks against real camera files. Run `samples/fetch.sh` first; without
 //! the samples every test here passes trivially.
 
-use sift_core::{formats, meta, preview, rating};
+use sift_core::{formats, meta, preview, rating, render};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -100,6 +100,96 @@ fn nikon_point_bitmap_matches_exiftool_count() {
         let boxes = meta::read(&f).unwrap().af.map_or(0, |a| a.boxes.len());
         assert_eq!(boxes as u32, used, "{}", name(&f));
     }
+}
+
+#[test]
+fn fujifilm_focus_pixel_matches_exiftool() {
+    for f in samples().into_iter().filter(|f| formats::ext_of(f) == "raf") {
+        let Some(tags) = exiftool(&f, &["FocusPixel", "ExifImageWidth", "ExifImageHeight", "Orientation"]) else { return };
+        let v: Vec<f32> = tags.iter().flat_map(|t| t.split_whitespace()).filter_map(|n| n.parse().ok()).collect();
+        let [x, y, w, h, orientation] = v[..] else { panic!("{}: {tags:?}", name(&f)) };
+        if orientation != 1.0 {
+            continue;
+        }
+        let af = meta::read(&f).unwrap().af.unwrap_or_else(|| panic!("{}: AF area not decoded", name(&f)));
+        let b = af.boxes[0];
+        assert_eq!(af.source, "fujifilm");
+        let close = |a: f32, e: f32| (a - e).abs() < 0.002;
+        assert!(close(b.x + b.w / 2.0, x / w) && close(b.y + b.h / 2.0, y / h), "{}: {b:?} vs {x},{y} of {w}x{h}", name(&f));
+    }
+}
+
+#[test]
+fn panasonic_af_point_matches_exiftool() {
+    for f in samples().into_iter().filter(|f| matches!(formats::ext_of(f).as_str(), "rw2" | "rwl")) {
+        let Some(tags) = exiftool(&f, &["AFPointPosition", "AFAreaSize", "Orientation"]) else { return };
+        let v: Vec<f32> = tags.iter().flat_map(|t| t.split_whitespace()).filter_map(|n| n.parse().ok()).collect();
+        let orientation = *v.last().unwrap();
+        if orientation != 1.0 || v.len() < 3 || v[0] > 1.0 {
+            continue;
+        }
+        let (x, y) = (v[0], v[1]);
+        let size = (v.len() == 5 && v[2] <= 1.0).then(|| (v[2], v[3]));
+        let af = meta::read(&f).unwrap().af.unwrap_or_else(|| panic!("{}: AF area not decoded", name(&f)));
+        let b = af.boxes[0];
+        assert_eq!(af.source, "panasonic");
+        let close = |a: f32, e: f32| (a - e).abs() < 0.002;
+        assert!(close(b.x + b.w / 2.0, x) && close(b.y + b.h / 2.0, y), "{}: {b:?} vs {x},{y}", name(&f));
+        if let Some((w, h)) = size {
+            assert!(close(b.w, w) && close(b.h, h), "{}: size {b:?} vs {w}x{h}", name(&f));
+        }
+    }
+}
+
+/// An RW2 shot in 16:9, 3:2 or 1:1 records a crop of the sensor while its
+/// JPEGs and the sensor data decoded show the whole sensor (ImageIO cuts
+/// some and not others); every rendition is cut to the crop.
+#[test]
+fn rw2_shot_in_another_aspect_ratio_is_shown_as_recorded() {
+    for f in samples().into_iter().filter(|f| matches!(formats::ext_of(f).as_str(), "rw2" | "rwl")) {
+        let Some(tags) = exiftool(&f, &["CropLeft", "CropTop", "CropRight", "CropBottom", "ImageWidth", "ImageHeight"]) else { return };
+        let v: Vec<f64> = tags.iter().filter_map(|t| t.parse().ok()).collect();
+        // Older bodies record no crop: their sensor borders are the picture already.
+        let [l, t, r, b, w, h] = v[..] else { continue };
+        let aspect = (r - l) / (b - t);
+        let cropped = ((r - l) - w).abs() > 8.0 || ((b - t) - h).abs() > 8.0;
+        let near = |w: u32, h: u32| (w as f64 / h as f64 / aspect - 1.0).abs() < 0.01;
+        let m = meta::read(&f).unwrap();
+        assert!(near(m.preview_width, m.preview_height), "{}: preview {}x{} vs {aspect}", name(&f), m.preview_width, m.preview_height);
+        let full = preview::decode_jpeg(&preview::full(&f).unwrap(), u32::MAX).unwrap();
+        assert!(near(full.width(), full.height()), "{}: full {:?}", name(&f), full.dimensions());
+        assert_eq!(full.dimensions(), (m.preview_width, m.preview_height), "{}", name(&f));
+        let thumb = preview::pixels(&f, 320).unwrap();
+        assert!(near(thumb.width(), thumb.height()) && thumb.width().max(thumb.height()) == 320, "{}: thumb {:?}", name(&f), thumb.dimensions());
+        let screen = preview::decode_jpeg(&preview::screen(&f, 2048, 88).unwrap(), u32::MAX).unwrap();
+        assert!(near(screen.width(), screen.height()), "{}: screen {:?}", name(&f), screen.dimensions());
+        if cropped {
+            assert!(preview::embedded_screen(&f, 2048).unwrap().is_none(), "{}: uncut embedded preview", name(&f));
+            for (what, jpeg) in [("original", render::original(&f, 80)), ("developed", render::matched(&f, 80))] {
+                let img = preview::decode_jpeg(&jpeg.unwrap_or_else(|e| panic!("{}: {what}: {e}", name(&f))), 1024).unwrap();
+                assert!(near(img.width(), img.height()), "{}: {what} {:?}", name(&f), img.dimensions());
+            }
+        }
+    }
+}
+
+/// The DC-GH6 samples were shot from one spot with one AF area in 3:2 and
+/// 16:9, which crop the sensor differently: on the sensor the area is the same.
+#[test]
+fn panasonic_af_area_stays_put_across_aspect_ratios() {
+    let shot = |aspect: &str| samples().into_iter().find(|f| name(f).starts_with("Panasonic__DC-GH6__") && name(f).contains(aspect));
+    let (Some(a), Some(b)) = (shot("3-2"), shot("16-9")) else { return };
+    let on_sensor = |f: &Path| {
+        let b = meta::read(f).unwrap().af.unwrap().boxes[0];
+        let src = sift_core::io::Src::open(f).unwrap();
+        let c = sift_core::container::parse(&src).recorded_crop().expect("a crop");
+        let ([sl, st, sr, sb], [cl, ct, cr, cb]) = (c.sensor.map(|v| v as f32), c.crop.map(|v| v as f32));
+        let (sw, sh, cw, ch) = (sr - sl, sb - st, cr - cl, cb - ct);
+        ((cl - sl + b.x * cw) / sw, (ct - st + b.y * ch) / sh, b.w * cw / sw, b.h * ch / sh)
+    };
+    let (a, b) = (on_sensor(&a), on_sensor(&b));
+    let close = |p: f32, q: f32| (p - q).abs() < 0.002;
+    assert!(close(a.0, b.0) && close(a.1, b.1) && close(a.2, b.2) && close(a.3, b.3), "{a:?} vs {b:?}");
 }
 
 #[test]

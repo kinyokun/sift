@@ -8,6 +8,13 @@ fn orientation_of(path: &Path) -> u8 {
     crate::io::Src::open(path).map_or(1, |src| crate::exif::orientation(&crate::container::parse(&src)))
 }
 
+#[cfg(target_vendor = "apple")]
+fn system(path: &Path, quality: u8) -> Result<Vec<u8>> {
+    let src = crate::io::Src::open(path)?;
+    let p = crate::container::parse(&src);
+    crate::apple::render_jpeg(path, crate::exif::orientation(&p), p.recorded_crop(), quality as f32 / 100.0)
+}
+
 /// The photo without the in-camera look (Picture Control, recipe, film
 /// simulation), as a JPEG whose EXIF orientation makes it display upright
 /// (decode with [`crate::preview::decode_upright`] to get upright pixels).
@@ -17,7 +24,7 @@ fn orientation_of(path: &Path) -> u8 {
 /// decoder produces a plain neutral rendering.
 pub fn original(path: &Path, quality: u8) -> Result<Vec<u8>> {
     #[cfg(target_vendor = "apple")]
-    if let Ok(jpeg) = crate::apple::render_jpeg(path, orientation_of(path), quality as f32 / 100.0) {
+    if let Ok(jpeg) = system(path, quality) {
         return Ok(jpeg);
     }
     #[cfg(feature = "develop")]
@@ -39,7 +46,7 @@ pub fn matched(path: &Path, quality: u8) -> Result<Vec<u8>> {
     let bundled: Result<Vec<u8>> = Err(Error::Unsupported("RAW decoding is not available in this build"));
     #[cfg(target_vendor = "apple")]
     if bundled.is_err() {
-        return crate::apple::render_jpeg(path, orientation_of(path), quality as f32 / 100.0);
+        return system(path, quality);
     }
     bundled
 }

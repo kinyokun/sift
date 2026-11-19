@@ -48,7 +48,7 @@ Press `E` to zoom to the eyes. Sift looks for faces first; when there is no pers
 </tr>
 </table>
 
-Press `F` to show the AF points that Nikon, Canon, Sony and Fujifilm bodies record, placed correctly for orientation and crop. The info panel next to it lists the camera, lens, exposure, focus mode, Picture Control or film simulation, and a histogram.
+Press `F` to show the AF points that Nikon, Canon, Sony, Fujifilm and Panasonic bodies record, placed correctly for orientation and crop. The info panel next to it lists the camera, lens, exposure, focus mode, Picture Control or film simulation, and a histogram.
 
 <p align="center"><img src="docs/readme/focus-en.webp" alt="A Nikon Z fc NEF with the AF box on the flower, the info panel and histogram on the right" width="88%"></p>
 
@@ -159,7 +159,7 @@ iOS and Android builds currently have to be built yourself; see [AGENTS.md](AGEN
 - Selection: click the circle at a photo's top left, drag a box, Shift for a range, ⌘/Ctrl to add; with several selected, a bar at the bottom rates, flags, tags or applies a look to all of them. On phones, a long press starts selecting
 - Pick / reject / 0–5 stars; ratings are written into the XMP inside the file (or a `.xmp` sidecar when that is not possible), and RAW files are never rewritten
 - Tags: make a tag at any point while culling (one per person at an event, say) and put it on photos; a photo can carry several. Show only the photos with certain tags; on export every tag gets its own folder, with the files named after the tag, and a photo with several tags is in each of their folders
-- 100% view, eye close-up (people, and the eyes of cats, dogs, birds, horses, sheep, cows and other animals), AF points (Nikon, Canon, Sony, Fujifilm)
+- 100% view, eye close-up (people, and the eyes of cats, dogs, birds, horses, sheep, cows and other animals), AF points (Nikon, Canon, Sony, Fujifilm, Panasonic)
 - Compare 2, 3 or 4 photos side by side; each pane picks and steps its own photo, burst frames included; zoom and pan can be synced; compare a grid selection directly
 - Composition guides and crop preview (applied on export once confirmed)
 - Histogram and on-screen clipping warning
@@ -211,8 +211,8 @@ iOS and Android builds currently have to be built yourself; see [AGENTS.md](AGEN
 | Kind | Formats |
 | --- | --- |
 | Images | JPEG, HEIF (`.heic`, `.heif`, `.hif`), PNG, WebP, BMP, GIF, TIFF |
-| RAW | CR3, CR2, NEF, NRW, ARW, SR2, SRF, DNG, RAF, ORF, RW2, PEF, 3FR, IIQ, ERF, SRW |
-| AF points | Nikon, Canon, Sony, Fujifilm |
+| RAW | CR3, CR2, NEF, NRW, ARW, SR2, SRF, DNG, RAF, ORF, RW2, RWL, PEF, 3FR, IIQ, ERF, SRW |
+| AF points | Nikon, Canon, Sony, Fujifilm, Panasonic (also Leica's Panasonic-made D-Lux, C-Lux and V-Lux) |
 | Looks | `.cube`, `.3dl`, HaldCLUT `.png`, Nikon `.NP3` |
 
 For Nikon High Efficiency (HE / HE\*) NEF files, "Original (no look)" uses the system decoder on Apple platforms; the decoders on Windows and Android cannot read them, but you can still cull them from the embedded previews.
