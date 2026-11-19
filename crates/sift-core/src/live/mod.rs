@@ -24,6 +24,7 @@ mod still;
 mod writer;
 
 pub use portable::from_movie;
+pub use still::described;
 #[cfg(not(target_vendor = "apple"))]
 pub use portable::export;
 #[cfg(target_vendor = "apple")]

@@ -6,6 +6,7 @@ pub mod apple;
 pub mod container;
 #[cfg(feature = "develop")]
 pub mod develop;
+pub mod edit;
 pub mod exif;
 pub mod export;
 #[cfg(feature = "face")]
