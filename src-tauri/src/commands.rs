@@ -704,6 +704,25 @@ fn rewritten(data: &[u8], turn: u8, strip: bool) -> Option<Vec<u8>> {
     }
 }
 
+/// A shot of an export that is made anew rather than copied.
+struct Made<'a> {
+    /// Where it is among the shots of its folder, and among all.
+    n: usize,
+    i: usize,
+    shot: &'a [PathBuf],
+    look: Option<&'a String>,
+    crop: Option<([f32; 4], f32)>,
+    turn: u8,
+    job: Job,
+}
+
+/// Photos rendered at once on export. Each holds a few copies of the
+/// full-size picture, and the work on its pixels runs on every core already;
+/// reading, decoding, encoding and writing them gains from overlapping.
+fn renderers() -> usize {
+    std::thread::available_parallelism().map_or(2, |n| n.get() / 2).clamp(1, 4)
+}
+
 /// Progress of one of several folders as progress of the whole export.
 fn overall(p: Progress, part: usize, parts: usize) -> Progress {
     const STEPS: usize = 1000;
@@ -721,7 +740,7 @@ fn look_source(shot: &[PathBuf]) -> Option<&PathBuf> {
 /// Copies the chosen kind of file of every shot, optionally renamed. Shots
 /// with a look or crop assigned (keyed by the first path of the shot) get a
 /// JPEG rendered that way instead of a copy of the camera's JPEG.
-pub fn export_shots(state: &AppState, shots: &[Vec<String>], dest: &str, plan: &ExportPlan, mut on_progress: impl FnMut(Progress)) -> CmdResult<CopyReport> {
+pub fn export_shots(state: &AppState, shots: &[Vec<String>], dest: &str, plan: &ExportPlan, mut on_progress: impl FnMut(Progress) + Send) -> CmdResult<CopyReport> {
     let ExportPlan { kind, looks, crops, turns, output, .. } = plan;
     let kind = *kind;
     let all = checked_shots(state, shots)?;
@@ -738,6 +757,8 @@ pub fn export_shots(state: &AppState, shots: &[Vec<String>], dest: &str, plan: &
         let mut step = |p: Progress| on_progress(overall(p, k, parts.len()));
         // Files that are copied as they are, with the name their shot was given.
         let (mut plain, mut names) = (Vec::new(), Vec::new());
+        // The shots made anew, rendered or rewritten.
+        let mut work = Vec::new();
         for (n, (&i, shot)) in part.shots.iter().zip(&picked).enumerate() {
             let first = shots[i].first();
             let look = first.and_then(|p| looks.get(p));
@@ -762,15 +783,24 @@ pub fn export_shots(state: &AppState, shots: &[Vec<String>], dest: &str, plan: &
             if matches!(job, Job::Plain) {
                 plain.push(shot.clone());
                 names.push(stems[n].clone());
-                continue;
+            } else {
+                work.push(Made { n, i, shot, look, crop, turn, job });
             }
+        }
+        let started = std::sync::Mutex::new((0, &mut step));
+        let made = crate::briefs::each(&work, renderers(), |w| -> Option<(PathBuf, CmdResult<()>)> {
             if state.cancel.load(AtomicOrdering::Relaxed) {
-                report.cancelled = true;
-                return Ok(report);
+                return None;
             }
-            step(Progress { done: n, total: picked.len(), name: stems[n].clone() });
+            {
+                let mut started = started.lock().unwrap();
+                let done = started.0;
+                (started.1)(Progress { done, total: picked.len(), name: stems[w.n].clone() });
+                started.0 += 1;
+            }
+            let Made { n, i, shot, look, crop, turn, ref job } = *w;
             let ext = |p: &Path| p.extension().and_then(|e| e.to_str()).unwrap_or("jpg").to_string();
-            let (target, made) = match &job {
+            let (target, made) = match job {
                 Job::Rewrite(jpeg) => {
                     let target = part.dir.join(format!("{}.{}", stems[n], ext(jpeg)));
                     let bytes = fs::read(jpeg).map_err(err).map(|data| rewritten(&data, turn, output.strip));
@@ -803,18 +833,28 @@ pub fn export_shots(state: &AppState, shots: &[Vec<String>], dest: &str, plan: &
                     .and_then(|jpeg| fs::write(&target, jpeg).map_err(err))
                 }
             };
+            Some((target, written))
+        });
+        drop(started);
+        if state.cancel.load(AtomicOrdering::Relaxed) {
+            report.cancelled = true;
+            return Ok(report);
+        }
+        for (w, made) in work.iter().zip(made) {
+            let Some((target, written)) = made else { continue };
             match written {
                 Ok(()) => {
                     report.copied += 1;
-                    rendered.entry(i).or_insert(target.clone());
+                    rendered.entry(w.i).or_insert(target);
                 }
-                Err(e) => report.failed.push(format!("{}: {e}", stems[n])),
+                Err(e) => report.failed.push(format!("{}: {e}", stems[w.n])),
             }
             // The other files travel along unchanged: the RAW when RAW files are wanted, and next to
             // a JPEG copied as it was, the movie of a Live Photo.
-            let rest: Vec<PathBuf> = shot
+            let rest: Vec<PathBuf> = w
+                .shot
                 .iter()
-                .filter(|p| match &job {
+                .filter(|p| match &w.job {
                     Job::Rewrite(jpeg) => *p != jpeg,
                     _ => formats::is_raw(p) && kind == export::Kind::All,
                 })
@@ -822,7 +862,7 @@ pub fn export_shots(state: &AppState, shots: &[Vec<String>], dest: &str, plan: &
                 .collect();
             if !rest.is_empty() {
                 plain.push(rest);
-                names.push(stems[n].clone());
+                names.push(stems[w.n].clone());
             }
         }
         let copied = export::export_named(&plain, &names, &part.dir, kind, &state.cancel, step).map_err(err)?;
@@ -1022,7 +1062,7 @@ fn best_pixels(state: &AppState, path: &Path, m: &meta::Meta) -> sift_core::Resu
 }
 
 /// Renders every requested photo with its info frame into `request.dest`.
-pub fn frame_files(state: &AppState, request: &FramedRequest, mut on_progress: impl FnMut(Progress)) -> CmdResult<CopyReport> {
+pub fn frame_files(state: &AppState, request: &FramedRequest, on_progress: impl FnMut(Progress) + Send) -> CmdResult<CopyReport> {
     state.cancel.store(false, AtomicOrdering::Relaxed);
     let mut report = CopyReport::default();
     let shots: Vec<Vec<String>> = request.files.iter().map(|f| vec![f.clone()]).collect();
@@ -1031,22 +1071,25 @@ pub fn frame_files(state: &AppState, request: &FramedRequest, mut on_progress: i
     let total: usize = parts.iter().map(|part| part.shots.len()).sum();
     let output = Output { size: if request.output.size > 0 { request.output.size } else { request.max_edge }, ..request.output.clone() };
     let mark = mark_of(state, &output)?;
-    let mut done = 0;
+    let started = std::sync::Mutex::new((0, on_progress));
     // A photo that goes into several folders is framed once; the others get a copy of that file.
     let mut framed: HashMap<usize, PathBuf> = HashMap::new();
-    'parts: for part in &parts {
+    for part in &parts {
         fs::create_dir_all(&part.dir).map_err(err)?;
         let picked: Vec<Vec<PathBuf>> = part.shots.iter().map(|i| all[*i].clone()).collect();
         let stems = export::stems(&picked, part.rename.as_ref());
-        for (n, &i) in part.shots.iter().enumerate() {
+        let jobs: Vec<(usize, usize)> = part.shots.iter().copied().enumerate().collect();
+        let made = crate::briefs::each(&jobs, renderers(), |&(n, i)| -> Option<(PathBuf, sift_core::Result<()>)> {
             if state.cancel.load(AtomicOrdering::Relaxed) {
-                report.cancelled = true;
-                break 'parts;
+                return None;
             }
             let (f, path) = (&request.files[i], &all[i][0]);
-            let name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
-            on_progress(Progress { done, total, name: name.clone() });
-            done += 1;
+            {
+                let mut started = started.lock().unwrap();
+                let done = started.0;
+                (started.1)(Progress { done, total, name: path.file_name().unwrap_or_default().to_string_lossy().into_owned() });
+                started.0 += 1;
+            }
             let target = part.dir.join(if part.rename.is_some() { format!("{}.jpg", stems[n]) } else { format!("{}_framed.jpg", stems[n]) });
             let result = match framed.get(&i) {
                 Some(first) => export::copy_file(first, &target, &state.cancel),
@@ -1067,15 +1110,24 @@ pub fn frame_files(state: &AppState, request: &FramedRequest, mut on_progress: i
                     Ok(())
                 })(),
             };
+            Some((target, result))
+        });
+        for (&(_, i), made) in jobs.iter().zip(made) {
+            let Some((target, result)) = made else { continue };
             match result {
                 Ok(()) => {
                     report.copied += 1;
                     framed.entry(i).or_insert(target);
                 }
-                Err(e) => report.failed.push(format!("{name}: {e}")),
+                Err(e) => report.failed.push(format!("{}: {e}", all[i][0].file_name().unwrap_or_default().to_string_lossy())),
             }
         }
+        if state.cancel.load(AtomicOrdering::Relaxed) {
+            report.cancelled = true;
+            break;
+        }
     }
+    let (_, mut on_progress) = started.into_inner().unwrap();
     on_progress(Progress { done: total, total, name: String::new() });
     Ok(report)
 }
