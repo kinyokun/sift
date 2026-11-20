@@ -113,12 +113,21 @@ pub struct Brief {
     /// What the file says about the burst or pixel-shift series it belongs to.
     #[serde(skip)]
     pub series: stack::Hint,
+    /// Where the rating was found, to read it again from.
+    #[serde(skip)]
+    pub places: rating::Places,
 }
 
 pub fn brief(path: &Path) -> Result<Brief> {
     let src = Src::open(path)?;
     let p = container::parse_metadata(&src);
-    Ok(Brief { rating: rating::read(&src, &p, path), date: exif::read(&p).datetime, hdr: hdr::of(&src, &p), series: stack::hint(&p, path) })
+    Ok(Brief { rating: rating::read(&src, &p, path), date: exif::read(&p).datetime, hdr: hdr::of(&src, &p), series: stack::hint(&p, path), places: rating::Places::of(&p) })
+}
+
+/// [`brief`] of a photo opened already, whose `.xmp` sidecar is known (`None`: it has none).
+pub fn brief_beside(src: &Src, path: &Path, sidecar: Option<&Path>) -> Brief {
+    let p = container::parse_metadata(src);
+    Brief { rating: rating::read_beside(src, &p, sidecar), date: exif::read(&p).datetime, hdr: hdr::of(src, &p), series: stack::hint(&p, path), places: rating::Places::of(&p) }
 }
 
 pub fn read(path: &Path) -> Result<Meta> {

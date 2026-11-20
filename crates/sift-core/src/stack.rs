@@ -15,7 +15,7 @@
 use crate::container::{self, MakerNote, Parsed};
 use crate::io::{u16_at, u32_at, Src};
 use crate::{formats, Result};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 /// Frames of one camera-numbered series are at most this far apart. Nikon's
@@ -37,7 +37,7 @@ pub enum Kind {
 }
 
 /// What one file says about the series it was shot in.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Hint {
     /// Make and model; only frames of one camera form a stack.
     pub camera: Option<String>,

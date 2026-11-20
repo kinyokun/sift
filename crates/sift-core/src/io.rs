@@ -48,7 +48,12 @@ impl Src {
     pub fn open(path: &Path) -> io::Result<Src> {
         let f = File::open(path)?;
         let len = f.metadata()?.len();
-        Ok(Src::File { f, len, blocks: Mutex::new(Vec::new()) })
+        Ok(Src::file(f, len))
+    }
+
+    /// A file opened already, `len` bytes long.
+    pub fn file(f: File, len: u64) -> Src {
+        Src::File { f, len, blocks: Mutex::new(Vec::new()) }
     }
 
     pub fn mem(data: Vec<u8>) -> Src {

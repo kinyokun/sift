@@ -10,6 +10,7 @@ use crate::io::Src;
 use crate::jpeg;
 use crate::xmp::{self, Patch};
 use crate::{Error, Result};
+use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
 use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -18,7 +19,7 @@ const SONY_RATING: u16 = 0x2002;
 /// A JPEG marker segment holds at most 65533 payload bytes.
 const MAX_APP1_BODY: usize = 65533;
 
-#[derive(serde::Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Stored {
     /// Written into the image file itself.
@@ -29,13 +30,11 @@ pub enum Stored {
 
 /// Existing sidecar for `path`, or the name a new one should get.
 pub fn sidecar_path(path: &Path) -> PathBuf {
-    for ext in ["xmp", "XMP"] {
-        let p = path.with_extension(ext);
-        if p.is_file() {
-            return p;
-        }
-    }
-    path.with_extension("xmp")
+    existing_sidecar(path).unwrap_or_else(|| path.with_extension("xmp"))
+}
+
+fn existing_sidecar(path: &Path) -> Option<PathBuf> {
+    ["xmp", "XMP"].into_iter().map(|ext| path.with_extension(ext)).find(|p| p.is_file())
 }
 
 /// Absolute position of the Sony MakerNote Rating value (a u32 stored inline).
@@ -46,20 +45,53 @@ fn sony_rating_pos(p: &Parsed) -> Option<(u64, bool)> {
 }
 
 pub fn read(src: &Src, p: &Parsed, path: &Path) -> u8 {
+    read_beside(src, p, existing_sidecar(path).as_deref())
+}
+
+/// [`read`] with the sidecar already found (`None`: there is none), as one
+/// listing of the folder tells for all its photos: on a network share,
+/// looking for it costs a round trip or three per photo.
+pub fn read_beside(src: &Src, p: &Parsed, sidecar: Option<&Path>) -> u8 {
+    read_places(src, &Places::of(p), sidecar)
+}
+
+/// Where a file keeps its stars. Stars are written in place, in as many bytes
+/// as before, or else the file is written anew in another size; so a file of
+/// the size it had can have them read again from here, without being parsed.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Places {
+    jpeg: bool,
+    xmp: Option<(u64, usize)>,
+    sony: Option<(u64, bool)>,
+}
+
+impl Places {
+    pub fn of(p: &Parsed) -> Places {
+        Places { jpeg: p.format == Format::Jpeg, xmp: p.xmp.map(|r| (r.pos, r.len.min(1 << 20))), sony: sony_rating_pos(p) }
+    }
+}
+
+/// The rating read at `at`, as [`read_beside`] finds it; `None` when no
+/// XMP packet is where there was one, and the file has to be parsed.
+pub fn read_at(src: &Src, at: &Places, sidecar: Option<&Path>) -> Option<u8> {
+    if let Some((pos, len)) = at.xmp {
+        crate::io::find(&src.read(pos, len)?, b"xmpmeta")?;
+    }
+    Some(read_places(src, at, sidecar))
+}
+
+fn read_places(src: &Src, at: &Places, sidecar: Option<&Path>) -> u8 {
     let embedded = || {
-        let r = p.xmp?;
-        xmp::read_rating(&src.read(r.pos, r.len.min(1 << 20))?)
+        let (pos, len) = at.xmp?;
+        xmp::read_rating(&src.read(pos, len)?)
     };
-    let sidecar = || xmp::read_rating(&fs::read(sidecar_path(path)).ok()?);
+    let sidecar = || xmp::read_rating(&fs::read(sidecar?).ok()?);
     let sony = || {
-        let (pos, le) = sony_rating_pos(p)?;
+        let (pos, le) = at.sony?;
         let v = crate::io::u32_at(&src.read(pos, 4)?, 0, le)?;
         (1..=5).contains(&v).then_some(v as u8)
     };
-    let found = match p.format {
-        Format::Jpeg => embedded().or_else(sidecar),
-        _ => sidecar().or_else(embedded).or_else(sony),
-    };
+    let found = if at.jpeg { embedded().or_else(sidecar) } else { sidecar().or_else(embedded).or_else(sony) };
     found.unwrap_or(0)
 }
 

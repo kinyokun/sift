@@ -15,10 +15,10 @@ use crate::container::{self, Format, Parsed};
 use crate::io::Src;
 use crate::{exif, jpeg, preview, Error, Result};
 use image::{imageops, ImageEncoder, RgbImage};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum Hdr {
     /// Coded as light on a screen (SMPTE ST 2084).
