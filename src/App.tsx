@@ -11,6 +11,7 @@ import { DeleteSheet } from "./sheets/Delete";
 import { ExportSheet, FindRawSheet, TransferSheet } from "./sheets/Export";
 import { HelpSheet, SettingsSheet } from "./sheets/Settings";
 import { UpdateSheet } from "./sheets/Update";
+import { Tips } from "./ui/Tip";
 
 /** Toasts are raised with short codes so the store stays free of UI text. */
 function Toast() {
@@ -116,6 +117,7 @@ export function App() {
       {sheet === "update" && <UpdateSheet onClose={close} />}
       {sheet === "delete" && <DeleteSheet />}
       <Toast />
+      <Tips />
     </>
   );
 }

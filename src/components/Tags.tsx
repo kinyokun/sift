@@ -3,6 +3,7 @@ import type { Item, Tag } from "../lib/api";
 import { useT } from "../lib/i18n";
 import { TAG_ACTIONS, keyCaps } from "../lib/shortcuts";
 import { TAG_COLORS, tagsOf, useStore } from "../lib/store";
+import { tipProps } from "../ui/controls";
 import { Icon } from "../ui/Icon";
 
 /** How many remembered names are offered at once. */
@@ -23,7 +24,7 @@ export function tagsOn(tags: Tag[], tagged: Record<string, string[]>, item: Item
 export type TagMenuHandle = { open: () => void };
 
 /** A button that opens the folder's tags: tick the ones `targets` should carry, or make a new one. */
-export function TagMenu(props: { targets: Item[]; label: string; up?: boolean; ref?: Ref<TagMenuHandle> }) {
+export function TagMenu(props: { targets: Item[]; label: string; up?: boolean; keys?: string[]; ref?: Ref<TagMenuHandle> }) {
   const t = useT();
   const tags = useStore((s) => s.tags);
   const tagged = useStore((s) => s.tagged);
@@ -93,7 +94,7 @@ export function TagMenu(props: { targets: Item[]; label: string; up?: boolean; r
 
   return (
     <div className={`menu-anchor ${marked ? "on" : ""}`} ref={anchor}>
-      <button className={`icon-button ${open ? "on" : ""}`} title={props.label} aria-label={props.label} aria-expanded={open} onClick={() => setOpen(!open)}>
+      <button className={`icon-button ${open ? "on" : ""}`} {...tipProps(props.label, props.keys)} aria-label={props.label} aria-expanded={open} onClick={() => setOpen(!open)}>
         <Icon name="tag" />
       </button>
       {open && (

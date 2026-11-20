@@ -1,6 +1,13 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "./Icon";
 
+/** What a control says on hover: with the shortcuts that do the same (bindings such as `Shift+V`), the
+ * tooltip that shows them as key caps (`Tips`); without, the system's. */
+export function tipProps(label: string, keys?: string[]): Record<string, string> {
+  const bound = keys?.filter(Boolean) ?? [];
+  return bound.length ? { "data-tip": label, "data-keys": bound.join("|") } : { title: label };
+}
+
 export function Segmented<T extends string>(props: {
   value: T;
   options: { value: T; label: ReactNode }[];
@@ -24,7 +31,7 @@ export function Segmented<T extends string>(props: {
   );
 }
 
-export function Stars(props: { value: number; onChange?: (value: number) => void; size?: number }) {
+export function Stars(props: { value: number; onChange?: (value: number) => void; size?: number; tips?: { label: string; key: string }[] }) {
   const size = props.size ?? 18;
   return (
     <div className="stars" role="radiogroup">
@@ -33,6 +40,7 @@ export function Stars(props: { value: number; onChange?: (value: number) => void
           key={n}
           className={n <= props.value ? "on" : ""}
           aria-label={`${n}`}
+          {...(props.tips ? tipProps(props.tips[n - 1].label, [props.tips[n - 1].key]) : {})}
           aria-checked={n === props.value}
           role="radio"
           tabIndex={-1}
@@ -69,11 +77,13 @@ export function IconButton(props: {
   disabled?: boolean;
   size?: number;
   className?: string;
+  /** Bindings of the shortcuts that do the same, shown on hover. */
+  keys?: string[];
 }) {
   return (
     <button
       className={`icon-button ${props.active ? "on" : ""} ${props.className ?? ""}`}
-      title={props.label}
+      {...tipProps(props.label, props.keys)}
       aria-label={props.label}
       aria-pressed={props.active}
       disabled={props.disabled}
@@ -87,7 +97,7 @@ export function IconButton(props: {
 export type MenuItem = { label: string; onSelect: () => void; checked?: boolean; icon?: string } | "divider";
 
 /** A button that opens a small popover menu. */
-export function Menu(props: { button: ReactNode; label: string; items: MenuItem[]; align?: "left" | "right"; up?: boolean; className?: string }) {
+export function Menu(props: { button: ReactNode; label: string; items: MenuItem[]; align?: "left" | "right"; up?: boolean; className?: string; keys?: string[] }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -109,7 +119,7 @@ export function Menu(props: { button: ReactNode; label: string; items: MenuItem[
   }, [open]);
   return (
     <div className={`menu-anchor ${props.className ?? ""}`} ref={ref}>
-      <button className={`icon-button ${open ? "on" : ""}`} title={props.label} aria-label={props.label} aria-expanded={open} onClick={() => setOpen(!open)}>
+      <button className={`icon-button ${open ? "on" : ""}`} {...tipProps(props.label, props.keys)} aria-label={props.label} aria-expanded={open} onClick={() => setOpen(!open)}>
         {props.button}
       </button>
       {open && (

@@ -3,10 +3,10 @@ import { NO_LOOK, api, fileName, imageUrl, isHeifPath, isRawPath, type Item, typ
 import { editIn } from "../lib/editor";
 import { importLooks } from "../lib/looks";
 import { useT } from "../lib/i18n";
-import { actionFor, isTyping, ratingOf, tagOf } from "../lib/shortcuts";
+import { NO_KEYS, RATE_ACTIONS, actionFor, isTyping, ratingOf, tagOf } from "../lib/shortcuts";
 import { cropOf, flagOf, lookOf, turnOf, useStore, wheelModeOf } from "../lib/store";
 import { fitCrop, turnRect, turnedSize } from "../lib/turn";
-import { IconButton, Menu, Stars, type MenuItem } from "../ui/controls";
+import { IconButton, Menu, Stars, tipProps, type MenuItem } from "../ui/controls";
 import { Icon } from "../ui/Icon";
 import { CROP_RATIOS, GUIDE_MODES, ROTATABLE_GUIDES, centeredCrop, type Crop } from "./Overlay";
 import { Histogram } from "./Histogram";
@@ -849,6 +849,8 @@ export function Viewer() {
       return next;
     });
   const docked = showInfo && !mobile && !immersive;
+  // Hovering a control names its shortcut, where there is a keyboard.
+  const keys = mobile ? NO_KEYS : settings.keys;
   const look = currentMeta?.look;
   const currentLook = lookOf(looks, current);
   const chosenLook = library.find((l) => l.id === currentLook);
@@ -1021,30 +1023,30 @@ export function Viewer() {
             </div>
           )}
           <div className="dock-group">
-            <Stars value={ratings[current.id] || 0} onChange={setRating} size={20} />
+            <Stars value={ratings[current.id] || 0} onChange={setRating} size={20} tips={RATE_ACTIONS.slice(1).map((a) => ({ label: t.actions[a], key: keys[a] }))} />
           </div>
           <div className="dock-group">
-            <IconButton icon="check" label={t.pick} active={flag === 1} className="pick" onClick={() => setFlag(1)} />
-            <IconButton icon="x" label={t.reject} active={flag === -1} className="reject" onClick={() => setFlag(-1)} />
-            <TagMenu ref={tagMenu} label={t.tags} targets={[current]} up />
+            <IconButton icon="check" label={t.pick} active={flag === 1} className="pick" onClick={() => setFlag(1)} keys={[keys.pick]} />
+            <IconButton icon="x" label={t.reject} active={flag === -1} className="reject" onClick={() => setFlag(-1)} keys={[keys.reject]} />
+            <TagMenu ref={tagMenu} label={t.tags} targets={[current]} up keys={[keys.tags]} />
           </div>
           <div className="dock-group">
-            <IconButton icon="focus" label={t.focusPoints} active={showAf && !!currentMeta?.af} onClick={toggleAf} />
-            <IconButton icon="eye" label={t.eyeZoom} active={eye} onClick={toggleEye} />
-            <Menu label={t.looks} up className={currentLook ? "on" : ""} items={lookItems} button={<Icon name="look" />} />
-            <Menu label={t.guides} up className={guides ? "on" : ""} items={guideItems} button={<Icon name="guides" />} />
-            <Menu label={t.crop} up className={cropRatio || savedCrop ? "on" : ""} items={cropItems} button={<Icon name="crop" />} />
-            <IconButton icon="rotate" label={t.actions.rotateRight} onClick={() => rotate(1)} />
-            {!mobile && <IconButton icon="openIn" label={t.actions.editor} onClick={() => void editIn([current])} />}
-            <IconButton icon="clip" label={t.clipping} active={settings.clipping} onClick={toggleClipping} />
-            <IconButton icon="compare" label={t.compare} active={compare} onClick={toggleCompare} />
-            {compare && <IconButton icon="link" label={t.link} active={link} onClick={() => setLink(!link)} />}
+            <IconButton icon="focus" label={t.focusPoints} active={showAf && !!currentMeta?.af} onClick={toggleAf} keys={[keys.af]} />
+            <IconButton icon="eye" label={t.eyeZoom} active={eye} onClick={toggleEye} keys={[keys.eye]} />
+            <Menu label={t.looks} up className={currentLook ? "on" : ""} items={lookItems} button={<Icon name="look" />} keys={[keys.lookPrev, keys.lookNext]} />
+            <Menu label={t.guides} up className={guides ? "on" : ""} items={guideItems} button={<Icon name="guides" />} keys={[keys.guides]} />
+            <Menu label={t.crop} up className={cropRatio || savedCrop ? "on" : ""} items={cropItems} button={<Icon name="crop" />} keys={[keys.crop]} />
+            <IconButton icon="rotate" label={t.actions.rotateRight} onClick={() => rotate(1)} keys={[keys.rotateRight]} />
+            {!mobile && <IconButton icon="openIn" label={t.actions.editor} onClick={() => void editIn([current])} keys={[keys.editor]} />}
+            <IconButton icon="clip" label={t.clipping} active={settings.clipping} onClick={toggleClipping} keys={[keys.clipping]} />
+            <IconButton icon="compare" label={t.compare} active={compare} onClick={toggleCompare} keys={[keys.compare]} />
+            {compare && <IconButton icon="link" label={t.link} active={link} onClick={() => setLink(!link)} keys={[keys.link]} />}
           </div>
           {compare && (
             <div className="dock-group">
               <div className="segmented pane-count" role="group" aria-label={t.actions.panes}>
                 {[2, 3, 4].map((n) => (
-                  <button key={n} className={indices.length === n ? "on" : ""} aria-pressed={indices.length === n} title={t.comparePanes(n)} onClick={() => setPaneCount(n)}>
+                  <button key={n} className={indices.length === n ? "on" : ""} aria-pressed={indices.length === n} {...tipProps(t.comparePanes(n), [keys.panes])} onClick={() => setPaneCount(n)}>
                     {n}
                   </button>
                 ))}
@@ -1074,7 +1076,7 @@ export function Viewer() {
       )}
 
       <header className="viewer-bar" ref={topBar} data-tauri-drag-region>
-        <IconButton icon="back" label={t.back} onClick={() => useStore.getState().closeViewer()} className="on-dark" />
+        <IconButton icon="back" label={t.back} onClick={() => useStore.getState().closeViewer()} className="on-dark" keys={mobile ? undefined : ["Escape"]} />
         <div className="viewer-title" data-tauri-drag-region>
           <strong>{current.name}</strong>
           <span>
@@ -1094,13 +1096,13 @@ export function Viewer() {
         </div>
         <div className="viewer-bar-end">
           {zoom.percent > 0 && (
-            <button className="zoom-pill" onClick={() => panes[active].current?.toggleActual()}>
+            <button className="zoom-pill" onClick={() => panes[active].current?.toggleActual()} {...tipProps(t.actions.zoom, [keys.zoom])}>
               {zoom.percent}%
             </button>
           )}
           {info?.save_to_photos && <IconButton icon="save" label={t.saveToPhotos} onClick={() => useStore.getState().saveToPhotos([current])} className="on-dark" />}
-          <IconButton icon="trash" label={t.delete} disabled={!!crop || !!live} onClick={() => useStore.getState().deletePhotos([current.id])} className="on-dark" />
-          <IconButton icon="info" label={t.info} active={showInfo} onClick={toggleInfo} className="on-dark" />
+          <IconButton icon="trash" label={t.delete} disabled={!!crop || !!live} onClick={() => useStore.getState().deletePhotos([current.id])} className="on-dark" keys={[keys.delete]} />
+          <IconButton icon="info" label={t.info} active={showInfo} onClick={toggleInfo} className="on-dark" keys={[keys.info]} />
         </div>
       </header>
     </div>
