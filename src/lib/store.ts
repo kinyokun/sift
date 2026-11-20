@@ -5,6 +5,7 @@ import {
   shotKey,
   type AppInfo,
   type CropBox,
+  type Hdr,
   type Item,
   type LookInfo,
   type Meta,
@@ -65,6 +66,8 @@ export type Settings = {
   infoPinned: boolean;
   /** Mark blown highlights and crushed shadows on the photo in the viewer. */
   clipping: boolean;
+  /** Show HDR photos in HDR on a screen that can; off, they are shown as ordinary pictures. */
+  showHdr: boolean;
   /** Show the camera's level over the photo in the viewer. */
   level: boolean;
   /** Crop ratios typed in lately, as "W:H", newest first. */
@@ -129,6 +132,7 @@ const defaults: Settings = {
   autoAdvance: false,
   infoPinned: true,
   clipping: false,
+  showHdr: true,
   level: false,
   cropRatios: [],
   wheel: null,
@@ -185,6 +189,8 @@ type State = {
   ratings: Record<string, number>;
   /** Capture time of each photo ("YYYY-MM-DD HH:MM:SS"), where the file records one. */
   dates: Record<string, string>;
+  /** The HDR photos, and what kind of HDR each is. */
+  hdr: Record<string, Hdr>;
   /** File name (below a subfolder: its path from the opened folder) -> 1 picked, -1 rejected. Every file of a shot carries the flag. */
   flags: Record<string, number>;
   metas: Record<string, Meta>;
@@ -205,6 +211,8 @@ type State = {
   tagFilter: string[];
   filter: FlagFilter;
   minStars: number;
+  /** Only HDR photos are shown. */
+  hdrOnly: boolean;
   /** Bursts and pixel-shift series of the folder, known once every file has been read. */
   stacks: Stack[];
   /** Photo id -> its stack and its place in it. */
@@ -234,6 +242,7 @@ type State = {
   setSubfolder: (subfolder: string | null) => void;
   setFilter: (filter: FlagFilter) => void;
   setMinStars: (n: number) => void;
+  setHdrOnly: (on: boolean) => void;
   select: (ids: string[], cursor?: string | null) => void;
   /** Opens a stack in the grid, or folds it up again. */
   toggleStack: (key: string) => void;
@@ -363,7 +372,7 @@ export type Entry = {
   stack: { key: string; kind: StackKind; index: number; total: number; open: boolean } | null;
 };
 
-type Shown = Pick<State, "items" | "filter" | "minStars" | "flags" | "ratings" | "dates" | "stacks" | "stackOf" | "expanded" | "tagged" | "tagFilter"> & {
+type Shown = Pick<State, "items" | "filter" | "minStars" | "hdr" | "hdrOnly" | "flags" | "ratings" | "dates" | "stacks" | "stackOf" | "expanded" | "tagged" | "tagFilter"> & {
   subfolder?: string | null;
   settings: Pick<Settings, "sortBy" | "sortDesc" | "stacks">;
 };
@@ -386,6 +395,7 @@ export function visibleEntries(s: Shown): Entry[] {
     if (s.filter === "rejected" && flag !== -1) return false;
     if (s.filter === "unflagged" && flag !== 0) return false;
     if (s.tagFilter.length && !tagsOf(s.tagged, it).some((id) => s.tagFilter.includes(id))) return false;
+    if (s.hdrOnly && !s.hdr[it.id]) return false;
     return (s.ratings[it.id] || 0) >= s.minStars;
   });
   const single = (it: Item): Entry => ({ id: it.id, item: it, members: [it], stack: null });
@@ -518,9 +528,9 @@ export const useStore = create<State>((set, get) => {
 
   const saveNow = () => {
     clearTimeout(saveTimer);
-    const { folder, flags, looks, crops, turns, viewer, filter, minStars, loading, subfolder, tags, tagged, tagFilter } = get();
+    const { folder, flags, looks, crops, turns, viewer, filter, minStars, hdrOnly, loading, subfolder, tags, tagged, tagFilter } = get();
     if (!folder || loading) return;
-    const session: Session = { flags, looks, crops, turns, cursor: position(), viewer: !!viewer, filter, minStars, subfolder, tags, tagged, tagFilter };
+    const session: Session = { flags, looks, crops, turns, cursor: position(), viewer: !!viewer, filter, minStars, hdrOnly, subfolder, tags, tagged, tagFilter };
     api.saveSession(folder, session).catch(() => {});
   };
 
@@ -547,7 +557,7 @@ export const useStore = create<State>((set, get) => {
     setSettings({ tagNames: [name, ...settings.tagNames.filter((n) => !sameName(n, name))].slice(0, MAX_TAG_NAMES) });
   };
 
-  /** Reads ratings and capture times from the files, in batches. `again` is for photos read before: stars that
+  /** Reads ratings, capture times and what is HDR from the files, in batches. `again` is for photos read before: stars that
    * are no longer there are taken away, and a file that cannot be read is passed over. False when the folder
    * was left meanwhile. */
   const readBriefs = async (path: string, items: Item[], again = false): Promise<boolean> => {
@@ -560,6 +570,7 @@ export const useStore = create<State>((set, get) => {
       if (get().folder !== path) return false;
       const ratings = { ...get().ratings };
       const dates = { ...get().dates };
+      const hdr = { ...get().hdr };
       part.forEach((it, k) => {
         const value = values[k];
         if (!value) return;
@@ -569,8 +580,10 @@ export const useStore = create<State>((set, get) => {
           else if (again) delete ratings[it.id];
         }
         if (value.date) dates[it.id] = value.date;
+        if (value.hdr) hdr[it.id] = value.hdr;
+        else delete hdr[it.id];
       });
-      set({ ratings, dates });
+      set({ ratings, dates, hdr });
     }
     return true;
   };
@@ -621,7 +634,7 @@ export const useStore = create<State>((set, get) => {
       const i = order.indexOf(id);
       return now.has(id) ? id : (order.slice(i + 1).find((x) => now.has(x)) ?? order.slice(0, Math.max(i, 0)).reverse().find((x) => now.has(x)) ?? null);
     };
-    const { viewer, selection, cursor, ratings, dates, metas } = get();
+    const { viewer, selection, cursor, ratings, dates, hdr, metas } = get();
     const order = visibleEntries(get()).map((e) => e.id);
     const at = cursor && heir(cursor, order);
     const kept = selection.filter((id) => now.has(id));
@@ -634,7 +647,7 @@ export const useStore = create<State>((set, get) => {
     }
     const subfolder = get().subfolder;
     const narrowed = subfolder != null && items.some((it) => it.dir === subfolder) ? subfolder : null;
-    set({ items, subfolder: narrowed, ratings: fresh(ratings), dates: fresh(dates), metas: fresh(metas), viewer: shown, selection: kept.length ? kept : at ? [at] : [], cursor: at });
+    set({ items, subfolder: narrowed, ratings: fresh(ratings), dates: fresh(dates), hdr: fresh(hdr), metas: fresh(metas), viewer: shown, selection: kept.length ? kept : at ? [at] : [], cursor: at });
     return { added, removed, changed, lost: !!viewer && !now.has(viewer.ids[viewer.index]) };
   };
 
@@ -724,6 +737,7 @@ export const useStore = create<State>((set, get) => {
     loading: false,
     ratings: {},
     dates: {},
+    hdr: {},
     flags: {},
     metas: {},
     looks: {},
@@ -735,6 +749,7 @@ export const useStore = create<State>((set, get) => {
     tagFilter: [],
     filter: "all",
     minStars: 0,
+    hdrOnly: false,
     stacks: [],
     stackOf: {},
     expanded: [],
@@ -787,7 +802,7 @@ export const useStore = create<State>((set, get) => {
 
     openFolder: async (path) => {
       saveNow();
-      set({ loading: true, folder: path, deep: false, subfolder: null, items: [], ratings: {}, dates: {}, flags: {}, looks: {}, crops: {}, turns: {}, tags: [], tagged: {}, tagFilter: [], metas: {}, stacks: [], stackOf: {}, expanded: [], selection: [], cursor: null, viewer: null });
+      set({ loading: true, folder: path, deep: false, subfolder: null, items: [], ratings: {}, dates: {}, hdr: {}, flags: {}, looks: {}, crops: {}, turns: {}, tags: [], tagged: {}, tagFilter: [], metas: {}, stacks: [], stackOf: {}, expanded: [], selection: [], cursor: null, viewer: null });
       try {
         const [{ items, deep, found }, saved] = await Promise.all([scanFolder(path), api.loadSession(path)]);
         if (get().folder !== path) return;
@@ -808,6 +823,7 @@ export const useStore = create<State>((set, get) => {
           loading: false,
           filter: (saved?.filter as FlagFilter) ?? "all",
           minStars: saved?.minStars ?? 0,
+          hdrOnly: saved?.hdrOnly ?? false,
           selection: at ? [at.id] : [],
           cursor: at?.id ?? null,
         });
@@ -840,7 +856,7 @@ export const useStore = create<State>((set, get) => {
       if (get().folder !== folder) return;
       const keep = items.find((it) => it.paths.some((p) => shotKey(it.dir, p) === at));
       const subfolder = deep ? get().subfolder : null;
-      set({ items, deep, subfolder, metas: {}, dates: {}, stacks: [], stackOf: {}, viewer: null, selection: keep ? [keep.id] : [], cursor: keep?.id ?? null });
+      set({ items, deep, subfolder, metas: {}, dates: {}, hdr: {}, stacks: [], stackOf: {}, viewer: null, selection: keep ? [keep.id] : [], cursor: keep?.id ?? null });
       await read(folder, items);
     },
 
@@ -863,6 +879,10 @@ export const useStore = create<State>((set, get) => {
     },
     setMinStars: (minStars) => {
       set({ minStars, selection: [], cursor: null });
+      save();
+    },
+    setHdrOnly: (hdrOnly) => {
+      set({ hdrOnly, selection: [], cursor: null });
       save();
     },
     select: (ids, cursor) => {

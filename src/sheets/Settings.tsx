@@ -127,6 +127,9 @@ export function SettingsSheet({ onClose }: { onClose: () => void }) {
             <Row label={t.autoAdvance}>
               <Toggle checked={settings.autoAdvance} onChange={(autoAdvance) => setSettings({ autoAdvance })} />
             </Row>
+            <Row label={t.showHdr} hint={t.showHdrHint}>
+              <Toggle checked={settings.showHdr} onChange={(showHdr) => setSettings({ showHdr })} />
+            </Row>
             {!mobile && (
               <>
                 <Row label={t.mouseWheel} hint={t.wheelHints[wheel]}>

@@ -61,6 +61,7 @@ const Cell = memo(function Cell(props: {
   flag: number;
   /** Name of the look chosen for this photo, if any. */
   look: string;
+  hdr: boolean;
   /** The photo's tags, one to a line: place in the palette, a tab, the name. */
   tags: string;
   /** Quarter turns clockwise the photo was given. */
@@ -159,6 +160,7 @@ const Cell = memo(function Cell(props: {
             </span>
           )}
           {item.raw && <span className="cell-raw">{item.paired ? "RAW+J" : "RAW"}</span>}
+          {props.hdr && <span className="cell-hdr">HDR</span>}
           {item.live && (
             <span className="cell-live">
               <Icon name="live" size={10} />
@@ -254,6 +256,8 @@ export function Library() {
       tagFilter: st.tagFilter,
       filter: st.filter,
       minStars: st.minStars,
+      hdr: st.hdr,
+      hdrOnly: st.hdrOnly,
       stacks: st.stacks,
       stackOf: st.stackOf,
       expanded: st.expanded,
@@ -274,7 +278,7 @@ export function Library() {
   const items: Entry[] = useMemo(
     () => visibleEntries({ ...s, settings: { sortBy: s.sortBy, sortDesc: s.sortDesc, stacks: s.stacking } }),
     // Capture times only matter when sorting by them, tags when narrowing to some.
-    [s.items, s.subfolder, s.filter, s.minStars, s.flags, s.ratings, s.sortBy, s.sortDesc, s.sortBy === "time" ? s.dates : null, s.stacks, s.expanded, s.stacking, s.tagFilter, s.tagFilter.length ? s.tagged : null],
+    [s.items, s.subfolder, s.filter, s.minStars, s.hdrOnly, s.hdrOnly ? s.hdr : null, s.flags, s.ratings, s.sortBy, s.sortDesc, s.sortBy === "time" ? s.dates : null, s.stacks, s.expanded, s.stacking, s.tagFilter, s.tagFilter.length ? s.tagged : null],
   );
   const photoCount = useMemo(() => items.reduce((n, e) => n + e.members.length, 0), [items]);
   /** The photos an action on these cells reaches: every frame of a folded stack. */
@@ -346,7 +350,7 @@ export function Library() {
   // A new folder, filter or order starts ranges afresh.
   useEffect(() => {
     anchor.current = { id: null, base: [] };
-  }, [s.folder, s.subfolder, s.filter, s.minStars, s.tagFilter]);
+  }, [s.folder, s.subfolder, s.filter, s.minStars, s.hdrOnly, s.tagFilter]);
   useEffect(() => setSelecting(false), [s.folder]);
   /** The cell under a point of the window, and how far down it the point is. */
   const cellAt = (at: { clientX: number; clientY: number }) => {
@@ -731,11 +735,17 @@ export function Library() {
     { value: "rejected", label: <>{t.filterRejected}{counts.rejected > 0 && <i>{counts.rejected}</i>}</> },
   ];
 
-  const starItems: MenuItem[] = [0, 1, 2, 3, 4, 5].map((n) => ({
-    label: n === 0 ? t.anyStars : t.starsAtLeast(n),
-    checked: s.minStars === n,
-    onSelect: () => act.setMinStars(n),
-  }));
+  const hdrCount = useMemo(() => s.items.filter((it) => (s.subfolder == null || it.dir === s.subfolder) && s.hdr[it.id]).length, [s.items, s.hdr, s.subfolder]);
+  const starItems: MenuItem[] = [
+    ...[0, 1, 2, 3, 4, 5].map((n) => ({
+      label: n === 0 ? t.anyStars : t.starsAtLeast(n),
+      checked: s.minStars === n,
+      onSelect: () => act.setMinStars(n),
+    })),
+    // Offered where there is something to narrow to, and always while it narrows.
+    ...(hdrCount || s.hdrOnly ? ["divider" as const, { label: `${t.hdrOnly} · ${hdrCount}`, checked: s.hdrOnly, onSelect: () => act.setHdrOnly(!s.hdrOnly) }] : []),
+  ];
+  const filtering = s.minStars > 0 || s.hdrOnly;
 
   const sorts: [SortBy, string][] = [
     ["name", t.sortName],
@@ -837,7 +847,12 @@ export function Library() {
               onChange={(e) => act.setSettings({ thumb: Number(e.target.value) })}
             />
           )}
-          <Menu label={t.stars} items={starItems} className={s.minStars > 0 ? "on" : ""} button={<><Icon name="star" fill={s.minStars > 0} />{s.minStars > 0 && <b>{s.minStars}</b>}</>} />
+          <Menu
+            label={t.stars}
+            items={starItems}
+            className={`${filtering ? "on" : ""} ${s.hdrOnly ? "wide" : ""}`}
+            button={<><Icon name="star" fill={filtering} />{s.minStars > 0 && <b>{s.minStars}</b>}{s.hdrOnly && <b>HDR</b>}</>}
+          />
           <Menu label={t.sort} items={viewItems} button={<Icon name="sort" />} />
           <i className="toolbar-sep" />
           <Menu label={t.lookApply} items={lookItems} button={<Icon name="look" />} />
@@ -887,6 +902,7 @@ export function Library() {
                 rating={s.ratings[item.id] || 0}
                 flag={flagOf(s.flags, item)}
                 look={lookLabel(lookOf(s.looks, item))}
+                hdr={!!s.hdr[item.id]}
                 tags={tagLine(item)}
                 turn={turnOf(s.turns, item)}
                 selected={selected.has(entry.id)}

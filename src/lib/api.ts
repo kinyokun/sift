@@ -46,6 +46,9 @@ export type Exif = {
 
 export type Histogram = { r: number[]; g: number[]; b: number[]; luma: number[]; shadows: number; highlights: number };
 
+/** What makes a photo HDR: coded for HDR screens (PQ, HLG), or an ordinary picture with a gain map. */
+export type Hdr = "pq" | "hlg" | "gainMap";
+
 export type Meta = {
   format: string;
   raw: boolean;
@@ -62,6 +65,7 @@ export type Meta = {
   preview_width: number;
   preview_height: number;
   low_res: boolean;
+  hdr?: Hdr | null;
 };
 
 export type AppInfo = {
@@ -185,6 +189,7 @@ export type Session = {
   viewer: boolean;
   filter: string;
   minStars: number;
+  hdrOnly?: boolean;
   /** File name -> look id chosen for that photo (absent: as shot). */
   looks?: Record<string, string>;
   /** File name -> confirmed crop as normalised [x, y, width, height]. */
@@ -210,8 +215,9 @@ export const fileName = (path: string) => path.split(/[\\/]/).pop() ?? path;
 export const shotKey = (dir: string | undefined, path: string) => (dir ? `${dir}/${fileName(path)}` : fileName(path));
 
 /** URL of a rendition served by the app's `sift://` protocol. */
-export function imageUrl(kind: ImageKind, path: string, version: number, edge = 0, look?: string): string {
-  const extra = look ? `&l=${encodeURIComponent(look)}` : "";
+/** `sdr`: an HDR photo comes as an ordinary picture. */
+export function imageUrl(kind: ImageKind, path: string, version: number, edge = 0, look?: string, sdr = false): string {
+  const extra = (look ? `&l=${encodeURIComponent(look)}` : "") + (sdr ? "&sdr=1" : "");
   return `${convertFileSrc(kind, "sift")}?p=${encodeURIComponent(path)}&v=${version}&e=${edge}${extra}`;
 }
 
@@ -222,7 +228,7 @@ export const api = {
   /** A value that changes when a photo or movie appears in the folder or goes away. */
   folderChanges: (path: string, deep: boolean) => invoke<string>("folder_changes", { path, deep }),
   readMeta: (path: string) => invoke<Meta>("read_meta", { path }),
-  readBriefs: (paths: string[]) => invoke<{ rating: number; date: string | null }[]>("read_briefs", { paths }),
+  readBriefs: (paths: string[]) => invoke<{ rating: number; date: string | null; hdr: Hdr | null }[]>("read_briefs", { paths }),
   /** Bursts and pixel-shift series among the displayed files of a folder. */
   groupShots: (paths: string[]) => invoke<Stack[]>("group_shots", { paths }),
   /** Seconds each of `frames` is shown for when they play as a Live Photo. */

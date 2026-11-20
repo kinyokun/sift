@@ -132,6 +132,31 @@ await session("desktop", desktop, async (page, shot) => {
   await shot("help");
 });
 
+// HDR photos (run on a folder that has some): the badge, narrowing to them, the info panel, and the
+// setting that shows them as ordinary pictures.
+await session("hdr", desktop, async (page, shot) => {
+  await openLibrary(page);
+  await page.locator(".cell-hdr").first().waitFor();
+  await shot("library");
+  await page.locator('[aria-label="星级"]').click();
+  await shot("menu");
+  await page.getByRole("menuitem", { name: /只看 HDR/ }).click();
+  await shot("only-hdr");
+  await page.locator(".cell").first().dblclick();
+  await page.locator(".tier.full.ready").waitFor({ timeout: 30000 });
+  console.log("[hdr] viewer:", await page.locator(".tier").evaluateAll((els) => els.map((e) => e.getAttribute("src").replace(/^.*\/(\w+)\?/, "$1?").slice(0, 60))));
+  await shot("viewer");
+  await page.keyboard.press("Escape");
+  await page.locator('[aria-label="更多"]').click();
+  await page.getByRole("menuitem", { name: "设置" }).click();
+  await page.getByText("以 HDR 显示 HDR 照片").scrollIntoViewIfNeeded();
+  await shot("settings");
+  await page.getByText("以 HDR 显示 HDR 照片").locator("xpath=ancestor::div[contains(concat(' ', @class, ' '), ' row ')][1]").locator('[role="switch"]').click();
+  await page.keyboard.press("Escape");
+  await page.locator(".cell").first().dblclick();
+  await page.locator(".tier.full.ready").waitFor({ timeout: 30000 });
+  console.log("[hdr] viewer, HDR off:", await page.locator(".tier").evaluateAll((els) => els.map((e) => e.getAttribute("src").replace(/^.*\/(\w+)\?/, "$1?").slice(0, 60) + (e.getAttribute("src").includes("sdr=1") ? " sdr" : ""))));
+});
 await session("eyes", desktop, async (page, shot) => {
   await openLibrary(page);
   await page.locator(".cell", { has: page.locator('img[src*="portrait"]') }).dblclick();

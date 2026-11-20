@@ -261,6 +261,13 @@ p {
   font-weight: 700;
 }
 
+/* A menu button that says more than an icon and a digit. */
+.menu-anchor.wide > .icon-button {
+  width: auto;
+  min-width: var(--ctl);
+  padding: 0 7px;
+}
+
 /* Buttons with words on them: one shape in sheets and in the bars over a photo. */
 .button,
 button.primary,
@@ -1161,6 +1168,10 @@ kbd {
 .cell-badges .cell-look {
   padding: 0 4px;
   pointer-events: auto;
+}
+
+.cell-badges .cell-hdr {
+  letter-spacing: 0.04em;
 }
 
 .cell-tags {

@@ -33,6 +33,8 @@ type Props = {
   /** A double click leaves the photo instead of zooming into it. */
   onBack?: () => void;
   autoDevelop: boolean;
+  /** HDR photos are shown in HDR (`Settings.showHdr`). */
+  hdr: boolean;
   /** Nikon's SDK is installed: NEF looks come from it. */
   nikon: boolean;
   /** Look chosen for this photo: a library look, `NO_LOOK`, or null for as shot. */
@@ -75,20 +77,20 @@ export function lookSource(item: Item, opts: { mobile: boolean; nikon: boolean }
 }
 
 /** Full-resolution URL for a photo, shared with the viewer's read-ahead. */
-export function fullUrlOf(item: Item, meta: Meta | null, opts: { mobile: boolean; autoDevelop: boolean; nikon: boolean; look: string | null }): string {
+export function fullUrlOf(item: Item, meta: Meta | null, opts: { mobile: boolean; autoDevelop: boolean; hdr: boolean; nikon: boolean; look: string | null }): string {
   const raw = item.paths.find(isRawPath);
   const source = lookSource(item, opts);
   if (opts.look && opts.nikon && raw && isNefPath(raw)) return imageUrl("look", source.path, item.mtime, source.edge, opts.look);
   if (opts.look === NO_LOOK && raw) return imageUrl("orig", raw, item.mtime);
   if (opts.look && opts.look !== NO_LOOK) return imageUrl("look", source.path, item.mtime, source.edge, opts.look);
   if (meta?.raw && meta.low_res && opts.autoDevelop) return imageUrl("dev", item.id, item.mtime);
-  return opts.mobile ? imageUrl("screen", item.id, item.mtime, MOBILE_FULL_EDGE) : imageUrl("full", item.id, item.mtime);
+  return opts.mobile ? imageUrl("screen", item.id, item.mtime, MOBILE_FULL_EDGE, undefined, !opts.hdr) : imageUrl("full", item.id, item.mtime, 0, undefined, !opts.hdr);
 }
 
 const SCREEN_EDGE = 2048;
 
 /** The picture a photo is first shown with: quick to get, and what the viewer fetches ahead of a page turn. */
-export const screenUrlOf = (item: Item) => imageUrl("screen", item.id, item.mtime, SCREEN_EDGE);
+export const screenUrlOf = (item: Item, hdr: boolean) => imageUrl("screen", item.id, item.mtime, SCREEN_EDGE, undefined, !hdr);
 const MOBILE_FULL_EDGE = 4096;
 const NIKON_SCREEN_EDGE = 2560;
 const MAX_SCALE = 8;
@@ -157,7 +159,7 @@ export const Pane = forwardRef<PaneHandle, Props>(function Pane(props, ref) {
   const original = props.look === NO_LOOK && item.paths.some(isRawPath);
   const styled = !!props.look && props.look !== NO_LOOK;
   const develop = original || styled || (!!meta?.raw && meta.low_res && props.autoDevelop);
-  const screenUrl = screenUrlOf(item);
+  const screenUrl = screenUrlOf(item, props.hdr);
   const fullUrl = fullUrlOf(item, meta, props);
   const fullReady = readyUrl === fullUrl;
   // The clipping warning is taken from what is on screen; a look still

@@ -87,6 +87,7 @@ function InfoPanel({ item, meta, docked, crop, tags, histogram, onSaveLook }: In
     [t.exposure, meta ? [exposureLine(meta), equivalent].filter(Boolean).join("  ·  ") : ""],
     [t.shooting, shooting],
     [t.whiteBalance, x?.manual_wb == null ? "" : x.manual_wb ? t.wbManual : t.wbAuto],
+    [t.hdr, meta?.hdr && t.hdrKinds[meta.hdr]],
     [
       t.look,
       look && (
@@ -298,7 +299,7 @@ export function Viewer() {
 
   /** Starts fetching a photo's picture and metadata, or finds the fetch that is under way. */
   const fetchAhead = (item: Item): Ahead => {
-    const url = screenUrlOf(item);
+    const url = screenUrlOf(item, useStore.getState().settings.showHdr);
     const known = ahead.current.get(item.id);
     if (known?.url === url) return known;
     const picture = new Image();
@@ -340,7 +341,7 @@ export function Viewer() {
       const now = useStore.getState();
       const full = new Image();
       full.decoding = "async";
-      full.src = fullUrlOf(next, meta, { mobile, autoDevelop: settings.autoDevelop, nikon: !!now.info?.nikon_sdk, look: lookOf(now.looks, next) });
+      full.src = fullUrlOf(next, meta, { mobile, autoDevelop: settings.autoDevelop, hdr: settings.showHdr, nikon: !!now.info?.nikon_sdk, look: lookOf(now.looks, next) });
       full.decode?.().catch(() => {});
       aheadFull.current = full;
     }, hurried ? HURRY_MS : 0);
@@ -889,6 +890,7 @@ export function Viewer() {
     // Zooming out of a photo that fits goes back to the grid, as zooming into the grid came here.
     onZoomOut: crop || live || mobile || compare ? undefined : () => useStore.getState().closeViewer(),
     autoDevelop: settings.autoDevelop,
+    hdr: settings.showHdr,
     nikon: sdk,
     showAf,
     showLevel: settings.level,

@@ -62,7 +62,8 @@ export function LookWall({ item, source, looks, current, turn, onChoose, onClose
     },
   });
   const tiles: { id: string | null; name: string; url: string }[] = [
-    { id: null, name: t.lookAsShot, url: imageUrl("screen", item.id, item.mtime, 1024) },
+    // Looks make ordinary pictures, so the photo as shot is one here too.
+    { id: null, name: t.lookAsShot, url: imageUrl("screen", item.id, item.mtime, 1024, undefined, true) },
     ...(item.paths.some(isRawPath) ? [{ id: NO_LOOK, name: t.original, url: imageUrl("look", source.path, item.mtime, edge, NO_LOOK) }] : []),
     ...looks.map((l) => ({ id: l.id, name: l.name, url: imageUrl("look", source.path, item.mtime, edge, l.id) })),
   ];

@@ -46,7 +46,7 @@ export function useScopes(): { scopes: Record<Scope, Item[]>; initial: Scope } {
     const selection = chosen.length > 1 ? chosen : [];
     const initial: Scope = picked.length ? "picked" : selection.length ? "selection" : "shown";
     return { scopes: { picked, selection, shown }, initial };
-  }, [s.items, s.flags, s.selection, s.filter, s.minStars, s.ratings, s.stacks, s.expanded, s.settings.stacks, s.settings.sortBy, s.settings.sortDesc, s.tagged, s.tagFilter]);
+  }, [s.items, s.flags, s.selection, s.filter, s.minStars, s.hdrOnly, s.hdr, s.ratings, s.stacks, s.expanded, s.settings.stacks, s.settings.sortBy, s.settings.sortDesc, s.tagged, s.tagFilter]);
 }
 
 function useProgress(): Progress | null {
