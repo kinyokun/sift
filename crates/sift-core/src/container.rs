@@ -4,7 +4,7 @@
 
 use crate::io::{u16_at, u32_at, Src};
 use crate::jpeg;
-use crate::tiff::{Ifd, Tiff, T_EXIF_IFD, T_MAKERNOTE, T_SUBIFDS, T_XMP};
+use crate::tiff::{Ifd, Tiff, T_DNG_PRIVATE, T_EXIF_IFD, T_MAKERNOTE, T_SUBIFDS, T_XMP};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -183,6 +183,16 @@ fn attach_exif<'a>(p: &mut Parsed<'a>, tiff: Tiff<'a>, ifd0: Ifd) {
     if p.maker.is_none() {
         if let Some(mn) = ifd0.get(T_MAKERNOTE) {
             p.maker = Some(MakerNote { parent: tiff, pos: tiff.data_pos(mn), len: tiff.byte_len(mn) });
+        }
+    }
+    // Pentax and Ricoh cameras keep the MakerNote of their own DNGs as DNGPrivateData,
+    // whose offsets count from the note itself.
+    if p.maker.is_none() {
+        if let Some(e) = ifd0.get(T_DNG_PRIVATE) {
+            let pos = tiff.data_pos(e);
+            if tiff.src.read(pos, 8).is_some_and(|h| h.starts_with(b"PENTAX \0") || h.starts_with(b"RICOH\0")) {
+                p.maker = Some(MakerNote { parent: tiff, pos, len: tiff.byte_len(e) });
+            }
         }
     }
     p.exif = exif.map(|e| (tiff, e));

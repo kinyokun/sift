@@ -19,6 +19,10 @@ These files live in `crates/sift-core/assets` and are compiled into the app.
 - **RTMPose-m AP-10K** animal keypoints (`rtmpose-ap10k.onnx`): [OpenMMLab MMPose](https://github.com/open-mmlab/mmpose), Apache-2.0; trained on [AP-10K](https://github.com/AlexTheBad/AP-10K), CC BY 4.0
 - **Inter** typeface (`Inter.ttf`): [The Inter Project Authors](https://github.com/rsms/inter), SIL OFL 1.1 ([text](crates/sift-core/assets/Inter-OFL.txt))
 
+## Camera data
+
+- **Focus Points** Lightroom plug-in ([musselwhizzle/Focus-Points](https://github.com/musselwhizzle/Focus-Points)), Apache-2.0: the positions and sizes of the AF points of Pentax bodies (`crates/sift-core/src/af/pentax.rs`) are taken from its point layouts.
+
 ## Rust crates
 
 Most crates are MIT and/or Apache-2.0. Those under other licences:

@@ -138,6 +138,9 @@ pub fn hint(p: &Parsed, path: &Path) -> Hint {
         Some(m) if m.starts_with("CANON") => {
             canon(p, &mut hint);
         }
+        Some(m) if m.starts_with("PENTAX") || m.starts_with("RICOH") => {
+            hint.continuous = crate::pentax::continuous(p);
+        }
         _ => {}
     }
     hint.camera = match (make, model) {

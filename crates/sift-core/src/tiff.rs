@@ -9,6 +9,7 @@ pub const T_SUBIFDS: u16 = 0x014A;
 pub const T_XMP: u16 = 0x02BC;
 pub const T_EXIF_IFD: u16 = 0x8769;
 pub const T_MAKERNOTE: u16 = 0x927C;
+pub const T_DNG_PRIVATE: u16 = 0xC634;
 
 /// Values larger than this are never read in one piece (previews are located, not loaded).
 const MAX_VALUE: usize = 8 * 1024 * 1024;

@@ -59,7 +59,8 @@ type InfoProps = {
 function InfoPanel({ item, meta, docked, crop, tags, histogram, onSaveLook }: InfoProps) {
   const t = useT();
   const x = meta?.exif;
-  const camera = x ? [x.make?.split(" ")[0], x.model].filter((v, i, a) => v && !(i === 0 && a[1]?.toUpperCase().includes(v.toUpperCase()))).join(" ") : "";
+  // Ricoh Imaging names its Pentax bodies "PENTAX K-1" and so on.
+  const camera = x ? [x.make?.split(" ")[0], x.model].filter((v, i, a) => v && !(i === 0 && (a[1]?.toUpperCase().includes(v.toUpperCase()) || a[1]?.startsWith("PENTAX ")))).join(" ") : "";
   const look = meta?.look;
   // Only worth a mention when the sensor is not full frame.
   const equivalent = x?.focal35 && x.focal && Math.abs(x.focal35 - x.focal) > 1 ? t.equiv(x.focal35) : "";

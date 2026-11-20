@@ -141,6 +141,36 @@ fn panasonic_af_point_matches_exiftool() {
     }
 }
 
+#[test]
+fn pentax_and_ricoh_look_matches_exiftool() {
+    for f in samples().into_iter().filter(|f| name(f).starts_with("Pentax__") || name(f).starts_with("Ricoh__")) {
+        // The names, not the numbers ExifTool prints with -n.
+        let Ok(out) = Command::new("exiftool").args(["-s", "-S", "-ImageTone", "-ImageEffects"]).arg(&f).output() else { return };
+        let Some(expected) = String::from_utf8_lossy(&out.stdout).lines().next().map(str::to_string) else { continue };
+        let look = meta::read(&f).unwrap().look.unwrap_or_else(|| panic!("{}: no look", name(&f)));
+        assert_eq!(look.name, expected, "{}", name(&f));
+    }
+}
+
+/// Every Pentax and Ricoh sample focused automatically shows where.
+#[test]
+fn pentax_and_ricoh_af_is_decoded() {
+    for f in samples().into_iter().filter(|f| name(f).starts_with("Pentax__") || name(f).starts_with("Ricoh__")) {
+        let Some(tags) = exiftool(&f, &["FocusMode"]) else { return };
+        let af = meta::read(&f).unwrap().af;
+        // Pentax FocusMode 3 is manual focus.
+        if name(&f).starts_with("Pentax__") && tags.first().map(String::as_str) == Some("3") {
+            assert!(af.is_none(), "{}", name(&f));
+            continue;
+        }
+        let af = af.unwrap_or_else(|| panic!("{}: AF not decoded", name(&f)));
+        assert!(matches!(af.source, "pentax" | "ricoh"), "{}", name(&f));
+        assert!(!af.boxes.is_empty(), "{}", name(&f));
+        for b in &af.boxes {
+            assert!(b.x >= 0.0 && b.y >= 0.0 && b.x + b.w <= 1.0 && b.y + b.h <= 1.0, "{}: {b:?}", name(&f));
+        }
+    }
+}
 /// An RW2 shot in 16:9, 3:2 or 1:1 records a crop of the sensor while its
 /// JPEGs and the sensor data decoded show the whole sensor (ImageIO cuts
 /// some and not others); every rendition is cut to the crop.

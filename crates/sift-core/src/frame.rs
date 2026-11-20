@@ -152,7 +152,8 @@ fn camera_name(exif: &Exif) -> String {
     let model = exif.model.clone().unwrap_or_default();
     let make = exif.make.clone().unwrap_or_default();
     let brand = make.split_whitespace().next().unwrap_or("");
-    if brand.is_empty() || model.to_ascii_uppercase().contains(&brand.to_ascii_uppercase()) {
+    // Ricoh Imaging names its Pentax bodies "PENTAX K-1" and so on.
+    if brand.is_empty() || model.to_ascii_uppercase().contains(&brand.to_ascii_uppercase()) || model.starts_with("PENTAX ") {
         model
     } else {
         format!("{brand} {model}")

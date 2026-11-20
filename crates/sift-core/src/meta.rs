@@ -2,7 +2,7 @@ use crate::af::{self, AfInfo};
 use crate::container::{self, Format};
 use crate::exif::{self, Exif};
 use crate::io::Src;
-use crate::{formats, rating, stack, Result};
+use crate::{formats, pentax, rating, stack, Result};
 use serde::Serialize;
 use std::path::Path;
 
@@ -29,7 +29,8 @@ pub struct Meta {
     pub low_res: bool,
 }
 
-/// The in-camera look (Nikon Picture Control) a photo was rendered with.
+/// The in-camera look (Nikon Picture Control, Pentax Custom Image, Ricoh
+/// Image Control) a photo was rendered with.
 #[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct Look {
     pub name: String,
@@ -70,6 +71,12 @@ fn nikon_look(p: &container::Parsed) -> Option<Look> {
     let custom = !base.is_empty() && !name.eq_ignore_ascii_case(&base);
     // Built-in names are stored in capitals; recipes keep the name they were given.
     Some(Look { name: if custom { name } else { title_case(&name) }, base: title_case(&base), custom })
+}
+
+/// Pentax Custom Image / Ricoh Image Control, or a Ricoh compact's image effect.
+fn pentax_look(p: &container::Parsed) -> Option<Look> {
+    let name = pentax::look(p)?.to_string();
+    Some(Look { base: name.clone(), name, custom: false })
 }
 
 /// Whether the MakerNote has the three values `nikon::record_look` rewrites.
@@ -144,7 +151,7 @@ pub fn read(path: &Path) -> Result<Meta> {
         raw,
         orientation,
         rating: rating::read(&src, &p, path),
-        look: nikon_look(&p),
+        look: nikon_look(&p).or_else(|| pentax_look(&p)),
         look_recordable: nikon_recordable(&p),
         exif,
         af,

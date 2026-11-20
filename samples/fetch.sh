@@ -10,9 +10,11 @@ dirs=(
 "Fujifilm/X-T3" "Fujifilm/X-T4" "Fujifilm/X-T5" "Fujifilm/X-H2S" "Fujifilm/X-S10" "Fujifilm/X100V" "FUJIFILM/X-T50" "FUJIFILM/X-M5"
 "Panasonic/DC-G9M2" "Panasonic/DC-GH6" "Panasonic/DC-S5" "Panasonic/DC-S5M2" "Panasonic/DC-S1" "Panasonic/DMC-G85" "Panasonic/DC-GH5"
 "Leica/C-Lux" "Leica/D-Lux%207" "Leica/D-LUX%20(Typ%20109)"
+"Pentax/K-1%20Mark%20II" "Pentax/K-1" "Pentax/K-3%20Mark%20III" "Pentax/K-3%20II" "Pentax/KP" "Pentax/K-70" "Pentax/KF" "Pentax/K-S2" "Pentax/K-5%20II" "Pentax/645Z"
+"Ricoh/GR%20III" "Ricoh/GR%20IIIx" "Ricoh/GR%20II"
 )
 # how many files to take per directory (default 1)
-declare -A take=( ["Nikon/Z%208"]=3 ["Nikon/Z%209"]=2 ["Nikon/Z%20f"]=2 ["Nikon/Z%206"]=2 ["Nikon/Z%2050"]=2 ["Nikon/Z%20fc"]=2 ["FUJIFILM/X-M5"]=4 ["Panasonic/DC-G9M2"]=2 ["Panasonic/DC-GH6"]=4 ["Panasonic/DC-S5M2"]=2 )
+declare -A take=( ["Nikon/Z%208"]=3 ["Nikon/Z%209"]=2 ["Nikon/Z%20f"]=2 ["Nikon/Z%206"]=2 ["Nikon/Z%2050"]=2 ["Nikon/Z%20fc"]=2 ["FUJIFILM/X-M5"]=4 ["Panasonic/DC-G9M2"]=2 ["Panasonic/DC-GH6"]=4 ["Panasonic/DC-S5M2"]=2 ["Pentax/K-1%20Mark%20II"]=2 ["Pentax/K-1"]=2 ["Pentax/K-3%20Mark%20III"]=5 ["Pentax/K-3%20II"]=3 ["Pentax/KP"]=2 ["Pentax/K-70"]=2 ["Pentax/K-S2"]=2 ["Pentax/K-5%20II"]=2 ["Pentax/645Z"]=2 )
 for d in "${dirs[@]}"; do
   n=${take[$d]:-1}
   out=$(python3 -c "import urllib.parse,sys; print(urllib.parse.unquote(sys.argv[1]).replace('/','__').replace(' ','_'))" "$d")

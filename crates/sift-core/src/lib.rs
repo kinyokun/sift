@@ -24,6 +24,7 @@ pub mod look;
 pub mod nikon;
 pub mod nksc;
 pub mod meta;
+pub mod pentax;
 pub mod preview;
 pub mod rating;
 pub mod remove;

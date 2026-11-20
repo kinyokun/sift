@@ -3,12 +3,14 @@
 //! Tag layouts follow the ExifTool tag tables (Canon AFInfo2/AFInfo3, Sony
 //! FocusLocation/FocusFrameSize, Nikon AFInfo2 v0100-v0402, FujiFilm
 //! FocusPixel/FocusSettings, Panasonic AFPointPosition/AFAreaSize, also in
-//! Leica's cameras made by Panasonic).
+//! Leica's cameras made by Panasonic, Pentax AFPointSelected/AFPointInfo/
+//! AFInfoK3III, Ricoh AFAreaXPosition).
 
 mod canon;
 mod fuji;
 mod nikon;
 mod panasonic;
+mod pentax;
 mod sony;
 
 use crate::container::Parsed;
@@ -28,7 +30,7 @@ pub struct AfBox {
 #[derive(Serialize, Clone, Debug, Default)]
 pub struct AfInfo {
     pub boxes: Vec<AfBox>,
-    /// Vendor that produced the data: `canon`, `nikon`, `sony`, `fujifilm` or `panasonic`.
+    /// Vendor that produced the data: `canon`, `nikon`, `sony`, `fujifilm`, `panasonic`, `pentax` or `ricoh`.
     pub source: &'static str,
     /// AF area mode as named by the camera maker, when known.
     pub mode: Option<String>,
@@ -77,6 +79,8 @@ pub fn read(p: &Parsed, make: &str, model: &str, orientation: u8) -> Option<AfIn
         fuji::parse(mn, p)
     } else if make.starts_with("PANASONIC") || make.starts_with("LEICA") {
         panasonic::parse(mn, p, &make)
+    } else if make.starts_with("PENTAX") || make.starts_with("RICOH") || make.starts_with("ASAHI") {
+        pentax::parse(mn, model, p)
     } else {
         None
     }?;
@@ -257,5 +261,121 @@ mod tests {
         // Without a recorded size, the default frame is square in the 5776 x 3248 picture.
         let b = af_of(rw2(&entries[..1]), "Panasonic").unwrap().boxes[0];
         assert!(close(b.w, 0.04) && close(b.h, 0.04 * 5776.0 / 3248.0), "{b:?}");
+    }
+    fn af_model(bytes: Vec<u8>, make: &str, model: &str) -> Option<AfInfo> {
+        let src = Src::mem(bytes);
+        let p = container::parse(&src);
+        read(&p, make, model, 1)
+    }
+
+    fn bytes(tag: u16, v: &[u8]) -> Entry {
+        (tag, 7, v.len() as u32, v.to_vec())
+    }
+
+    /// A Pentax MakerNote behind `header`, its offsets counted from the note.
+    fn pentax(header: &[u8], entries: &[Entry]) -> Vec<u8> {
+        let mut note = header.to_vec();
+        note.extend(ifd(entries, header.len() as u32));
+        note
+    }
+
+    fn centre(b: &AfBox) -> (f32, f32) {
+        (b.x + b.w / 2.0, b.y + b.h / 2.0)
+    }
+
+    #[test]
+    fn pentax_pef_point_in_focus_is_placed_on_the_point_layout() {
+        // K-3 II, AF-S, single point Near-right (15), in focus.
+        let entries = [shorts(0x000D, &[0x10]), shorts(0x000E, &[15, 0]), long(0x000F, 1 << 14)];
+        let file = file("PENTAX", &[], |at| {
+            let mut note = b"AOC\0II".to_vec();
+            note.extend(ifd(&entries, at + 6));
+            note
+        });
+        let af = af_model(file, "PENTAX", "PENTAX K-3 II").unwrap();
+        assert_eq!(af.boxes.len(), 1);
+        let (x, y) = centre(&af.boxes[0]);
+        assert!(close(x, 3453.0 / 6016.0) && close(y, 0.5), "{:?}", af.boxes[0]);
+        assert!(af.boxes[0].focused);
+        assert_eq!((af.source, af.mode.as_deref()), ("pentax", Some("Single Point")));
+    }
+
+    #[test]
+    fn pentax_dng_keeps_its_maker_note_as_private_data() {
+        // KP, auto area: every point selected, the centre (14) in focus.
+        let mut info = vec![1, 0, 27, 0];
+        info.extend((0..27).collect::<Vec<usize>>().chunks(4).map(|c| c.iter().fold(0u8, |b, &k| b | (if k == 13 { 3 } else { 1 }) << (6 - 2 * (k % 4)))));
+        let entries = [shorts(0x000D, &[0x10]), shorts(0x000E, &[0xFFFF, 0]), bytes(0x0245, &info), shorts(0x004F, &[1]), bytes(0x0034, &[1, 0, 0, 0])];
+        let ifd0 = [text(0x010F, "RICOH IMAGING COMPANY, LTD."), bytes(0xC634, &pentax(b"PENTAX \0II", &entries))];
+        let mut tiff = b"II\x2A\0\x08\0\0\0".to_vec();
+        tiff.extend(ifd(&ifd0, 8));
+        let src = Src::mem(tiff);
+        let p = container::parse(&src);
+        let af = read(&p, "RICOH IMAGING COMPANY, LTD.", "PENTAX KP", 1).unwrap();
+        assert_eq!(af.boxes.len(), 1, "{af:?}");
+        let (x, y) = centre(&af.boxes[0]);
+        assert!(close(x, 0.5) && close(y, 0.5) && af.boxes[0].focused, "{af:?}");
+        assert_eq!(af.mode.as_deref(), Some("Auto"));
+        assert_eq!(crate::pentax::look(&p), Some("Bright"));
+        assert_eq!(crate::pentax::continuous(&p), Some(true));
+    }
+
+    #[test]
+    fn pentax_zones_and_eleven_point_pairs() {
+        let note = |entries: &[Entry]| file("RICOH IMAGING COMPANY, LTD.", &[], |_| pentax(b"PENTAX \0II", entries));
+        // K-1 zone around the centre, nothing said about focus: the nine points, none marked.
+        let af = af_model(note(&[shorts(0x000E, &[273, 0])]), "RICOH IMAGING COMPANY, LTD.", "PENTAX K-1").unwrap();
+        assert_eq!(af.boxes.len(), 9);
+        assert!(af.boxes.iter().all(|b| !b.focused));
+        let xs: Vec<f32> = af.boxes.iter().map(|b| centre(b).0 * 7360.0).collect();
+        assert!(xs.iter().all(|x| (3238.0 - 1.0..=4121.0 + 1.0).contains(x)), "{xs:?}");
+        assert_eq!(af.mode.as_deref(), Some("Zone Select"));
+        // K-50: AFInfo reports mid-left and centre in focus.
+        let mut af_info = vec![0; 12];
+        af_info[0x0B] = 4;
+        let af = af_model(note(&[shorts(0x000E, &[6, 0]), bytes(0x021F, &af_info)]), "PENTAX", "PENTAX K-50").unwrap();
+        let xs: Vec<f32> = af.boxes.iter().map(|b| centre(b).0).collect();
+        assert!(xs.len() == 2 && close(xs[0], 2118.0 / 6000.0) && close(xs[1], 0.5), "{xs:?}");
+        // Auto area with nothing in focus, and manual focus, place nothing.
+        assert!(af_model(note(&[shorts(0x000E, &[0xFFFF, 0])]), "PENTAX", "PENTAX K-50").is_none());
+        assert!(af_model(note(&[shorts(0x000D, &[3]), shorts(0x000E, &[6, 0])]), "PENTAX", "PENTAX K-50").is_none());
+        // Live view: the contrast-detect area in a 720 x 480 frame.
+        let af = af_model(note(&[shorts(0x000D, &[0x20]), shorts(0x0231, &[336, 216, 48, 48])]), "PENTAX", "PENTAX K-70").unwrap();
+        assert!(close(af.boxes[0].x, 336.0 / 720.0) && close(af.boxes[0].h, 0.1), "{af:?}");
+        // A body whose points are not mapped still places its centre point.
+        let af = af_model(note(&[shorts(0x000E, &[0xFFFE, 0])]), "PENTAX", "PENTAX 645Z").unwrap();
+        assert_eq!(centre(&af.boxes[0]), (0.5, 0.5));
+    }
+
+    #[test]
+    fn ricoh_gr_iii_areas_are_read_from_af_info() {
+        // One area in focus, and one outside the selection that was not.
+        let words: Vec<u8> = [2, 0x2002, 25, 2, 2, 0, 0, 720, 480, 360, 240, 64, 52, 15, 720, 480, 100, 100, 0, 0, 3].iter().flat_map(|w: &u16| w.to_le_bytes()).collect();
+        let file = file("RICOH IMAGING COMPANY, LTD.", &[], |_| pentax(b"RICOH\0II", &[bytes(0x040C, &words), shorts(0x004F, &[258])]));
+        let src = Src::mem(file);
+        let p = container::parse(&src);
+        let af = read(&p, "RICOH IMAGING COMPANY, LTD.", "RICOH GR III", 1).unwrap();
+        assert_eq!(af.boxes.len(), 1);
+        let b = af.boxes[0];
+        assert!(close(centre(&b).0, 0.5) && close(b.w, 64.0 / 720.0) && close(b.h, 52.0 / 480.0) && b.focused, "{b:?}");
+        assert_eq!((af.source, af.mode.as_deref()), ("ricoh", Some("Contrast-detect Select")));
+        assert_eq!(crate::pentax::look(&p), Some("Monotone"));
+    }
+
+    #[test]
+    fn ricoh_compact_af_area_is_read_in_the_cropped_picture() {
+        let entries = [shorts(0x1006, &[3]), shorts(0x1010, &[1]), shorts(0x1200, &[1]), long(0x1203, 1944), long(0x1204, 1287), long(0x1603, 3936), long(0x1604, 2608)];
+        let file = file("RICOH IMAGING COMPANY, LTD.", &[], |at| {
+            let mut note = b"Ricoh\0\0\0".to_vec();
+            note.extend(ifd(&entries, at + 8));
+            note
+        });
+        let src = Src::mem(file);
+        let p = container::parse(&src);
+        let af = read(&p, "RICOH IMAGING COMPANY, LTD.", "GR II", 1).unwrap();
+        let (x, y) = centre(&af.boxes[0]);
+        assert!(close(x, 1944.0 / 3936.0) && close(y, 1287.0 / 2608.0) && af.boxes[0].focused, "{af:?}");
+        assert_eq!((af.source, af.mode.as_deref()), ("ricoh", Some("Spot AF")));
+        assert_eq!(crate::pentax::look(&p), Some("Vivid"));
     }
 }
