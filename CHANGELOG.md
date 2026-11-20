@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-11-21
+
 ### 新增
 
 - HDR 照片：iPhone、安卓手机拍的带增益图的 HDR 照片（JPG、HEIC），以及相机机内直出的 HDR HEIF（PQ、HLG），列表里带“HDR”角标；在支持 HDR 的屏幕上看大图时按 HDR 亮度显示，高光比普通照片更亮，和系统“照片”里看到的一样。信息栏注明是哪种 HDR
@@ -14,6 +16,7 @@
 ### 说明
 
 - Windows 上需要 WebView2 116 或更新的版本才能以 HDR 显示；Windows 和 Android 暂时读不了 HEIC 里的增益图，这类照片按普通照片显示
+
 ## [0.6.3] - 2026-11-20
 
 ### 新增
@@ -265,7 +268,8 @@
 - 导出（复制 / 重命名 / 找回 RAW / 参数相框）、局域网传输、自定义快捷键
 - 中文 / 英文界面
 
-[Unreleased]: https://github.com/kinyokun/sift/compare/v0.6.3...HEAD
+[Unreleased]: https://github.com/kinyokun/sift/compare/v0.6.4...HEAD
+[0.6.4]: https://github.com/kinyokun/sift/compare/v0.6.3...v0.6.4
 [0.6.3]: https://github.com/kinyokun/sift/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/kinyokun/sift/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/kinyokun/sift/compare/v0.6.0...v0.6.1
