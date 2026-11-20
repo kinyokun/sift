@@ -11,7 +11,7 @@ const ZONE_GRID: (f32, f32) = (13.0, 9.0);
 
 /// The FujiFilm MakerNote: `FUJIFILM`, the IFD's offset, then an IFD that is
 /// always little-endian, with offsets counted from the start of the note.
-fn maker_ifd<'a>(mn: &MakerNote<'a>) -> Option<(Tiff<'a>, Ifd)> {
+pub(crate) fn maker_ifd<'a>(mn: &MakerNote<'a>) -> Option<(Tiff<'a>, Ifd)> {
     let src = mn.parent.src;
     let h = src.read(mn.pos, 12)?;
     if !h.starts_with(b"FUJIFILM") {

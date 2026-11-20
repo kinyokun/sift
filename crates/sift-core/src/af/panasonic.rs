@@ -36,7 +36,7 @@ fn mode_name(v: &[u32]) -> Option<&'static str> {
 /// so both are tried. Leica's cameras made by Panasonic write the same IFD
 /// behind headers of their own; Leica's other cameras also start with
 /// `LEICA\0\0\0` but hold other tags, and say `Leica Camera AG` as their make.
-fn maker_ifd<'a>(mn: &MakerNote<'a>, make: &str) -> Option<(Tiff<'a>, Ifd)> {
+pub(crate) fn maker_ifd<'a>(mn: &MakerNote<'a>, make: &str) -> Option<(Tiff<'a>, Ifd)> {
     let t = mn.parent;
     let head = t.src.read(mn.pos, 18)?;
     let skip = if head.starts_with(b"Panasonic\0") {

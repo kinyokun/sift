@@ -5,18 +5,23 @@
 //!
 //! Recent Nikon bodies number every series themselves (MakerNote 0x0056: a
 //! series id and the frame's position in it; 0x005E is filled in for
-//! pixel-shift frames), so their stacks are exact. Other cameras are grouped
-//! by capture time: frames of one camera that follow each other closely,
-//! helped by the drive mode where the file records it (Nikon, Canon).
+//! pixel-shift frames), so their stacks are exact; so are iPhone bursts (one
+//! BurstUUID for every frame) and Sony pixel-shift series. Other cameras are
+//! grouped by capture time: frames of one camera that follow each other
+//! closely, helped by the drive mode (Canon, Sony, Fujifilm, Panasonic and
+//! Leica, Olympus and OM System, Pentax and Ricoh) and the frame's number in
+//! its burst, where the file records them.
 
-use crate::container::{self, Parsed};
-use crate::io::{u16_at, Src};
+use crate::container::{self, MakerNote, Parsed};
+use crate::io::{u16_at, u32_at, Src};
+use crate::tiff::{Ifd, Tiff};
 use crate::{formats, Result};
 use serde::Serialize;
 use std::path::Path;
 
-/// Frames of one camera-numbered series are at most this far apart. The id is
-/// 16 bits wide and comes round again, so it only counts between neighbours.
+/// Frames of one camera-numbered series are at most this far apart. Nikon's
+/// ids are 16 bits wide and come round again, and burst frame numbers start
+/// again at 1, so they only count between neighbours.
 const SERIES_GAP_MS: i64 = 60_000;
 /// Largest pause between frames of a burst when the file says the drive mode
 /// was continuous (slow continuous modes go down to about one frame a second).
@@ -117,12 +122,129 @@ fn canon(p: &Parsed, hint: &mut Hint) -> Option<()> {
     let v = container::u16s(&t.data(e.get(0x0001)?)?, t.le);
     hint.continuous = match *v.get(5)? {
         0 | 6 | 9 => Some(false),
-        1 | 3 | 4 | 5 | 10 => Some(true),
+        1 | 3 | 4 | 5 | 8 | 10 => Some(true),
         _ => None,
     };
     Some(())
 }
 
+/// Sony ReleaseMode (MakerNote 0xB049), SequenceNumber (0xB04A, the frame's
+/// number in its burst) and PixelShiftInfo (0x202F: a group id, then the
+/// frame's number and the number of frames).
+fn sony(p: &Parsed, hint: &mut Hint) -> Option<()> {
+    let (t, ifd) = container::sony_maker_ifd(p)?;
+    let one = |tag: u16| ifd.get(tag).and_then(|e| t.uint(e));
+    hint.continuous = match one(0xB049) {
+        Some(0) => Some(false),
+        // Continuous, and exposure, white balance and DRO bracketing.
+        Some(2 | 5 | 6 | 8) => Some(true),
+        _ => None,
+    };
+    hint.seq = one(0xB04A).filter(|n| *n > 0 && *n != 0xFFFF);
+    if let Some(d) = ifd.get(0x202F).and_then(|e| t.data(e)).filter(|d| d.len() >= 6) {
+        let group = u32_at(&d, 0, t.le).unwrap_or(0);
+        if group != 0 && d[4] != 0 && d[5] != 0 {
+            hint.pixel_shift = true;
+            hint.series = Some(group);
+            hint.seq = Some(d[4] as u32);
+        }
+    }
+    Some(())
+}
+
+/// FujiFilm AutoBracketing (MakerNote 0x1100; 6 is a pixel-shift series),
+/// SequenceNumber (0x1101) and DriveSettings (0x1103, the drive mode in its
+/// low byte).
+fn fuji(mn: &MakerNote, hint: &mut Hint) -> Option<()> {
+    let (t, ifd) = crate::af::fuji::maker_ifd(mn)?;
+    let one = |tag: u16| ifd.get(tag).and_then(|e| t.uint(e));
+    let bracket = one(0x1100);
+    hint.seq = one(0x1101).filter(|n| *n > 0);
+    hint.pixel_shift = bracket == Some(6);
+    hint.continuous = match (one(0x1103).map(|v| v & 0xFF), bracket) {
+        // Pixel-shift frames are shot in single-frame mode, one by one.
+        (_, Some(1 | 2 | 6)) => Some(true),
+        (Some(0), _) => Some(false),
+        (Some(1 | 2), _) => Some(true),
+        _ => None,
+    };
+    Some(())
+}
+
+/// Panasonic BurstMode (MakerNote 0x002A) and SequenceNumber (0x002B), also
+/// in Leica's cameras made by Panasonic.
+fn panasonic(mn: &MakerNote, make: &str, hint: &mut Hint) -> Option<()> {
+    let (t, ifd) = crate::af::panasonic::maker_ifd(mn, make)?;
+    let one = |tag: u16| ifd.get(tag).and_then(|e| t.uint(e));
+    hint.continuous = match one(0x002A) {
+        Some(0) => Some(false),
+        // On, exposure, focus, white balance and aperture bracketing, unlimited, on with flash.
+        Some(1..=4 | 8 | 17 | 18) => Some(true),
+        _ => None,
+    };
+    hint.seq = one(0x002B).filter(|n| *n > 0);
+    Some(())
+}
+
+/// The Olympus MakerNote of cameras since about 2005: `OLYMPUS\0` and a byte
+/// order mark, or `OM SYSTEM\0\0\0` and one, then an IFD whose offsets count
+/// from the start of the note.
+fn olympus_ifd<'a>(mn: &MakerNote<'a>) -> Option<(Tiff<'a>, Ifd)> {
+    let src = mn.parent.src;
+    let h = src.read(mn.pos, 16)?;
+    let (mark, skip) = if h.starts_with(b"OLYMPUS\0") {
+        (8, 12)
+    } else if h.starts_with(b"OM SYSTEM\0") {
+        (12, 16)
+    } else {
+        return None;
+    };
+    let le = match &h[mark..mark + 2] {
+        b"II" => true,
+        b"MM" => false,
+        _ => return None,
+    };
+    let t = Tiff { src, base: mn.pos, le };
+    Some((t, t.ifd(skip)?))
+}
+
+/// Olympus and OM System DriveMode (0x0600 of the CameraSettings IFD,
+/// MakerNote 0x2020): the mode, 0 for a single shot, then the frame's number.
+fn olympus(mn: &MakerNote, hint: &mut Hint) -> Option<()> {
+    let (t, ifd) = olympus_ifd(mn)?;
+    let settings = t.ifd(t.uint(ifd.get(0x2020)?)?)?;
+    let v = t.uints(settings.get(0x0600)?);
+    hint.continuous = match *v.first()? {
+        0 => Some(false),
+        // Continuous, and exposure, white balance and other bracketing.
+        1..=5 => Some(true),
+        _ => None,
+    };
+    hint.seq = v.get(1).copied().filter(|n| *n > 0);
+    Some(())
+}
+
+/// Apple BurstUUID (MakerNote 0x000B): the same for every frame of a burst.
+/// The note is `Apple iOS\0`, a version, a byte order mark, then an IFD whose
+/// offsets count from the start of the note.
+fn apple(mn: &MakerNote, hint: &mut Hint) -> Option<()> {
+    let src = mn.parent.src;
+    let h = src.read(mn.pos, 14)?;
+    if !h.starts_with(b"Apple iOS\0") {
+        return None;
+    }
+    let le = match &h[12..14] {
+        b"II" => true,
+        b"MM" => false,
+        _ => return None,
+    };
+    let t = Tiff { src, base: mn.pos, le };
+    let id = t.ascii(t.ifd(14)?.get(0x000B)?)?;
+    // FNV-1a: a series id has to be a number.
+    hint.series = Some(id.bytes().fold(0x811C_9DC5u32, |h, b| (h ^ b as u32).wrapping_mul(0x0100_0193)));
+    hint.continuous = Some(true);
+    Some(())
+}
 pub fn hint(p: &Parsed, path: &Path) -> Hint {
     let text = |tag: u16| [&p.exif, &p.ifd0].into_iter().flatten().find_map(|(t, i)| i.get(tag).and_then(|e| t.ascii(e)));
     let (make, model) = (text(0x010F), text(0x0110));
@@ -131,6 +253,7 @@ pub fn hint(p: &Parsed, path: &Path) -> Hint {
         merged: formats::ext_of(path) == "nefx",
         ..Hint::default()
     };
+    let mn = p.maker.as_ref();
     match make.as_deref().map(str::to_ascii_uppercase) {
         Some(m) if m.starts_with("NIKON") => {
             nikon(p, &mut hint);
@@ -138,12 +261,26 @@ pub fn hint(p: &Parsed, path: &Path) -> Hint {
         Some(m) if m.starts_with("CANON") => {
             canon(p, &mut hint);
         }
+        Some(m) if m.starts_with("SONY") => {
+            sony(p, &mut hint);
+        }
+        Some(m) if m.starts_with("FUJIFILM") => {
+            mn.and_then(|mn| fuji(mn, &mut hint));
+        }
+        Some(m) if m.starts_with("PANASONIC") || m.starts_with("LEICA") => {
+            mn.and_then(|mn| panasonic(mn, &m, &mut hint));
+        }
+        Some(m) if m.starts_with("OLYMPUS") || m.starts_with("OM DIGITAL") => {
+            mn.and_then(|mn| olympus(mn, &mut hint));
+        }
         Some(m) if m.starts_with("PENTAX") || m.starts_with("RICOH") => {
             hint.continuous = crate::pentax::continuous(p);
         }
+        Some(m) if m.starts_with("APPLE") => {
+            mn.and_then(|mn| apple(mn, &mut hint));
+        }
         _ => {}
-    }
-    hint.camera = match (make, model) {
+    }    hint.camera = match (make, model) {
         (None, None) => None,
         (make, model) => Some(format!("{} {}", make.unwrap_or_default(), model.unwrap_or_default())),
     };
@@ -166,6 +303,9 @@ fn follows(a: &Hint, b: &Hint, gap: i64) -> bool {
         (Some(_), None) | (None, Some(_)) => false,
         (None, None) => match (a.continuous, b.continuous) {
             (Some(false), _) | (_, Some(false)) => false,
+            // Frame numbers start again at 1 with every burst; frames culled
+            // from the middle of one leave gaps in them.
+            _ if a.seq.is_some() && b.seq.is_some() => b.seq > a.seq && gap <= SERIES_GAP_MS,
             (Some(true), Some(true)) => gap <= CONTINUOUS_GAP_MS,
             _ => gap <= UNKNOWN_GAP_MS,
         },
@@ -205,6 +345,7 @@ pub fn group(hints: &[Hint]) -> Vec<Stack> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::af::tests::{bytes, file, ifd, long, shorts, text, Entry};
 
     fn shot(ms: i64) -> Hint {
         Hint { camera: Some("NIKON Z f".into()), time_ms: Some(ms), ..Hint::default() }
@@ -271,5 +412,87 @@ mod tests {
         let other = |ms| Hint { camera: Some("Canon EOS R5".into()), ..shot(ms) };
         let stacks = group(&[shot(0), other(50), shot(100), other(150), Hint::default()]);
         assert_eq!(stacks, vec![Stack { kind: Kind::Burst, members: vec![0, 2] }, Stack { kind: Kind::Burst, members: vec![1, 3] }]);
+    }
+    fn hint_of(file: Vec<u8>) -> Hint {
+        let src = Src::mem(file);
+        hint(&container::parse_metadata(&src), Path::new("frame"))
+    }
+
+    /// A file by `make` whose MakerNote is `header` and an IFD with offsets counted from the note.
+    fn noted(make: &str, header: &[u8], entries: &[Entry]) -> Vec<u8> {
+        file(make, &[], |_| [header, &ifd(entries, header.len() as u32)].concat())
+    }
+
+    #[test]
+    fn sony_release_mode_frame_number_and_pixel_shift() {
+        // ARW: the IFD starts the note, its offsets counted from the file.
+        let sony = |entries: &[Entry]| hint_of(file("SONY", &[], |at| ifd(entries, at)));
+        let h = sony(&[shorts(0xB049, &[2]), shorts(0xB04A, &[3])]);
+        assert_eq!((h.continuous, h.seq, h.pixel_shift), (Some(true), Some(3), false));
+        let h = sony(&[shorts(0xB049, &[0]), shorts(0xB04A, &[0])]);
+        assert_eq!((h.continuous, h.seq), (Some(false), None));
+        assert_eq!(sony(&[shorts(0xB049, &[65535])]).continuous, None);
+        let h = sony(&[shorts(0xB049, &[0]), bytes(0x202F, &[0x34, 0x12, 0, 0, 2, 4])]);
+        assert_eq!((h.series, h.seq, h.pixel_shift), (Some(0x1234), Some(2), true));
+        assert!(!sony(&[bytes(0x202F, &[0; 6])]).pixel_shift);
+    }
+
+    #[test]
+    fn fujifilm_drive_settings_and_pixel_shift() {
+        let fuji = |entries: &[Entry]| hint_of(noted("FUJIFILM", b"FUJIFILM\x0C\0\0\0", entries));
+        // Continuous high at 8 frames a second, third frame.
+        let h = fuji(&[shorts(0x1100, &[0]), shorts(0x1101, &[3]), long(0x1103, 0x0800_0002)]);
+        assert_eq!((h.continuous, h.seq), (Some(true), Some(3)));
+        assert_eq!(fuji(&[long(0x1103, 0)]).continuous, Some(false));
+        assert_eq!(fuji(&[long(0x1103, 0), shorts(0x1100, &[1])]).continuous, Some(true));
+        let h = fuji(&[shorts(0x1100, &[6]), shorts(0x1101, &[5]), long(0x1103, 0)]);
+        assert_eq!((h.continuous, h.seq, h.pixel_shift), (Some(true), Some(5), true));
+    }
+
+    #[test]
+    fn panasonic_and_leica_burst_mode() {
+        let note = |make: &str, header: &[u8], entries: &[Entry]| hint_of(file(make, &[], |at| [header, &ifd(entries, at + header.len() as u32)].concat()));
+        let h = note("Panasonic", b"Panasonic\0\0\0", &[shorts(0x002A, &[1]), long(0x002B, 2)]);
+        assert_eq!((h.continuous, h.seq), (Some(true), Some(2)));
+        let h = note("LEICA CAMERA AG", b"LEICA CAMERA AG\0\0\0", &[shorts(0x002A, &[0]), long(0x002B, 0)]);
+        assert_eq!((h.continuous, h.seq), (Some(false), None));
+        assert_eq!(note("Panasonic", b"Panasonic\0\0\0", &[shorts(0x002A, &[99])]).continuous, None);
+    }
+
+    #[test]
+    fn olympus_and_om_system_drive_mode() {
+        let note = |make: &str, header: &[u8], drive: &[u16]| {
+            let main_at = header.len() as u32;
+            let settings_at = main_at + 2 + 12 + 4;
+            let main = ifd(&[(0x2020, 13, 1, settings_at.to_le_bytes().to_vec())], main_at);
+            hint_of(file(make, &[], |_| [header, &main, &ifd(&[shorts(0x0600, drive)], settings_at)].concat()))
+        };
+        let h = note("OLYMPUS CORPORATION", b"OLYMPUS\0II\x03\0", &[1, 4, 0, 0, 0]);
+        assert_eq!((h.continuous, h.seq), (Some(true), Some(4)));
+        let h = note("OM Digital Solutions", b"OM SYSTEM\0\0\0II\x04\0", &[0, 0, 0, 0, 2, 5]);
+        assert_eq!((h.continuous, h.seq), (Some(false), None));
+        // Exposure bracketing.
+        assert_eq!(note("OM Digital Solutions", b"OM SYSTEM\0\0\0II\x04\0", &[2, 1]).continuous, Some(true));
+    }
+
+    #[test]
+    fn iphone_bursts_share_one_id() {
+        let iphone = |id: &str| hint_of(noted("Apple", b"Apple iOS\0\0\x01II", &[text(0x000B, id)]));
+        let (a, b, c) = (iphone("D87A1F0C-5E1B-4D6A-9E0B-1A2B3C4D5E6F"), iphone("D87A1F0C-5E1B-4D6A-9E0B-1A2B3C4D5E6F"), iphone("0F9E8D7C-6B5A-4938-8271-605F4E3D2C1B"));
+        assert!(a.series.is_some() && a.series == b.series && a.series != c.series);
+        assert_eq!(a.continuous, Some(true));
+        assert_eq!(hint_of(noted("Apple", b"Apple iOS\0\0\x01II", &[shorts(0x0001, &[12])])).series, None);
+    }
+
+    #[test]
+    fn frame_numbers_split_bursts_shot_back_to_back() {
+        let frame = |ms, seq| Hint { seq: Some(seq), continuous: Some(true), ..shot(ms) };
+        // Two bursts a frame apart, then one culled down to its first and last frames.
+        let hints = [frame(0, 1), frame(100, 2), frame(200, 3), frame(300, 1), frame(400, 2), frame(5000, 1), frame(9000, 6)];
+        let members: Vec<Vec<usize>> = group(&hints).into_iter().map(|s| s.members).collect();
+        assert_eq!(members, vec![vec![0, 1, 2], vec![3, 4], vec![5, 6]]);
+        // Pixel-shift frames shot seconds apart in single-frame mode.
+        let shift = |ms, seq| Hint { pixel_shift: true, ..frame(ms, seq) };
+        assert_eq!(group(&[shift(0, 1), shift(4000, 2), shift(8000, 3), frame(8300, 1)]), vec![Stack { kind: Kind::PixelShift, members: vec![0, 1, 2] }]);
     }
 }

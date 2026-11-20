@@ -1,7 +1,7 @@
 //! Checks against real camera files. Run `samples/fetch.sh` first; without
 //! the samples every test here passes trivially.
 
-use sift_core::{formats, meta, preview, rating, render};
+use sift_core::{formats, meta, preview, rating, render, stack};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -222,6 +222,56 @@ fn panasonic_af_area_stays_put_across_aspect_ratios() {
     assert!(close(a.0, b.0) && close(a.1, b.1) && close(a.2, b.2) && close(a.3, b.3), "{a:?} vs {b:?}");
 }
 
+#[test]
+fn drive_mode_and_burst_frame_number_match_exiftool() {
+    let tags = [
+        "Nikon:ShootingMode",
+        "Canon:ContinuousDrive",
+        "Sony:ReleaseMode",
+        "Sony:SequenceNumber",
+        "FujiFilm:DriveMode",
+        "FujiFilm:AutoBracketing",
+        "FujiFilm:SequenceNumber",
+        "Panasonic:BurstMode",
+        "Panasonic:SequenceNumber",
+        "Olympus:DriveMode",
+        "Pentax:DriveMode",
+        "Apple:BurstUUID",
+        "Ricoh:DriveMode",
+    ];
+    for f in samples() {
+        // One tab-separated row of printed values, `-` for tags the file lacks.
+        let Ok(out) = Command::new("exiftool").arg("-T").args(tags.iter().map(|t| format!("-{t}"))).arg(&f).output() else { return };
+        let row = String::from_utf8_lossy(&out.stdout).trim_end().to_string();
+        let v: Vec<Option<&str>> = row.split('\t').map(|s| (s != "-").then_some(s)).collect();
+        assert_eq!(v.len(), tags.len(), "{}", name(&f));
+        let number = |s: Option<&str>| s.and_then(|s| s.parse::<u32>().ok()).filter(|n| *n > 0);
+        let (continuous, seq) = if let Some(s) = v[0] {
+            (Some(s.contains("Continuous")), None)
+        } else if let Some(s) = v[1] {
+            (Some(s.starts_with("Continuous")), None)
+        } else if let Some(s) = v[2] {
+            (Some(s != "Normal"), number(v[3]))
+        } else if let Some(s) = v[4] {
+            (Some(s != "Single" || v[5].is_some_and(|b| b != "Off")), number(v[6]))
+        } else if let Some(s) = v[7] {
+            (Some(s != "Off"), number(v[8]))
+        } else if let Some(s) = v[9] {
+            (Some(!s.starts_with("Single Shot")), s.split("Shot ").nth(1).and_then(|n| n.split(|c: char| !c.is_ascii_digit()).next()).and_then(|n| number(Some(n))))
+        } else if let Some(s) = v[10].or(v[12]) {
+            (Some(!s.starts_with("Single-frame")), None)
+        } else {
+            (None, None)
+        };
+        let h = stack::read(&f).unwrap();
+        assert_eq!(h.continuous, continuous, "{}: drive mode {row}", name(&f));
+        // Nikon numbers its series in a record of its own, checked elsewhere.
+        if v[0].is_none() {
+            assert_eq!(h.seq, seq, "{}: frame number {row}", name(&f));
+            assert_eq!(h.series.is_some(), v[11].is_some(), "{}: series {row}", name(&f));
+        }
+    }
+}
 #[test]
 fn rating_round_trips_without_moving_image_data() {
     let dir = std::env::temp_dir().join(format!("sift-rating-{}", std::process::id()));

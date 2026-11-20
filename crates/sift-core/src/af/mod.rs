@@ -7,9 +7,9 @@
 //! AFInfoK3III, Ricoh AFAreaXPosition).
 
 mod canon;
-mod fuji;
+pub(crate) mod fuji;
 mod nikon;
-mod panasonic;
+pub(crate) mod panasonic;
 mod pentax;
 mod sony;
 
@@ -89,19 +89,19 @@ pub fn read(p: &Parsed, make: &str, model: &str, orientation: u8) -> Option<AfIn
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::container;
     use crate::io::Src;
 
     /// An IFD entry: tag, type, count and the value's bytes (little-endian).
-    type Entry = (u16, u16, u32, Vec<u8>);
+    pub(crate) type Entry = (u16, u16, u32, Vec<u8>);
 
-    fn shorts(tag: u16, v: &[u16]) -> Entry {
+    pub(crate) fn shorts(tag: u16, v: &[u16]) -> Entry {
         (tag, 3, v.len() as u32, v.iter().flat_map(|x| x.to_le_bytes()).collect())
     }
 
-    fn long(tag: u16, v: u32) -> Entry {
+    pub(crate) fn long(tag: u16, v: u32) -> Entry {
         (tag, 4, 1, v.to_le_bytes().to_vec())
     }
 
@@ -109,7 +109,7 @@ mod tests {
         (tag, 5, v.len() as u32, v.iter().flat_map(|(n, d)| [n.to_le_bytes(), d.to_le_bytes()].concat()).collect())
     }
 
-    fn text(tag: u16, s: &str) -> Entry {
+    pub(crate) fn text(tag: u16, s: &str) -> Entry {
         let mut v = s.as_bytes().to_vec();
         v.push(0);
         (tag, 2, v.len() as u32, v)
@@ -117,7 +117,7 @@ mod tests {
 
     /// An IFD to be placed at `at` (offsets count from the TIFF header), with
     /// the values that do not fit in an entry right after it, in order.
-    fn ifd(entries: &[Entry], at: u32) -> Vec<u8> {
+    pub(crate) fn ifd(entries: &[Entry], at: u32) -> Vec<u8> {
         let table = 2 + entries.len() * 12 + 4;
         let mut out = (entries.len() as u16).to_le_bytes().to_vec();
         let mut values = Vec::new();
@@ -141,7 +141,7 @@ mod tests {
 
     /// A little-endian TIFF: IFD0 with `make` and `extra`, an EXIF IFD of a
     /// 6000 x 4000 picture whose MakerNote `note(position)` returns.
-    fn file(make: &str, extra: &[Entry], note: impl Fn(u32) -> Vec<u8>) -> Vec<u8> {
+    pub(crate) fn file(make: &str, extra: &[Entry], note: impl Fn(u32) -> Vec<u8>) -> Vec<u8> {
         let mut ifd0 = vec![text(0x010F, make), long(0x8769, 0)];
         ifd0.extend_from_slice(extra);
         let exif_at = 8 + ifd(&ifd0, 8).len() as u32;
@@ -268,7 +268,7 @@ mod tests {
         read(&p, make, model, 1)
     }
 
-    fn bytes(tag: u16, v: &[u8]) -> Entry {
+    pub(crate) fn bytes(tag: u16, v: &[u8]) -> Entry {
         (tag, 7, v.len() as u32, v.to_vec())
     }
 
