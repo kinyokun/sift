@@ -35,11 +35,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - run: cargo test -p sift-core --locked
-      - run: cargo clippy -p sift-core --all-targets --locked
+      - run: cargo test -p sift-core -p sift-delta --locked
+      - run: cargo clippy -p sift-core -p sift-delta --all-targets --locked
 
-  # The parts only Windows has: its H.264 encoder writing a Live Photo, and
-  # the bundled HEIF decoder on the platform that has no other.
+  # The parts only Windows has: its H.264 encoder writing a Live Photo, the
+  # bundled HEIF decoder on the platform that has no other, and updates
+  # replacing a program that is running.
   core-windows:
     name: core tests (windows)
     runs-on: windows-latest
@@ -52,6 +53,7 @@ jobs:
       - run: cargo test -p sift-core --locked
         env:
           SIFT_LIVE_OUT: ${{ runner.temp }}\live-photos
+      - run: cargo test -p sift-delta --locked
       # The Live Photos the test made, to be checked with Photos on a Mac.
       - uses: actions/upload-artifact@v7
         if: always()

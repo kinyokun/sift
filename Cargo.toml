@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/sift-core", "src-tauri"]
+members = ["crates/sift-core", "crates/sift-delta", "src-tauri"]
 
 [workspace.package]
 version = "0.6.2"

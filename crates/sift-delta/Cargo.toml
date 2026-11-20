@@ -1,0 +1,29 @@
+[package]
+name = "sift-delta"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Updates that carry only what changed between two Sift releases"
+
+[features]
+default = ["make"]
+# Writing deltas (the release pipeline); applying them needs none of it.
+make = ["zstd/zstdmt"]
+
+[dependencies]
+semver = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tar = { version = "0.4", default-features = false }
+zstd = { version = "0.14", default-features = false, features = ["experimental"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2"
+
+[[bin]]
+name = "sift-delta"
+required-features = ["make"]
+
+[dev-dependencies]
+tempfile = "3"
