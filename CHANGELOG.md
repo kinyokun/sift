@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-11-20
+
 ### 变更
 
 - 界面整体整理了一遍，各处的样式统一起来：按钮、开关、滑杆、标签、浮动工具条用同一套圆角、尺寸和颜色，所有鼠标提示都用同一种样式（带快捷键的会标出按键）
@@ -229,7 +231,8 @@
 - 导出（复制 / 重命名 / 找回 RAW / 参数相框）、局域网传输、自定义快捷键
 - 中文 / 英文界面
 
-[Unreleased]: https://github.com/kinyokun/sift/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/kinyokun/sift/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/kinyokun/sift/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/kinyokun/sift/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/kinyokun/sift/compare/v0.4.4...v0.5.0
 [0.4.4]: https://github.com/kinyokun/sift/compare/v0.4.3...v0.4.4
