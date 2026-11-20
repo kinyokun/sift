@@ -219,7 +219,9 @@ iOS 和 Android 版目前需要自己构建，见 [AGENTS.md](AGENTS.md)。
 
 尼康 High Efficiency（HE / HE\*）NEF 的“无滤镜原片”在 Apple 平台用系统解码器；Windows 和 Android 自带的解码器读不了这种文件，仍可用内嵌预览选片。
 
-HEIF（手机的 HEIC、相机的 HIF）在 Apple 平台用系统解码，Windows 和 Android 用内置的解码器（还没有在实机上测试过）。广色域照片转成 sRGB 显示，HDR 照片压到普通屏幕的亮度范围。
+HEIF（手机的 HEIC、相机的 HIF）在 Apple 平台用系统解码，Windows 和 Android 用内置的解码器（还没有在实机上测试过）。广色域照片转成 sRGB 显示。
+
+HDR：带增益图的 JPG、HEIC（iPhone、安卓手机）和相机的 HDR HEIF（PQ、HLG）在列表里有“HDR”角标，可以只看 HDR 照片；在支持 HDR 的屏幕上按 HDR 亮度显示（macOS 26 起；Windows 需要 WebView2 116 或更新），设置里可以关掉。导出时保留 HDR：复制、去掉拍摄信息和旋转不重新压缩，裁剪、缩小、加水印后导出带增益图的 JPG。缩略图、直方图和滤镜按普通照片处理。Windows 和 Android 暂时读不了 HEIC 里的增益图。
 
 色彩：照片按自己带的色彩配置文件读取，没有配置文件的按相机记下的色彩空间读取（相机设成 Adobe RGB 时会写进 EXIF 或厂商信息），再统一转成 sRGB，所以缩略图、滤镜、直方图和导出的照片颜色一致。
 
