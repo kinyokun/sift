@@ -6,8 +6,10 @@
 //! file the system gives up on, the bundled decoder does it (feature `heif`).
 //! That one hands out the values as coded, so what the file says about its
 //! colours (an ICC profile, or the primaries and transfer function it names)
-//! is applied ([`crate::color`]).
+//! is applied ([`crate::color`]). It does not read gain maps: a HEIF with
+//! one is an ordinary picture to it.
 
+use crate::hdr::Picture;
 use crate::{Error, Result};
 use image::RgbImage;
 use std::path::Path;
@@ -26,9 +28,31 @@ pub fn decode(path: &Path, edge: u32) -> Result<RgbImage> {
     system
 }
 
-/// [`decode`] by the bundled decoder alone.
+/// The HDR HEIF picture at `path` as a [`Picture`] whose ordinary picture is
+/// at most `edge` long, the same one [`decode`] gives. `None` when this build
+/// cannot read the picture's HDR.
+pub fn hdr(path: &Path, edge: u32) -> Result<Option<Picture>> {
+    #[cfg(target_vendor = "apple")]
+    let system = crate::hdr::rendered(path, edge);
+    #[cfg(not(target_vendor = "apple"))]
+    let system: Result<Option<Picture>> = Err(Error::Unsupported("HEIF pictures cannot be decoded in this build"));
+    #[cfg(feature = "heif")]
+    if system.is_err() {
+        return bundled_hdr(path, edge);
+    }
+    system
+}
+
+/// What the bundled decoder gives: sRGB pixels, or for a picture coded for
+/// HDR screens its values (16 bits a channel) and what they mean.
 #[cfg(feature = "heif")]
-pub fn bundled(path: &Path, edge: u32) -> Result<RgbImage> {
+enum Bundled {
+    Sdr(RgbImage),
+    Hdr(crate::color::Space, image::ImageBuffer<image::Rgb<u16>, Vec<u16>>),
+}
+
+#[cfg(feature = "heif")]
+fn bundled_decode(path: &Path, edge: u32) -> Result<Bundled> {
     use heic_decoder::{ColorInfo, RgbOptions};
     use image::imageops;
     let failed = |e: heic_decoder::HeifError| Error::Decode(e.to_string());
@@ -51,7 +75,7 @@ pub fn bundled(path: &Path, edge: u32) -> Result<RgbImage> {
             img = imageops::thumbnail(&img, fw, fh);
         }
         space.to_srgb(&mut img);
-        return Ok(img);
+        return Ok(Bundled::Sdr(img));
     }
     // HDR keeps its depth until it is brought into the range of a screen.
     let rgb = picture.to_rgb16_with_options(&options).map_err(failed)?;
@@ -60,7 +84,26 @@ pub fn bundled(path: &Path, edge: u32) -> Result<RgbImage> {
     if (fw, fh) != (w, h) {
         deep = imageops::thumbnail(&deep, fw, fh);
     }
-    RgbImage::from_raw(fw, fh, space.tone_map(deep.as_raw())).ok_or(Error::Malformed)
+    Ok(Bundled::Hdr(space, deep))
+}
+
+/// [`decode`] by the bundled decoder alone.
+#[cfg(feature = "heif")]
+pub fn bundled(path: &Path, edge: u32) -> Result<RgbImage> {
+    match bundled_decode(path, edge)? {
+        Bundled::Sdr(img) => Ok(img),
+        Bundled::Hdr(space, deep) => RgbImage::from_raw(deep.width(), deep.height(), space.tone_map(deep.as_raw())).ok_or(Error::Malformed),
+    }
+}
+
+/// [`hdr`] by the bundled decoder alone.
+#[cfg(feature = "heif")]
+pub fn bundled_hdr(path: &Path, edge: u32) -> Result<Option<Picture>> {
+    let Bundled::Hdr(space, deep) = bundled_decode(path, edge)? else { return Ok(None) };
+    let base = RgbImage::from_raw(deep.width(), deep.height(), space.tone_map(deep.as_raw())).ok_or(Error::Malformed)?;
+    let (w, h) = Picture::gain_size(deep.width(), deep.height());
+    let small = image::imageops::resize(&deep, w, h, image::imageops::FilterType::Triangle);
+    Ok(Some(Picture::from_renditions(base, &space.light(small.as_raw()), w, h)))
 }
 
 #[cfg(all(test, feature = "heif"))]

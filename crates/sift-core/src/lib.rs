@@ -15,6 +15,7 @@ pub mod animal;
 #[cfg(feature = "face")]
 pub mod face;
 pub mod formats;
+pub mod hdr;
 pub mod heif;
 pub mod histogram;
 pub mod frame;

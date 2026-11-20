@@ -56,11 +56,13 @@ pub struct Parsed<'a> {
     pub jpeg: Option<jpeg::JpegInfo>,
     /// HEIF files only: size and orientation of the picture.
     pub heif: Option<Heif>,
+    /// HEIF files only: the picture is HDR, by how it is coded or by a gain map.
+    pub hdr: Option<crate::hdr::Hdr>,
 }
 
 impl<'a> Parsed<'a> {
     fn empty(format: Format) -> Self {
-        Parsed { format, ifd0: None, exif: None, maker: None, previews: Vec::new(), xmp: None, jpeg: None, heif: None }
+        Parsed { format, ifd0: None, exif: None, maker: None, previews: Vec::new(), xmp: None, jpeg: None, heif: None, hdr: None }
     }
 
     pub fn largest_preview(&self) -> Option<JpegRef> {
@@ -222,21 +224,39 @@ fn parse_jpeg(src: &Src) -> Parsed<'_> {
 /// Cameras append screen-size previews after the main JPEG and list them in
 /// a Multi-Picture Format index (CIPA DC-007). Each MP Entry is 16 bytes:
 /// attributes, size, offset from the MPF header, two dependent-image numbers.
-fn mpf_previews(src: &Src, base: u64, out: &mut Vec<JpegRef>) -> Option<()> {
-    const MP_ENTRY: u16 = 0xB002;
-    let (tiff, ifd_off) = Tiff::open(src, base)?;
-    let ifd = tiff.ifd(ifd_off)?;
-    let entries = tiff.data(ifd.get(MP_ENTRY)?)?;
-    for e in entries.as_chunks::<16>().0.iter().take(8) {
+fn mpf_previews(src: &Src, base: u64, out: &mut Vec<JpegRef>) {
+    for (kind, pos, len) in mpf_images(src, base) {
         // Only "large thumbnail" entries are previews; phones also store depth
         // and gain maps here, which must not be mistaken for the picture.
-        let kind = u32_at(e, 0, tiff.le)? & 0x00FF_FFFF;
-        let (len, off) = (u32_at(e, 4, tiff.le)? as u64, u32_at(e, 8, tiff.le)? as u64);
-        if matches!(kind, 0x01_0001 | 0x01_0002) && off > 0 {
-            push_preview(src, out, base + off, len);
+        if is_mpf_preview(kind) && pos > base {
+            push_preview(src, out, pos, len);
         }
     }
-    Some(())
+}
+
+/// Whether an MP Entry's type (its attributes without the flags) is a preview.
+pub fn is_mpf_preview(kind: u32) -> bool {
+    matches!(kind, 0x01_0001 | 0x01_0002)
+}
+
+/// The pictures listed in the Multi-Picture Format index whose TIFF header
+/// is at `base`, at most eight: type (the attributes without the flags),
+/// position in the file (the first, the main picture, has none) and length.
+pub fn mpf_images(src: &Src, base: u64) -> Vec<(u32, u64, u64)> {
+    const MP_ENTRY: u16 = 0xB002;
+    let mut out = Vec::new();
+    (|| {
+        let (tiff, ifd_off) = Tiff::open(src, base)?;
+        let ifd = tiff.ifd(ifd_off)?;
+        let entries = tiff.data(ifd.get(MP_ENTRY)?)?;
+        for e in entries.as_chunks::<16>().0.iter().take(8) {
+            let kind = u32_at(e, 0, tiff.le)? & 0x00FF_FFFF;
+            let (len, off) = (u32_at(e, 4, tiff.le)? as u64, u32_at(e, 8, tiff.le)? as u64);
+            out.push((kind, if off > 0 { base + off } else { base }, len));
+        }
+        Some(())
+    })();
+    out
 }
 
 fn push_preview(src: &Src, out: &mut Vec<JpegRef>, offset: u64, len: u64) {
@@ -692,6 +712,26 @@ fn heif_orientation(properties: &[([u8; 4], &[u8])]) -> u8 {
     EXIF.iter().position(|c| *c == corners).map_or(1, |i| i as u8 + 1)
 }
 
+/// The transfer function (ITU-T H.273) a `colr` property names: in its
+/// `nclx` form, or in the `cicp` tag of the ICC profile it holds.
+fn heif_transfer(d: &[u8]) -> Option<u64> {
+    match d.get(..4)? {
+        b"nclx" => be(d, 6, 2),
+        b"prof" | b"rICC" => {
+            let icc = &d[4..];
+            (0..be(icc, 128, 4)?.min(64) as usize).find_map(|i| {
+                let at = 132 + i * 12;
+                if icc.get(at..at + 4)? != b"cicp" {
+                    return None;
+                }
+                // Signature, reserved, then primaries and transfer, a byte each.
+                be(icc, be(icc, at + 4, 4)? as usize + 9, 1)
+            })
+        }
+        _ => None,
+    }
+}
+
 fn parse_heif(src: &Src) -> Parsed<'_> {
     let mut p = Parsed::empty(Format::Heif);
     let top = boxes(src, 0, src.len());
@@ -735,6 +775,13 @@ fn parse_heif(src: &Src) -> Parsed<'_> {
             let (width, height) = if orientation >= 5 { (h as u32, w as u32) } else { (w as u32, h as u32) };
             p.heif = Some(Heif { width, height, orientation });
         }
+        // A gain map is an item of its own (ISO 21496-1 `tmap`), or for Apple's earlier one an auxiliary picture.
+        let gain_map = items.iter().any(|(_, kind, _)| kind == b"tmap") || iprp.windows(14).any(|w| w == b"aux:hdrgainmap");
+        p.hdr = match properties.iter().filter(|(kind, _)| kind == b"colr").find_map(|(_, d)| heif_transfer(d)) {
+            Some(16) => Some(crate::hdr::Hdr::Pq),
+            Some(18) => Some(crate::hdr::Hdr::Hlg),
+            _ => gain_map.then_some(crate::hdr::Hdr::GainMap),
+        };
     }
     for (id, kind, content) in &items {
         let Some((pos, len)) = place(*id) else { continue };

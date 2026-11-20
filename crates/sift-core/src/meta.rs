@@ -1,6 +1,7 @@
 use crate::af::{self, AfInfo};
 use crate::container::{self, Format};
 use crate::exif::{self, Exif};
+use crate::hdr::{self, Hdr};
 use crate::io::Src;
 use crate::level::{self, Level};
 use crate::{formats, pentax, rating, stack, Result};
@@ -30,6 +31,7 @@ pub struct Meta {
     pub preview_height: u32,
     /// True when a RAW only embeds a small preview and needs a full decode to check focus.
     pub low_res: bool,
+    pub hdr: Option<Hdr>,
 }
 
 /// The in-camera look (Nikon Picture Control, Pentax Custom Image, Ricoh
@@ -107,6 +109,7 @@ pub struct Brief {
     pub rating: u8,
     /// Capture time as "YYYY-MM-DD HH:MM:SS" (sorts as text), when the file records one.
     pub date: Option<String>,
+    pub hdr: Option<Hdr>,
     /// What the file says about the burst or pixel-shift series it belongs to.
     #[serde(skip)]
     pub series: stack::Hint,
@@ -115,7 +118,7 @@ pub struct Brief {
 pub fn brief(path: &Path) -> Result<Brief> {
     let src = Src::open(path)?;
     let p = container::parse_metadata(&src);
-    Ok(Brief { rating: rating::read(&src, &p, path), date: exif::read(&p).datetime, series: stack::hint(&p, path) })
+    Ok(Brief { rating: rating::read(&src, &p, path), date: exif::read(&p).datetime, hdr: hdr::of(&src, &p), series: stack::hint(&p, path) })
 }
 
 pub fn read(path: &Path) -> Result<Meta> {
@@ -163,5 +166,6 @@ pub fn read(path: &Path) -> Result<Meta> {
         preview_width: pw,
         preview_height: ph,
         low_res: raw && pw.max(ph) <= LOW_RES_EDGE,
+        hdr: hdr::of(&src, &p),
     })
 }

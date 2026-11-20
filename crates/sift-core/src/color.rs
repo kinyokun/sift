@@ -45,7 +45,7 @@ pub struct Space {
     matrix: Matrix,
 }
 
-fn srgb_to_linear(v: f32) -> f32 {
+pub(crate) fn srgb_to_linear(v: f32) -> f32 {
     if v <= 0.04045 {
         v / 12.92
     } else {
@@ -252,16 +252,9 @@ impl Space {
             .map(|i| {
                 let v = i as f32 / STEPS as f32;
                 if hlg {
-                    let (a, b, c) = (0.178_832_77, 0.284_668_92, 0.559_910_7);
-                    if v <= 0.5 {
-                        v * v / 3.0
-                    } else {
-                        (((v - c) / a).exp() + b) / 12.0
-                    }
+                    hlg_scene(v)
                 } else {
-                    let (m1, m2, c1, c2, c3) = (0.159_301_76, 78.84375, 0.835_937_5, 18.851_563, 18.6875);
-                    let root = v.powf(1.0 / m2);
-                    shown(10000.0 * ((root - c1).max(0.0) / (c2 - c3 * root)).powf(1.0 / m1))
+                    shown(pq_nits(v))
                 }
             })
             .collect();
@@ -286,6 +279,47 @@ impl Space {
         }
         out
     }
+
+    /// The light HDR values (16 bits a channel) stand for, as linear sRGB in
+    /// which 1 is the white of an ordinary picture: a white sheet of paper,
+    /// 203 cd/m² (ITU-R BT.2408), as macOS reads HDR pictures. HLG is shown
+    /// as on a 1000 cd/m² screen, as in [`Space::tone_map`]. Colours sRGB
+    /// cannot hold come out below 0.
+    pub fn light(&self, deep: &[u16]) -> Vec<f32> {
+        const STEPS: usize = 4095;
+        let hlg = matches!(self.transfer, Transfer::Hlg);
+        let coded: Vec<f32> = (0..=STEPS).map(|i| if hlg { hlg_scene(i as f32 / STEPS as f32) } else { pq_nits(i as f32 / STEPS as f32) / PAPER }).collect();
+        let mut out = Vec::with_capacity(deep.len());
+        for p in deep.as_chunks::<3>().0 {
+            let mut rgb = p.map(|v| coded[(v as usize * STEPS + 32767) / 65535]);
+            if hlg {
+                let gain = (0.2627 * rgb[0] + 0.678 * rgb[1] + 0.0593 * rgb[2]).max(0.0).powf(0.2) * 1000.0 / PAPER;
+                rgb = rgb.map(|v| v * gain);
+            }
+            out.extend(apply(&self.matrix, rgb));
+        }
+        out
+    }
+}
+
+/// The light of a white sheet of paper in an HDR picture, in cd/m² (ITU-R BT.2408).
+const PAPER: f32 = 203.0;
+
+/// The light of the scene (0 to 1) an HLG value stands for (ARIB STD-B67).
+fn hlg_scene(v: f32) -> f32 {
+    let (a, b, c) = (0.178_832_77, 0.284_668_92, 0.559_910_7);
+    if v <= 0.5 {
+        v * v / 3.0
+    } else {
+        (((v - c) / a).exp() + b) / 12.0
+    }
+}
+
+/// The light on a screen (cd/m²) a PQ value stands for (SMPTE ST 2084).
+fn pq_nits(v: f32) -> f32 {
+    let (m1, m2, c1, c2, c3) = (0.159_301_76, 78.84375, 0.835_937_5, 18.851_563, 18.6875);
+    let root = v.powf(1.0 / m2);
+    10000.0 * ((root - c1).max(0.0) / (c2 - c3 * root)).powf(1.0 / m1)
 }
 
 /// A display profile (ICC version 2) of three colorants (CIE XYZ adapted to
@@ -377,7 +411,7 @@ pub fn profiled(data: Vec<u8>, adobe_rgb: bool) -> Vec<u8> {
 /// of white, which leaves room for what is brighter; that rolls off and
 /// reaches white at 1000 cd/m².
 fn shown(nits: f32) -> f32 {
-    let paper = nits / 203.0;
+    let paper = nits / PAPER;
     let plain = 0.5 * paper.powf(0.9234);
     if paper <= 1.0 {
         return plain;

@@ -26,6 +26,8 @@ extern "C" {
     static kCGImagePropertyOrientation: CFStringRef;
     static kCGImageSourceCreateThumbnailFromImageAlways: CFStringRef;
     static kCGImageSourceCreateThumbnailWithTransform: CFStringRef;
+    static kCGImageSourceDecodeRequest: CFStringRef;
+    static kCGImageSourceDecodeToHDR: CFStringRef;
     static kCGImageSourceThumbnailMaxPixelSize: CFStringRef;
     fn CGImageSourceCreateThumbnailAtIndex(source: CFTypeRef, index: usize, options: CFDictionaryRef) -> CFTypeRef;
     fn CGImageSourceCreateWithURL(url: CFURLRef, options: CFDictionaryRef) -> CFTypeRef;
@@ -45,10 +47,13 @@ struct CGRect {
 
 /// `kCGImageAlphaNoneSkipLast`: RGBX, the plainest layout CoreGraphics draws into.
 const RGBX: u32 = 5;
+/// Four 32-bit floats a pixel, little-endian, alpha last and premultiplied.
+const FLOAT_RGBA: u32 = 1 | 1 << 8 | 2 << 12;
 
 #[link(name = "CoreGraphics", kind = "framework")]
 extern "C" {
     static kCGColorSpaceSRGB: CFStringRef;
+    static kCGColorSpaceExtendedLinearSRGB: CFStringRef;
     fn CGColorSpaceCreateWithName(name: CFStringRef) -> CFTypeRef;
     fn CGImageGetWidth(image: CFTypeRef) -> usize;
     fn CGImageGetHeight(image: CFTypeRef) -> usize;
@@ -147,5 +152,37 @@ pub fn pixels(path: &Path, edge: u32) -> Result<image::RgbImage> {
         drop(canvas);
         let rgb: Vec<u8> = rgbx.as_chunks::<4>().0.iter().flat_map(|p| [p[0], p[1], p[2]]).collect();
         image::RgbImage::from_raw(width as u32, height as u32, rgb).ok_or(Error::Malformed)
+    }
+}
+
+/// The light of an HDR picture (HEIF coded for HDR screens, or one with a
+/// gain map) upright, with a long edge of at most `edge`: linear sRGB, three
+/// values a pixel, in which 1 is the white of an ordinary picture.
+pub fn light(path: &Path, edge: u32) -> Result<(Vec<f32>, u32, u32)> {
+    let url = CFURL::from_path(path, false).ok_or(Error::Malformed)?;
+    // SAFETY: as in `pixels`; the canvas draws into `rgba`, which holds
+    // width x height x 4 floats and outlives it.
+    unsafe {
+        let source = Owned::new(CGImageSourceCreateWithURL(url.as_concrete_TypeRef(), ptr::null()), "cannot open file")?;
+        let key = |k: CFStringRef| CFString::wrap_under_get_rule(k);
+        let yes = || CFBoolean::true_value().as_CFType();
+        let mut options = vec![
+            (key(kCGImageSourceCreateThumbnailFromImageAlways), yes()),
+            (key(kCGImageSourceCreateThumbnailWithTransform), yes()),
+            (key(kCGImageSourceDecodeRequest), key(kCGImageSourceDecodeToHDR).as_CFType()),
+        ];
+        if let Ok(edge) = i32::try_from(edge) {
+            options.push((key(kCGImageSourceThumbnailMaxPixelSize), CFNumber::from(edge).as_CFType()));
+        }
+        let options = CFDictionary::from_CFType_pairs(&options);
+        let decoded = Owned::new(CGImageSourceCreateThumbnailAtIndex(source.0, 0, options.as_concrete_TypeRef()), "format not supported")?;
+        let (width, height) = (CGImageGetWidth(decoded.0), CGImageGetHeight(decoded.0));
+        let mut rgba = vec![0f32; width * height * 4];
+        let space = Owned::new(CGColorSpaceCreateWithName(kCGColorSpaceExtendedLinearSRGB), "no linear sRGB colour space")?;
+        let canvas = Owned::new(CGBitmapContextCreate(rgba.as_mut_ptr().cast(), width, height, 32, width * 16, space.0, FLOAT_RGBA), "out of memory")?;
+        CGContextDrawImage(canvas.0, CGRect { x: 0.0, y: 0.0, width: width as f64, height: height as f64 }, decoded.0);
+        drop(canvas);
+        let rgb = rgba.as_chunks::<4>().0.iter().flat_map(|p| [p[0], p[1], p[2]]).collect();
+        Ok((rgb, width as u32, height as u32))
     }
 }
