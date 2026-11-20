@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.6.5] - 2026-11-21
+
 ### 变更
 
 - 打开文件夹时网格只排一次版：先读完排序、筛选、叠放要用的信息，再一次性显示排好序、叠好组的照片，不再边读边跳好几次。读取时工具栏和网格中间显示“正在读取 X/Y 张…”。照片特别多、预计要读 15 秒以上的文件夹会先显示出来，读完再排一次
@@ -276,7 +278,8 @@
 - 导出（复制 / 重命名 / 找回 RAW / 参数相框）、局域网传输、自定义快捷键
 - 中文 / 英文界面
 
-[Unreleased]: https://github.com/kinyokun/sift/compare/v0.6.4...HEAD
+[Unreleased]: https://github.com/kinyokun/sift/compare/v0.6.5...HEAD
+[0.6.5]: https://github.com/kinyokun/sift/compare/v0.6.4...v0.6.5
 [0.6.4]: https://github.com/kinyokun/sift/compare/v0.6.3...v0.6.4
 [0.6.3]: https://github.com/kinyokun/sift/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/kinyokun/sift/compare/v0.6.1...v0.6.2
