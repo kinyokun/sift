@@ -702,9 +702,9 @@ export function Viewer() {
         if (e.metaKey || e.ctrlKey || e.altKey) return;
         if (e.key === "ArrowRight") return step(1, e.repeat);
         if (e.key === "ArrowLeft") return step(-1, e.repeat);
-        if (e.key === "?") return st.setSheet("help");
         if (e.key === "ArrowDown") return step(1, e.repeat, true);
         if (e.key === "ArrowUp") return step(-1, e.repeat, true);
+        if (e.key === "?") return st.setSheet("keys");
         return;
       }
       e.preventDefault();

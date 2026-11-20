@@ -20,7 +20,7 @@ import { quarter, turnRect } from "./turn";
 
 export type FlagFilter = "all" | "picked" | "unflagged" | "rejected";
 export type SortBy = "name" | "time" | "rating" | "size";
-export type SheetName = "export" | "findraw" | "transfer" | "settings" | "help" | "update" | "delete";
+export type SheetName = "export" | "findraw" | "transfer" | "settings" | "help" | "keys" | "update" | "delete";
 
 /** What the delete sheet asks about: photos by id. `forGood`: they would not go into a trash. `why`: the
  * trash did not take them, and this is what the system said. `busy` while they are being deleted. */

@@ -834,14 +834,16 @@ await session("crop", desktop, async (page, shot) => {
   console.log(`[crop] ${used.length} bindings, ${new Set(used).size} distinct`);
 });
 
-// The digit 0 clears a rating and nothing else; the letter O is unassigned;
-// N shows the original. An old settings file with "original" on O is migrated.
+// Settings saved with the old defaults move to the new ones, and what the user chose stays: here
+// pick on K, and the look wall on G, which the guides get by default now (so they are left without a key).
+// The digit 0 clears a rating and nothing else; the letter O (version 2's "original") is unassigned.
 await session("keys", desktop, async (page) => {
-  await page.addInitScript(() => {
+  const OLD = { prev: "A", next: "D", stackPrev: "ArrowUp", stackNext: "ArrowDown", pick: "K", reject: "X", unflag: "U", rate0: "0", af: "F", original: "N", wall: "G", clipping: "H", guides: "Alt+D", info: "I", side: "Tab", link: "L" };
+  await page.addInitScript((keys) => {
     if (sessionStorage.getItem("seeded")) return;
     sessionStorage.setItem("seeded", "1");
-    localStorage.setItem("sift.settings", JSON.stringify({ onboarded: true, keysVersion: 2, keys: { original: "O", pick: "K" } }));
-  });
+    localStorage.setItem("sift.settings", JSON.stringify({ onboarded: true, keysVersion: 9, keys }));
+  }, OLD);
   await page.reload();
   await openLibrary(page);
   await page.locator(".cell", { has: page.locator(".cell-raw") }).first().dblclick();
@@ -850,60 +852,97 @@ await session("keys", desktop, async (page) => {
     stars: await page.locator(".dock .stars button.on").count(),
     look: (await page.locator(".status-pill").count()) ? await page.locator(".status-pill").textContent() : "",
     picked: await page.locator(".dock .pick.on").count(),
+    af: await page.locator('.dock [aria-label="对焦点"]').getAttribute("aria-pressed"),
+    info: await page.locator(".info-side").count(),
   });
-  await page.keyboard.press("3");
-  await page.waitForTimeout(300);
-  const rated = await state();
-  await page.keyboard.press("O");
-  await page.waitForTimeout(300);
-  const afterO = await state();
-  await page.keyboard.press("0");
-  await page.waitForTimeout(300);
-  const afterZero = await state();
-  await page.keyboard.press("N");
-  await page.waitForTimeout(600);
-  const afterN = await state();
-  await page.keyboard.press("N");
+  const after = async (key, wait = 300) => {
+    await page.keyboard.press(key);
+    await page.waitForTimeout(wait);
+    return JSON.stringify(await state());
+  };
+  console.log(`[keys] start: ${JSON.stringify(await state())}`);
+  console.log(`[keys] 3: ${await after("3")}`);
+  console.log(`[keys] letter O (nothing): ${await after("O")}`);
+  console.log(`[keys] digit 0 (no stars): ${await after("0")}`);
+  console.log(`[keys] V (original): ${await after("V", 600)}`);
+  await page.keyboard.press("V");
+  console.log(`[keys] K (the user's pick): ${await after("K")}`);
   await page.keyboard.press("K");
-  await page.waitForTimeout(300);
-  const afterK = await state();
-  await page.keyboard.press("K");
+  console.log(`[keys] F (old af, new pick, both taken: nothing): ${await after("F")}`);
+  console.log(`[keys] Q (focus points off): ${await after("Q")}`);
+  await page.keyboard.press("Q");
+  console.log(`[keys] Tab (info off): ${await after("Tab")}`);
+  await page.keyboard.press("Tab");
+  console.log(`[keys] G (the user's look wall): ${(await page.keyboard.press("G"), await page.waitForTimeout(300), await page.locator(".look-wall").count())} wall`);
+  await page.keyboard.press("Escape");
   const keys = await page.evaluate(() => JSON.parse(localStorage.getItem("sift.settings")).keys);
-  console.log(`[keys] after 3: ${JSON.stringify(rated)}`);
-  console.log(`[keys] after letter O: ${JSON.stringify(afterO)}`);
-  console.log(`[keys] after digit 0: ${JSON.stringify(afterZero)}`);
-  console.log(`[keys] after N: ${JSON.stringify(afterN)}`);
-  console.log(`[keys] after K (customised pick, kept by migration): ${JSON.stringify(afterK)}`);
-  console.log(`[keys] migrated: original=${keys.original} pick=${keys.pick} rate0=${keys.rate0}`);
+  const used = Object.values(keys).filter(Boolean);
+  console.log(`[keys] migrated: pick=${keys.pick} af=${keys.af} original=${keys.original} wall=${keys.wall} guides=${JSON.stringify(keys.guides)} info=${keys.info} side=${keys.side} stackPrev=${keys.stackPrev} rate0=${keys.rate0}; ${used.length} bindings, ${new Set(used).size} distinct`);
+  // ↑ and ↓ still go through a burst with nothing on them.
+  console.log(`[keys] ArrowDown unbound: ${!Object.values(keys).includes("ArrowDown")}`);
 });
 
-// The ~ key shows the shortcut list on any screen and hides it again.
-await session("help", desktop, async (page, shot) => {
-  const open = async () => {
-    await page.waitForTimeout(300);
-    return page.locator(".help").count();
-  };
-  await page.locator(".welcome button.primary").waitFor();
-  await page.keyboard.press("Backquote");
-  const onWelcome = await open();
-  await page.keyboard.press("Backquote");
-  const closed = await open();
-  await openLibrary(page);
-  await page.locator(".cell").first().dblclick();
-  await page.locator(".tier.full.ready").waitFor({ timeout: 20000 });
-  await page.keyboard.press("Shift+Backquote");
-  const inViewer = await open();
-  await shot("in-viewer");
-  await page.keyboard.press("Backquote");
-  console.log(`[help] welcome: ${onWelcome}, toggled off: ${closed === 0}, viewer (with Shift): ${inViewer}, viewer still open: ${await page.locator(".viewer").count()}`);
-});
+// The ~ key shows the keyboard map on any screen and hides it again; hovering a control names its key.
+for (const [name, size, lang] of [["help", desktop, "zh-CN"], ["help-small", { width: 1024, height: 640 }, "zh-CN"], ["help-en", desktop, "en-US"], ["help-windows", { ...desktop, platform: "windows" }, "zh-CN"]]) {
+  await session(name, { ...size, lang }, async (page, shot) => {
+    const open = async () => {
+      await page.waitForTimeout(300);
+      return page.locator(".keys-overlay").count();
+    };
+    if (name === "help-windows") {
+      await page.addInitScript(() => Object.defineProperty(Navigator.prototype, "platform", { get: () => "Win32" }));
+      await page.reload();
+    }
+    await page.locator(".welcome button.primary").waitFor();
+    await page.keyboard.press("Backquote");
+    const onWelcome = await open();
+    await page.keyboard.press("Backquote");
+    const closed = await open();
+    await openLibrary(page);
+    await page.keyboard.press("Backquote");
+    const inGrid = await open();
+    const fits = await page.locator(".keys-overlay").evaluate((el) => el.scrollHeight <= el.clientHeight && el.scrollWidth <= el.clientWidth);
+    const clipped = await page.locator(".keys-overlay .cap").evaluateAll((caps) =>
+      caps.flatMap((cap) => {
+        const spans = [...cap.querySelectorAll("span")];
+        const glyph = cap.querySelector("b").getBoundingClientRect();
+        const cut = spans.filter((s) => s.scrollHeight > s.clientHeight + 1 || s.scrollWidth > s.clientWidth + 1).map((s) => s.textContent);
+        // The names stack up from the bottom and must stay clear of the key's own letter.
+        const top = spans.length ? spans[0].getBoundingClientRect().top : Infinity;
+        return [...cut, ...(spans.length && top < glyph.bottom - 1 && !cap.classList.contains("arrow") ? [`over the letter: ${spans.map((s) => s.textContent).join(" | ")}`] : [])];
+      }),
+    );
+    await shot("map-grid");
+    await page.keyboard.press("Escape");
+    await page.locator(".cell").first().dblclick();
+    await page.locator(".tier.full.ready").waitFor({ timeout: 20000 });
+    await page.keyboard.press("Shift+Backquote");
+    const inViewer = await open();
+    await shot("map-viewer");
+    await page.keyboard.press("Backquote");
+    console.log(`[${name}] welcome: ${onWelcome}, toggled off: ${closed === 0}, grid: ${inGrid}, fits without scrolling: ${fits}, cut-off labels: ${JSON.stringify(clipped)}, viewer (with Shift): ${inViewer}, viewer still open: ${await page.locator(".viewer").count()}`);
+    for (const label of ["选中", "Pick", "删除", "Delete", "返回", "Back"]) {
+      const button = page.locator(`.viewer [aria-label="${label}"]`).first();
+      if (!(await button.count())) continue;
+      await button.hover();
+      await page.locator(".tip").waitFor({ timeout: 2000 });
+      console.log(`[${name}] hover "${label}": "${await page.locator(".tip").innerText()}"`.replace(/\n/g, " "));
+    }
+    await page.locator(".viewer .stars button").nth(2).hover();
+    await page.waitForTimeout(500);
+    console.log(`[${name}] hover the third star: "${(await page.locator(".tip").innerText()).replace(/\n/g, " ")}"`);
+    await page.locator('.dock [aria-label="对焦点"], .dock [aria-label="Focus points"]').first().hover();
+    await page.waitForTimeout(500);
+    await shot("tooltip");
+  });
+}
 
 // Progress survives a restart: flags, filter position and the open photo come back.
 await session("resume", desktop, async (page, shot) => {
   await openLibrary(page);
   await page.locator(".cell").nth(2).dblclick();
   await page.locator(".tier.full.ready").waitFor({ timeout: 20000 });
-  await page.keyboard.press("P");
+  await page.keyboard.press("F");
   await page.keyboard.press("ArrowRight");
   await page.keyboard.press("4");
   await page.waitForTimeout(600);

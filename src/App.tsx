@@ -9,6 +9,7 @@ import { actionFor, isTyping } from "./lib/shortcuts";
 import { useStore } from "./lib/store";
 import { DeleteSheet } from "./sheets/Delete";
 import { ExportSheet, FindRawSheet, TransferSheet } from "./sheets/Export";
+import { KeysOverlay } from "./sheets/Keys";
 import { HelpSheet, SettingsSheet } from "./sheets/Settings";
 import { UpdateSheet } from "./sheets/Update";
 import { Tips } from "./ui/Tip";
@@ -83,7 +84,7 @@ export function App() {
     return () => void off.then((f) => f?.());
   }, []);
 
-  // The help key works on every screen and closes the sheet again; so does refreshing, wherever a folder is open.
+  // The help key brings up the keyboard map on every screen and closes it again; so does refreshing, wherever a folder is open.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const st = useStore.getState();
@@ -96,9 +97,9 @@ export function App() {
         return;
       }
       if (action !== "help") return;
-      if (st.sheet && st.sheet !== "help") return;
+      if (st.sheet && st.sheet !== "keys" && st.sheet !== "help") return;
       e.preventDefault();
-      st.setSheet(st.sheet === "help" ? null : "help");
+      st.setSheet(st.sheet === "keys" ? null : "keys");
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -114,6 +115,7 @@ export function App() {
       {sheet === "transfer" && folder && <TransferSheet onClose={close} />}
       {sheet === "settings" && <SettingsSheet onClose={close} />}
       {sheet === "help" && <HelpSheet onClose={close} />}
+      {sheet === "keys" && <KeysOverlay onClose={close} />}
       {sheet === "update" && <UpdateSheet onClose={close} />}
       {sheet === "delete" && <DeleteSheet />}
       <Toast />

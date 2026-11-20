@@ -7,6 +7,7 @@ import { useT } from "../lib/i18n";
 import { ACTIONS, DEFAULT_KEYS, comboOf, keyCaps, type Action } from "../lib/shortcuts";
 import { useStore, wheelModeOf, type Settings, type WheelMode } from "../lib/store";
 import { Row, Segmented, Sheet, Toggle } from "../ui/controls";
+import { Icon } from "../ui/Icon";
 import { UpdateSettings } from "./Update";
 
 const REPO = "https://github.com/kinyokun/sift";
@@ -280,8 +281,6 @@ export function HelpSheet({ onClose }: { onClose: () => void }) {
   const keys = useStore((s) => s.settings.keys);
   const onboarded = useStore((s) => s.settings.onboarded);
   const mobile = useStore((s) => !!s.info?.mobile);
-  const wheel = useStore((s) => wheelModeOf(s.settings, s.info?.platform));
-  const doubleClick = useStore((s) => s.settings.doubleClick);
   const finish = () => {
     useStore.getState().setSettings({ onboarded: true });
     onClose();
@@ -291,16 +290,6 @@ export function HelpSheet({ onClose }: { onClose: () => void }) {
     [t.help2Title, mobile ? t.help2BodyTouch : t.help2Body, <><Binding value={keys.af} /><Binding value={keys.eye} /><Binding value={keys.zoom} /></>],
     [t.help3Title, t.help3Body, <><Binding value={keys.rate1} />–<Binding value={keys.rate5} /><Binding value={keys.pick} /><Binding value={keys.reject} /></>],
     [t.help4Title, t.help4Body, null],
-  ];
-  const fixed: [React.ReactNode, string][] = [
-    [<><KeyCap>←</KeyCap><KeyCap>→</KeyCap></>, t.fixedKeys.arrows],
-    [<KeyCap>↩</KeyCap>, t.fixedKeys.enter],
-    ...(mobile ? [] : [[<KeyCap>Space</KeyCap>, t.fixedKeys.space] as [React.ReactNode, string]]),
-    [<KeyCap>Esc</KeyCap>, t.fixedKeys.esc],
-    [t.mouseRight, t.fixedKeys.rightHold],
-    [t.pinchOrCtrl, t.fixedKeys.pinch],
-    [t.mouseWheel, t.wheelModes[wheel]],
-    [t.mouseDouble, t.doubleClicks[doubleClick]],
   ];
   return (
     <Sheet
@@ -329,23 +318,11 @@ export function HelpSheet({ onClose }: { onClose: () => void }) {
           ))}
         </ol>
         {!mobile && (
-          <>
-            <h4>{t.shortcutList}</h4>
-            <div className="key-list">
-              {ACTIONS.map((a) => (
-                <div key={a}>
-                  <span><Binding value={keys[a]} /></span>
-                  {t.actions[a]}
-                </div>
-              ))}
-              {fixed.map(([cap, label], i) => (
-                <div key={i}>
-                  <span>{cap}</span>
-                  {label}
-                </div>
-              ))}
-            </div>
-          </>
+          <button className="help-map" onClick={() => useStore.getState().setSheet("keys")}>
+            <Icon name="keyboard" size={22} />
+            <span>{t.shortcutList}</span>
+            <Binding value={keys.help} />
+          </button>
         )}
       </div>
     </Sheet>

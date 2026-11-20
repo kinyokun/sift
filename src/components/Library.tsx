@@ -794,6 +794,7 @@ export function Library() {
     ...(s.stacks.length ? [{ label: t.stackPhotos, checked: s.stacking, onSelect: () => act.setSettings({ stacks: !s.stacking }) } as MenuItem] : []),
     ...(!mobile || s.stacks.length ? ["divider" as const] : []),
     { label: t.settings, icon: "gear", onSelect: () => act.setSheet("settings") },
+    ...(mobile ? [] : [{ label: t.keysTitle, icon: "keyboard", onSelect: () => act.setSheet("keys") } as MenuItem]),
     { label: t.help, icon: "help", onSelect: () => act.setSheet("help") },
   ];
 

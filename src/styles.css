@@ -2270,24 +2270,269 @@ input.text {
   margin: 20px 0 8px;
 }
 
-.key-list {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 7px 18px;
-  font-size: 13px;
+.help-map {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin-top: 20px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--fill);
+  font-size: 14px;
+  font-weight: 500;
+  text-align: left;
 }
 
-.key-list div {
+.help-map span {
+  flex: 1;
+}
+
+/* The keyboard map: everything on one screen, the keyboard as wide as the height left over allows. */
+.keys-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: calc(18px + var(--safe-top)) 24px calc(18px + var(--safe-bottom));
+  background: rgba(14, 14, 16, 0.94);
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+  color: #f5f5f7;
+  color-scheme: dark;
+  animation: fade 0.12s ease-out;
+  overflow: hidden;
+  --g-nav: #0a84ff;
+  --g-mark: #30d158;
+  --g-inspect: #ff9f0a;
+  --g-look: #bf5af2;
+  --g-compare: #64d2ff;
+  --g-app: #98989d;
+}
+
+.keys-overlay header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 22px;
+  width: min(100%, 1240px);
+}
+
+.keys-overlay h2 {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.keys-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  font-size: 12px;
+  color: rgba(235, 235, 245, 0.75);
+}
+
+.keys-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.keys-legend i {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--g);
+}
+
+.keys-legend kbd,
+.keys-overlay footer kbd {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  font-size: 11px;
+  background: rgba(255, 255, 255, 0.12);
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.keys-hint {
+  margin-left: auto;
+  font-size: 12px;
+  color: rgba(235, 235, 245, 0.5);
+}
+
+.keyboard {
+  container-type: inline-size;
+  flex: none;
+  /* 15 keys wide and 37% as tall: the height left after the header and footer decides. */
+  width: min(100%, 1320px, calc((100vh - 240px - var(--safe-top) - var(--safe-bottom)) * 2.7));
+  display: flex;
+  flex-direction: column;
+  gap: 0.5cqw;
+}
+
+.key-row {
+  display: grid;
+  grid-template-columns: repeat(60, minmax(0, 1fr));
+  gap: 0.5cqw;
+  height: 7cqw;
+}
+
+.cap {
+  --g: transparent;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 0.15cqw;
+  min-width: 0;
+  padding: 0.45cqw 0.55cqw;
+  border-radius: 0.6cqw;
+  background: rgba(255, 255, 255, 0.07);
+  box-shadow: inset 0 -0.15cqw 0 rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+
+.cap[class*="g-"] {
+  background: color-mix(in srgb, var(--g) 22%, rgba(255, 255, 255, 0.05));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--g) 55%, transparent);
+}
+
+.cap.shape {
+  background: rgba(255, 255, 255, 0.035);
+  box-shadow: none;
+}
+
+.cap.modifier b {
+  color: #f5f5f7;
+}
+
+.cap b {
+  position: absolute;
+  top: 0.4cqw;
+  left: 0.6cqw;
+  font: 600 clamp(10px, 1.05cqw, 15px) ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-variant-numeric: slashed-zero;
+  color: rgba(235, 235, 245, 0.55);
+}
+
+.cap span {
+  font-size: clamp(9px, 0.92cqw, 13px);
+  line-height: 1.15;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: rgba(235, 235, 245, 0.82);
+}
+
+/* A name may take two lines (the cap's tooltip has it whole). */
+.cap span {
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  flex: none;
+}
+
+.cap span.plain {
+  font-weight: 650;
+  font-size: clamp(10px, 1.05cqw, 14px);
+  color: #fff;
+}
+
+.cap span.chord {
+  font-size: clamp(8.5px, 0.84cqw, 11px);
+  color: color-mix(in srgb, var(--g) 60%, #fff);
+}
+
+.cap span i {
+  font-style: normal;
+  margin-right: 0.25cqw;
+  opacity: 0.8;
+}
+
+.arrows {
+  grid-column: span 12;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  gap: 0.3cqw;
+}
+
+.cap.arrow {
+  padding: 0.2cqw 0.4cqw;
+  justify-content: center;
+}
+
+.cap.arrow b {
+  position: static;
+}
+
+.cap.arrow span.plain {
+  font-size: clamp(8px, 0.8cqw, 12px);
+  font-weight: 600;
+}
+
+.cap.ArrowLeft {
+  grid-row: 1 / 3;
+  grid-column: 1;
+}
+
+.cap.ArrowUp {
+  grid-row: 1;
+  grid-column: 2;
+}
+
+.cap.ArrowDown {
+  grid-row: 2;
+  grid-column: 2;
+}
+
+.cap.ArrowRight {
+  grid-row: 1 / 3;
+  grid-column: 3;
+}
+
+.g-nav { --g: var(--g-nav); }
+.g-mark { --g: var(--g-mark); }
+.g-inspect { --g: var(--g-inspect); }
+.g-look { --g: var(--g-look); }
+.g-compare { --g: var(--g-compare); }
+.g-app { --g: var(--g-app); }
+
+.keys-overlay footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 48px;
+  width: min(100%, 1240px);
+  font-size: 12px;
+  color: rgba(235, 235, 245, 0.8);
+}
+
+.keys-overlay footer h3 {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: rgba(235, 235, 245, 0.45);
+  margin-bottom: 6px;
+}
+
+.keys-overlay footer section > div {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-height: 22px;
 }
 
-.key-list span {
+.keys-overlay footer section > div > span {
   flex: none;
-  min-width: 74px;
-  color: var(--text-2);
-  font-size: 12px;
+  min-width: 96px;
+  color: rgba(235, 235, 245, 0.55);
 }
 
 .toast {

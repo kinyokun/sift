@@ -176,7 +176,7 @@ iOS and Android builds currently have to be built yourself; see [AGENTS.md](AGEN
 
 - Export: copy / rename, a folder for each tag, find RAW files by name, info frames
 - LAN transfer: download originals to a phone by QR code, or send photos back to the computer
-- Every shortcut can be changed (Settings → Shortcuts)
+- Shortcuts are laid out for the left hand on the keyboard and the right hand on the mouse, and every one can be changed (Settings → Shortcuts); press `` ` `` to see them on a keyboard
 - In the viewer the scroll wheel zooms, goes to the next photo or pans, and a double-click zooms or goes back to the grid, as you choose (Settings → Mouse)
 - In-app updates: the official macOS / Windows installers check for new versions and install them from within the app
 
