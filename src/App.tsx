@@ -27,6 +27,7 @@ function Toast() {
     noFace: t.noFace,
     noFaceNoAf: t.noFaceNoAf,
     noFocusData: t.noFocusData,
+    noLevelData: t.noLevelData,
     originalNeedsRaw: t.originalNeedsRaw,
     resumed: t.resumed,
     lookImported: t.lookImported(Number(detail) || 0),

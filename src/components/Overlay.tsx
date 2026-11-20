@@ -9,17 +9,38 @@ export type Crop = { x: number; y: number; w: number; h: number; angle?: number 
 export const ROTATABLE_GUIDES = [3, 5];
 export const GUIDE_MODES = 7;
 
-export const CROP_RATIOS: { id: string; ratio: number | null }[] = [
-  { id: "original", ratio: 0 },
-  { id: "1:1", ratio: 1 },
-  { id: "4:5", ratio: 4 / 5 },
-  { id: "3:4", ratio: 3 / 4 },
-  { id: "2:3", ratio: 2 / 3 },
-  { id: "9:16", ratio: 9 / 16 },
-  { id: "3:2", ratio: 3 / 2 },
-  { id: "16:9", ratio: 16 / 9 },
-  { id: "free", ratio: null },
-];
+/** The crop shapes offered in the menu: "original" keeps the photo's own, "free" any. */
+export const CROP_RATIOS = ["original", "1:1", "4:5", "3:4", "2:3", "9:16", "3:2", "16:9", "free"];
+
+/** The pixel aspect ratio of a crop shape: 0 for the photo's own, null for any, else width over height. */
+export function ratioOf(id: string): number | null {
+  if (id === "original") return 0;
+  const m = /^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/.exec(id);
+  return m ? Number(m[1]) / Number(m[2]) : null;
+}
+
+/** A typed-in ratio as a crop shape ("16:9"): two numbers with ":", "x", "×", "/" or a space
+ * between them, or one for so many to 1. Null for anything else or a shape too extreme to use. */
+export function parseRatio(text: string): string | null {
+  const parts = text.trim().split(/\s*[:x×*/：\s]\s*/i).filter(Boolean);
+  if (parts.length < 1 || parts.length > 2 || parts.some((p) => !/^\d*\.?\d+$/.test(p))) return null;
+  const [w, h] = [Number(parts[0]), Number(parts[1] ?? 1)];
+  if (!(w > 0 && h > 0) || w / h > 20 || h / w > 20) return null;
+  return `${w}:${h}`;
+}
+
+/** The same shape on its side; a free crop has none. */
+export function swapRatio(id: string, imageW: number, imageH: number): string | null {
+  if (id === "free") return null;
+  if (id === "original") {
+    const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a);
+    const [w, h] = [Math.round(imageW), Math.round(imageH)];
+    const d = gcd(w, h) || 1;
+    return `${h / d}:${w / d}`;
+  }
+  const [w, h] = id.split(":");
+  return `${h}:${w}`;
+}
 
 /** Largest centred crop with the given pixel aspect ratio. */
 export function centeredCrop(imageW: number, imageH: number, ratio: number | null): Crop {
@@ -109,6 +130,35 @@ function Guides(props: { mode: number; flip: number; x: number; y: number; w: nu
   );
 }
 
+/** Where the true horizon runs, drawn through the middle of what is shown, against marks of
+ * the frame's own level. It turns green once the photo is straightened to it. The figures sit
+ * by the right-hand mark, clear of a focus area in the middle. */
+function Level(props: { horizon: number; pitch: number | null; x: number; y: number; w: number; h: number }) {
+  const { horizon, pitch, x, y, w, h } = props;
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  const r = Math.max(40, Math.min(w, h) * 0.3);
+  const tick = Math.min(28, r / 3);
+  const flat = Math.abs(horizon) < 0.25;
+  const label = `${Math.abs(horizon).toFixed(1)}°${pitch == null ? "" : `   ${pitch >= 0 ? "▲" : "▼"} ${Math.abs(pitch).toFixed(1)}°`}`;
+  const shapes = (
+    <>
+      <line x1={cx - r - 8 - tick} y1={cy} x2={cx - r - 8} y2={cy} />
+      <line x1={cx + r + 8} y1={cy} x2={cx + r + 8 + tick} y2={cy} />
+      <line x1={cx - r} y1={cy} x2={cx + r} y2={cy} transform={`rotate(${horizon} ${cx} ${cy})`} />
+      <circle cx={cx} cy={cy} r={3} />
+    </>
+  );
+  return (
+    <g className={`level ${flat ? "flat" : ""}`}>
+      <g className="shadow">{shapes}</g>
+      <g>{shapes}</g>
+      <text x={cx + r + 8 + tick} y={cy - 10} textAnchor="end" fontSize={12}>
+        {label}
+      </text>
+    </g>
+  );
+}
 type Props = {
   /** Size of the photo on screen, in CSS pixels. The overlay is drawn in
    * screen space so lines keep their width at any zoom level. */
@@ -125,6 +175,8 @@ type Props = {
   angle: number;
   cropRatio: number | null;
   onCrop: (crop: Crop) => void;
+  /** Degrees clockwise the true horizon runs on screen, and the camera's pitch; null hides the level. */
+  level?: { horizon: number; pitch: number | null } | null;
   style?: React.CSSProperties;
 };
 
@@ -194,6 +246,7 @@ export function Overlay(props: Props) {
         <path className="crop-mask" fillRule="evenodd" d={`M0 0H${W}V${H}H0Z M${region.x} ${region.y}h${region.w}v${region.h}h${-region.w}Z`} />
       )}
       {props.guides > 0 && <Guides mode={props.guides} flip={props.flip} {...region} />}
+      {props.level && <Level {...props.level} {...region} />}
       {props.af?.map((b, i) => {
         // Small areas (pinpoint AF, or any area on a zoomed-out photo) are
         // drawn at a minimum size around their centre so they stay visible.

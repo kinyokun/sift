@@ -883,6 +883,67 @@ await session("crop", desktop, async (page, shot) => {
   console.log(`[crop] ${used.length} bindings, ${new Set(used).size} distinct`);
 });
 
+// The camera's level: shown over the photo with L and in the info panel, and the crop straightens
+// to it in one click. The crop takes a ratio typed in, keeps it in its menu, and turns it on its side.
+for (const [name, size] of [["level", desktop], ["level-phone", phone]]) {
+  await session(name, size, async (page, shot) => {
+    const mobile = name === "level-phone";
+    await openLibrary(page);
+    const cell = page.locator('.cell[data-id$="CZP_0299.NEF"]');
+    await (mobile ? cell.tap() : cell.dblclick());
+    await page.locator(".tier.full.ready").waitFor({ timeout: 20000 });
+    if (!mobile) {
+      const row = page.locator(".info-side div", { has: page.locator("small", { hasText: "水平仪" }) });
+      console.log(`[${name}] info: ${await row.locator("span").textContent()}`);
+      await page.keyboard.press("L");
+    } else await page.locator('.dock [aria-label="水平仪"]').tap();
+    await page.waitForTimeout(300);
+    console.log(`[${name}] level drawn: ${await page.locator(".overlay .level").count()}, label ${await page.locator(".overlay .level text").textContent()}`);
+    await shot("level");
+    const click = (l) => (mobile ? l.tap() : l.click());
+    await click(page.locator('.dock [aria-label="裁剪预览"]'));
+    await click(page.getByRole("menuitem", { name: "原始比例" }));
+    await click(page.locator(".crop-bar button", { hasText: "按水平仪" }));
+    await page.waitForTimeout(300);
+    console.log(`[${name}] straightened to ${await page.locator(".crop-bar output").textContent()}, level green: ${await page.locator(".overlay .level.flat").count()}`);
+    await shot("straightened");
+    const field = page.locator(".crop-bar .ratio-field input");
+    await click(field);
+    await field.fill("65:24");
+    await field.press("Enter");
+    await page.waitForTimeout(300);
+    const aspect = async () => {
+      const b = await page.locator(".overlay .crop-frame").boundingBox();
+      return (b.width / b.height).toFixed(3);
+    };
+    console.log(`[${name}] typed 65:24: field ${await field.inputValue()}, crop aspect ${await aspect()} (want ${(65 / 24).toFixed(3)})`);
+    await shot("ratio-typed");
+    await click(page.locator('.crop-bar [aria-label="宽高互换"]'));
+    await page.waitForTimeout(300);
+    console.log(`[${name}] swapped: field ${await field.inputValue()}, crop aspect ${await aspect()} (want ${(24 / 65).toFixed(3)})`);
+    await click(field);
+    await field.fill("abc");
+    await field.press("Enter");
+    console.log(`[${name}] nonsense refused: ${await field.getAttribute("aria-invalid")}, still ${await field.inputValue()}`);
+    await field.press("Escape");
+    await click(page.locator('.dock [aria-label="裁剪预览"]'));
+    const items = await page.getByRole("menuitem").allTextContents();
+    console.log(`[${name}] menu: ${items.join(" | ")}`);
+    await shot("menu");
+    await click(page.getByRole("menuitem", { name: "自定义比例…" }));
+    await page.waitForTimeout(200);
+    console.log(`[${name}] custom ratio focuses the field: ${await page.evaluate(() => document.activeElement?.closest(".ratio-field") != null)}`);
+    await page.keyboard.type("1.91");
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(300);
+    console.log(`[${name}] 1.91: field ${await field.inputValue()}, crop aspect ${await aspect()}`);
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(300);
+    console.log(`[${name}] confirmed, crop bar gone: ${(await page.locator(".crop-bar").count()) === 0}, saved ratios ${await page.evaluate(() => JSON.stringify(JSON.parse(localStorage.getItem("sift.settings")).cropRatios))}`);
+    await shot("confirmed");
+  });
+}
+
 // Settings saved with the old defaults move to the new ones, and what the user chose stays: here
 // pick on K, and the look wall on G, which the guides get by default now (so they are left without a key).
 // The digit 0 clears a rating and nothing else; the letter O (version 2's "original") is unassigned.

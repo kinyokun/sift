@@ -53,6 +53,8 @@ export type Meta = {
   rating: number;
   exif: Exif;
   af: { boxes: AfBox[]; source: string; mode: string | null } | null;
+  /** The camera's electronic level: degrees turned clockwise seen from behind, and pointed above the horizon. */
+  level?: { roll: number; pitch: number | null } | null;
   /** In-camera look (Nikon Picture Control); `custom` marks a user or Imaging Cloud recipe. */
   look: { name: string; base: string; custom: boolean } | null;
   /** The camera's Picture Control can be replaced by an NP3, tone curve included, when Nikon's SDK develops the file. */

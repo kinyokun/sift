@@ -1276,9 +1276,13 @@ button.primary.large {
   display: flex;
   gap: 8px;
   padding: 6px;
-  border-radius: 999px;
+  border-radius: 22px;
   box-shadow: var(--shadow);
   white-space: nowrap;
+  flex-wrap: wrap;
+  justify-content: center;
+  width: max-content;
+  max-width: calc(100vw - 24px);
 }
 
 .crop-bar button {
@@ -1292,6 +1296,39 @@ button.primary.large {
   background: var(--fill);
 }
 
+.crop-bar .ratio-field {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 4px 0 6px;
+  border-radius: 999px;
+  background: var(--fill);
+}
+
+.crop-bar .ratio-field input {
+  width: 6.5em;
+  padding: 6px 4px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  outline: none;
+}
+
+.crop-bar .ratio-field input.bad {
+  color: #ff453a;
+}
+
+.crop-bar .ratio-field .icon-button {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: transparent;
+}
 .crop-bar .straighten {
   display: flex;
   align-items: center;
@@ -1471,6 +1508,38 @@ button.primary.large {
 .guide.shadow * {
   stroke: rgba(0, 0, 0, 0.5);
   stroke-width: 3;
+}
+
+.level * {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.95);
+  stroke-width: 1.500;
+}
+
+.level .shadow * {
+  stroke: rgba(0, 0, 0, 0.5);
+  stroke-width: 3.500;
+}
+
+.level circle {
+  fill: rgba(255, 255, 255, 0.95);
+}
+
+.level.flat > g:not(.shadow) * {
+  stroke: #30d158;
+}
+
+.level.flat > g:not(.shadow) circle {
+  fill: #30d158;
+}
+
+.level text {
+  fill: #fff;
+  stroke: rgba(0, 0, 0, 0.55);
+  stroke-width: 3;
+  paint-order: stroke;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 .crop-mask {

@@ -8,7 +8,7 @@ type Group = "nav" | "mark" | "inspect" | "look" | "compare" | "app";
 const GROUPS: Record<Group, Action[]> = {
   nav: ["prev", "next", "stackPrev", "stackNext"],
   mark: ["pick", "reject", "unflag", "delete", "rate0", "rate1", "rate2", "rate3", "rate4", "rate5", "tags", "tag1", "tag2", "tag3", "tag4", "tag5", "tag6", "tag7", "tag8", "tag9"],
-  inspect: ["eye", "zoom", "af", "clipping", "guides", "guidesPrev", "flip", "crop", "rotateLeft", "rotateRight", "info", "immersive"],
+  inspect: ["eye", "zoom", "af", "clipping", "level", "guides", "guidesPrev", "flip", "crop", "rotateLeft", "rotateRight", "info", "immersive"],
   look: ["original", "lookPrev", "lookNext", "wall"],
   compare: ["compare", "panes", "side", "link"],
   app: ["editor", "refresh", "help"],

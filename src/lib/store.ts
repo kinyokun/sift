@@ -62,6 +62,10 @@ export type Settings = {
   infoPinned: boolean;
   /** Mark blown highlights and crushed shadows on the photo in the viewer. */
   clipping: boolean;
+  /** Show the camera's level over the photo in the viewer. */
+  level: boolean;
+  /** Crop ratios typed in lately, as "W:H", newest first. */
+  cropRatios: string[];
   /** What the scroll wheel does in the viewer; unset, what suits the platform (`wheelModeOf`). */
   wheel: WheelMode | null;
   /** What a double click on the photo does in the viewer. */
@@ -119,6 +123,8 @@ const defaults: Settings = {
   autoAdvance: false,
   infoPinned: true,
   clipping: false,
+  level: false,
+  cropRatios: [],
   wheel: null,
   doubleClick: "zoom",
   thumb: 184,

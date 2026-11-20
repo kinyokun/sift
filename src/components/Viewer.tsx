@@ -3,12 +3,13 @@ import { NO_LOOK, api, fileName, imageUrl, isHeifPath, isRawPath, type Item, typ
 import { editIn } from "../lib/editor";
 import { importLooks } from "../lib/looks";
 import { useT } from "../lib/i18n";
+import { tiltOf } from "../lib/level";
 import { NO_KEYS, RATE_ACTIONS, actionFor, isTyping, ratingOf, tagOf } from "../lib/shortcuts";
 import { cropOf, flagOf, lookOf, turnOf, useStore, wheelModeOf } from "../lib/store";
 import { fitCrop, turnRect, turnedSize } from "../lib/turn";
 import { IconButton, Menu, Stars, tipProps, type MenuItem } from "../ui/controls";
 import { Icon } from "../ui/Icon";
-import { CROP_RATIOS, GUIDE_MODES, ROTATABLE_GUIDES, centeredCrop, type Crop } from "./Overlay";
+import { CROP_RATIOS, GUIDE_MODES, ROTATABLE_GUIDES, centeredCrop, parseRatio, ratioOf, swapRatio, type Crop } from "./Overlay";
 import { Histogram } from "./Histogram";
 import { LookWall } from "./LookWall";
 import { LiveEditor, LiveMovie, LivePreview, MIN_LIVE_FRAMES, type LiveDraft } from "./Live";
@@ -62,6 +63,7 @@ function InfoPanel({ item, meta, docked, crop, tags, histogram, onSaveLook }: In
   // Ricoh Imaging names its Pentax bodies "PENTAX K-1" and so on.
   const camera = x ? [x.make?.split(" ")[0], x.model].filter((v, i, a) => v && !(i === 0 && (a[1]?.toUpperCase().includes(v.toUpperCase()) || a[1]?.startsWith("PENTAX ")))).join(" ") : "";
   const look = meta?.look;
+  const tilt = tiltOf(meta);
   // Only worth a mention when the sensor is not full frame.
   const equivalent = x?.focal35 && x.focal && Math.abs(x.focal35 - x.focal) > 1 ? t.equiv(x.focal35) : "";
   const shooting = [t.programs[x?.program ?? 0], t.meterings[x?.metering ?? 0], x?.flash ? t.flashFired : ""].filter(Boolean).join("  ·  ");
@@ -100,6 +102,7 @@ function InfoPanel({ item, meta, docked, crop, tags, histogram, onSaveLook }: In
       ),
     ],
     [t.afMode, meta?.af?.mode],
+    [t.level, tilt !== null && t.levelLine(tilt, meta?.level?.pitch ?? null)],
     [t.taken, x?.datetime],
     [t.artist, x?.artist],
     [t.copyright, x?.copyright],
@@ -130,6 +133,59 @@ function InfoPanel({ item, meta, docked, crop, tags, histogram, onSaveLook }: In
   );
 }
 
+/** Crop shapes typed in that the crop menu keeps offering. */
+const MAX_CROP_RATIOS = 6;
+
+/** The crop's shape as text to type over: a ratio such as 16:9 is taken on Return. */
+function RatioField(props: { label: string; name: string; hint: string; focus: boolean; onFocused: () => void; onRatio: (id: string) => void }) {
+  const [text, setText] = useState(props.label);
+  const [bad, setBad] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    setText(props.label);
+    setBad(false);
+  }, [props.label]);
+  useEffect(() => {
+    if (!props.focus) return;
+    input.current?.focus();
+    props.onFocused();
+  }, [props.focus]);
+  return (
+    <input
+      ref={input}
+      className={`ratio ${bad ? "bad" : ""}`}
+      value={text}
+      size={7}
+      placeholder="W:H"
+      spellCheck={false}
+      autoComplete="off"
+      aria-label={props.name}
+      aria-invalid={bad}
+      title={props.hint}
+      onFocus={(e) => e.currentTarget.select()}
+      onChange={(e) => {
+        setText(e.target.value);
+        setBad(false);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          const id = parseRatio(text);
+          if (!id) return setBad(true);
+          props.onRatio(id);
+          e.currentTarget.blur();
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          e.currentTarget.blur();
+        }
+      }}
+      onBlur={() => {
+        setText(props.label);
+        setBad(false);
+      }}
+    />
+  );
+}
 /** Frames one Live Photo holds at most; the backend refuses more. */
 const MAX_LIVE_FRAMES = 600;
 /** Photos fetched ahead in the direction of travel, so a held key finds its pictures there; a phone turns one page at a time. */
@@ -170,6 +226,7 @@ export function Viewer() {
   const [flip, setFlip] = useState(0);
   const [cropRatio, setCropRatio] = useState<string | null>(null);
   const [crop, setCrop] = useState<Crop | null>(null);
+  const [focusRatio, setFocusRatio] = useState(false);
   const [eye, setEye] = useState(false);
   // Compare: the first pane is the viewer's own position, these are the others.
   const [extra, setExtra] = useState<number[]>(() =>
@@ -564,7 +621,7 @@ export function Viewer() {
     const keep = id === "free" || (saved && !cropRatio);
     // A photo that is being straightened stays so with another shape of crop.
     const angle = crop?.angle ?? saved?.[4] ?? 0;
-    const box = saved && keep ? { x: saved[0], y: saved[1], w: saved[2], h: saved[3] } : centeredCrop(size.w, size.h, CROP_RATIOS.find((r) => r.id === id)!.ratio);
+    const box = saved && keep ? { x: saved[0], y: saved[1], w: saved[2], h: saved[3] } : centeredCrop(size.w, size.h, ratioOf(id));
     setCrop({ ...fitCrop(box, angle, size), angle });
   };
 
@@ -595,6 +652,30 @@ export function Viewer() {
   const resetCrop = () => {
     if (current) useStore.getState().setCrop([current.id], null);
     chooseCrop(null);
+  };
+
+  /** Crops to a ratio that was typed in, and keeps it in the menu. */
+  const typeRatio = (id: string) => {
+    if (!CROP_RATIOS.includes(id)) {
+      const kept = useStore.getState().settings.cropRatios;
+      useStore.getState().setSettings({ cropRatios: [id, ...kept.filter((r) => r !== id)].slice(0, MAX_CROP_RATIOS) });
+    }
+    chooseCrop(id);
+  };
+
+  /** Turns the crop's shape on its side. */
+  const swapCrop = () => {
+    const meta = current ? metas[current.id] : null;
+    if (!cropRatio || !meta || !current) return;
+    const size = shownSize(meta, turnOf(quarters, current));
+    const id = swapRatio(cropRatio, size.w, size.h);
+    if (id) chooseCrop(id);
+  };
+
+  /** Starts a crop, if none is being drawn, with the ratio field ready to type in. */
+  const customRatio = () => {
+    if (!cropRatio && current) chooseCrop(cropOf(crops, current) ? "free" : "original");
+    setFocusRatio(true);
   };
 
   /** Steps through: as shot, original (RAW only), then every imported look. */
@@ -667,6 +748,11 @@ export function Viewer() {
   };
 
   const toggleClipping = () => useStore.getState().setSettings({ clipping: !settings.clipping });
+
+  const toggleLevel = () => {
+    if (!settings.level && tiltOf(currentMeta) === null) useStore.getState().notify("noLevelData");
+    useStore.getState().setSettings({ level: !settings.level });
+  };
 
   const toggleAf = () => {
     if (!showAf && !currentMeta?.af) useStore.getState().notify("noFocusData");
@@ -751,6 +837,8 @@ export function Viewer() {
           return setWall(true);
         case "clipping":
           return toggleClipping();
+        case "level":
+          return toggleLevel();
         case "guides":
           return cycleGuides(1);
         case "guidesPrev":
@@ -803,11 +891,12 @@ export function Viewer() {
     autoDevelop: settings.autoDevelop,
     nikon: sdk,
     showAf,
+    showLevel: settings.level,
     clip: settings.clipping,
     guides,
     flip,
     crop,
-    cropRatio: cropRatio ? CROP_RATIOS.find((r) => r.id === cropRatio)!.ratio : null,
+    cropRatio: cropRatio ? ratioOf(cropRatio) : null,
     onCrop: setCrop,
   };
 
@@ -827,12 +916,14 @@ export function Viewer() {
     { label: t.actions.rotateLeft, onSelect: () => rotate(-1) },
     { label: t.actions.rotateRight, onSelect: () => rotate(1) },
     "divider",
-    ...CROP_RATIOS.map((r) => ({
-      label: r.id === "original" ? t.cropOriginal : r.id === "free" ? t.cropFree : r.id,
-      checked: cropRatio === r.id,
-      onSelect: () => chooseCrop(r.id),
+    ...[...CROP_RATIOS.slice(0, -1), ...settings.cropRatios.filter((r) => !CROP_RATIOS.includes(r)), "free"].map((r) => ({
+      label: r === "original" ? t.cropOriginal : r === "free" ? t.cropFree : r,
+      checked: cropRatio === r,
+      onSelect: () => chooseCrop(r),
     })),
+    { label: t.cropCustom, onSelect: customRatio },
   ];
+  const currentTilt = tiltOf(currentMeta);
   const flag = flagOf(flags, current);
   const position = indices[active];
   const closePicker = () => setPicking(null);
@@ -1001,6 +1092,19 @@ export function Viewer() {
           )}
           {crop && (
             <div className="crop-bar glass">
+              {cropRatio && (
+                <div className="ratio-field">
+                  <RatioField
+                    label={cropRatio === "original" ? t.cropOriginal : cropRatio === "free" ? t.cropFree : cropRatio}
+                    name={t.cropRatio}
+                    hint={t.cropRatioHint}
+                    focus={focusRatio}
+                    onFocused={() => setFocusRatio(false)}
+                    onRatio={typeRatio}
+                  />
+                  <IconButton icon="swap" label={t.cropSwap} size={16} disabled={cropRatio === "free"} onClick={swapCrop} />
+                </div>
+              )}
               <label className="straighten" title={t.straightenHint}>
                 <span>{t.straighten}</span>
                 <input
@@ -1017,6 +1121,11 @@ export function Viewer() {
                 />
                 <output>{(crop.angle ?? 0).toFixed(1)}°</output>
               </label>
+              {currentTilt !== null && (
+                <button {...tipProps(t.straightenLevelHint(currentTilt.toFixed(1)))} onClick={() => straighten(Math.max(-45, Math.min(45, Math.round(currentTilt * 10) / 10)))}>
+                  {t.straightenLevel}
+                </button>
+              )}
               <button onClick={() => chooseCrop(null)}>{t.cancel}</button>
               {savedCrop && <button onClick={resetCrop}>{t.cropReset}</button>}
               <button className="primary" onClick={confirmCrop}>
@@ -1041,6 +1150,7 @@ export function Viewer() {
             <IconButton icon="rotate" label={t.actions.rotateRight} onClick={() => rotate(1)} keys={[keys.rotateRight]} />
             {!mobile && <IconButton icon="openIn" label={t.actions.editor} onClick={() => void editIn([current])} keys={[keys.editor]} />}
             <IconButton icon="clip" label={t.clipping} active={settings.clipping} onClick={toggleClipping} keys={[keys.clipping]} />
+            <IconButton icon="level" label={t.level} active={settings.level && currentTilt !== null} onClick={toggleLevel} keys={[keys.level]} />
             <IconButton icon="compare" label={t.compare} active={compare} onClick={toggleCompare} keys={[keys.compare]} />
             {compare && <IconButton icon="link" label={t.link} active={link} onClick={() => setLink(!link)} keys={[keys.link]} />}
           </div>

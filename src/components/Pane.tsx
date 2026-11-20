@@ -1,5 +1,6 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { NO_LOOK, imageUrl, isNefPath, isRawPath, type CropBox, type Item, type Meta } from "../lib/api";
+import { tiltOf } from "../lib/level";
 import type { WheelMode } from "../lib/store";
 import { ZOOM_PAST, ZOOM_REST_MS } from "../lib/wheelSize";
 import { spin, turnPoint, turnRect, turnStyle, turnedSize } from "../lib/turn";
@@ -42,6 +43,8 @@ type Props = {
   turn: number;
   onSwipeV?: (direction: 1 | -1) => void;
   showAf: boolean;
+  /** Draw the camera's level over the photo. */
+  showLevel?: boolean;
   /** Mark blown highlights and crushed shadows on the photo. */
   clip?: boolean;
   guides: number;
@@ -646,6 +649,10 @@ export const Pane = forwardRef<PaneHandle, Props>(function Pane(props, ref) {
       .filter((b) => b.x + b.w / 2 > 0 && b.x + b.w / 2 < 1 && b.y + b.h / 2 > 0 && b.y + b.h / 2 < 1);
   }, [meta, turn, angle, fullDims, frame?.[0], frame?.[1], frame?.[2], frame?.[3]]);
 
+  // The photo shows the scene turned the other way from the camera, then by however far it is straightened.
+  const tilt = props.showLevel ? tiltOf(meta) : null;
+  const levelShown = tilt === null ? null : { horizon: angle - tilt, pitch: meta?.level?.pitch ?? null };
+
   return (
     <div
       ref={box}
@@ -716,6 +723,7 @@ export const Pane = forwardRef<PaneHandle, Props>(function Pane(props, ref) {
           angle={angle}
           cropRatio={props.cropRatio}
           onCrop={props.onCrop}
+          level={levelShown}
         />
       )}
     </div>

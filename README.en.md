@@ -52,6 +52,8 @@ Press `Q` to show the AF points that Nikon, Canon, Sony, Fujifilm, Panasonic, Pe
 
 <p align="center"><img src="docs/readme/focus-en.webp" alt="A Nikon Z fc NEF with the AF box on the flower, the info panel and histogram on the right" width="88%"></p>
 
+Press `L` to show the camera's electronic level at the moment of the shot: a line across the middle marks the true horizon and turns green once the photo is straightened to it, with the tilt and pitch beside it and in the info panel. Nikon Z bodies, Canon, Fujifilm (the X-T5 and later, tilt only), Panasonic and Leica, Olympus / OM System, Pentax, Ricoh and the iPhone record it. While cropping, "By level" in the crop bar straightens the photo in one click; besides the presets, the crop takes any ratio typed in (65:24 or 1.91:1, say), keeps the ones you typed in its menu, and swaps width and height with the button beside it.
+
 ## Bursts, pixel shift and Live Photos
 
 Bursts and pixel-shift series fold into one grid cell with a frame count; rating, flagging and exporting it covers the whole stack. In the viewer a filmstrip shows every frame of the stack, and `↑` / `↓` jump to the previous or next stack. Nikon bodies and iPhones are grouped exactly by the burst id they write into the file; Canon, Sony, Fujifilm, Panasonic, Leica, Olympus / OM System, Pentax and Ricoh by the drive mode, the frame's number in its burst and the time between frames; other makers by the time between frames.
@@ -161,7 +163,7 @@ iOS and Android builds currently have to be built yourself; see [AGENTS.md](AGEN
 - Tags: make a tag at any point while culling (one per person at an event, say) and put it on photos; a photo can carry several. Show only the photos with certain tags; on export every tag gets its own folder, with the files named after the tag, and a photo with several tags is in each of their folders
 - 100% view, eye close-up (people, and the eyes of cats, dogs, birds, horses, sheep, cows and other animals), AF points (Nikon, Canon, Sony, Fujifilm, Panasonic, Pentax, Ricoh)
 - Compare 2, 3 or 4 photos side by side; each pane picks and steps its own photo, burst frames included; zoom and pan can be synced; compare a grid selection directly
-- Composition guides and crop preview (applied on export once confirmed)
+- Composition guides, the camera's level (tilt and pitch as recorded) and crop preview (any ratio typed in, straightened by the level in one click; applied on export once confirmed)
 - Histogram and on-screen clipping warning
 - Progress is saved per folder automatically and picked up next time
 
@@ -195,6 +197,7 @@ iOS and Android builds currently have to be built yourself; see [AGENTS.md](AGEN
 - `V`: original (no look); `Shift+V`: look wall
 - `⌘A` / `⌘D`: previous / next look (Ctrl on Windows)
 - `B`: clipping warning
+- `L`: camera level
 - `G` / `Shift+G`: next / previous composition guide; `Alt+G`: turn the guide
 - `R`: crop preview; `Alt+A` / `Alt+D`: rotate 90° left / right
 - `C`: compare (in the grid, the 2–4 selected photos); `Shift+C`: 2 / 3 / 4 photos; `Shift+Tab`: next pane; `Alt+C`: link zoom
