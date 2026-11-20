@@ -49,6 +49,9 @@ export type Histogram = { r: number[]; g: number[]; b: number[]; luma: number[];
 /** What makes a photo HDR: coded for HDR screens (PQ, HLG), or an ordinary picture with a gain map. */
 export type Hdr = "pq" | "hlg" | "gainMap";
 
+/** What the grid sorts, filters and stacks by, read from a photo. */
+export type Brief = { rating: number; date: string | null; hdr: Hdr | null };
+
 export type Meta = {
   format: string;
   raw: boolean;
@@ -228,7 +231,12 @@ export const api = {
   /** A value that changes when a photo or movie appears in the folder or goes away. */
   folderChanges: (path: string, deep: boolean) => invoke<string>("folder_changes", { path, deep }),
   readMeta: (path: string) => invoke<Meta>("read_meta", { path }),
-  readBriefs: (paths: string[]) => invoke<{ rating: number; date: string | null; hdr: Hdr | null }[]>("read_briefs", { paths }),
+  /** Makes the thumbnails of `paths` ahead, in the background; stops the run asked for before. */
+  warmThumbs: (paths: string[], edge: number) => invoke<void>("warm_thumbs", { paths, edge }),
+  /** What was read before from those of `paths` that have not changed since, without opening them. */
+  keptBriefs: (paths: string[]) => invoke<(Brief | null)[]>("kept_briefs", { paths }),
+  /** `fresh` reads the files again rather than taking what was read from them before. */
+  readBriefs: (paths: string[], fresh = false) => invoke<Brief[]>("read_briefs", { paths, fresh }),
   /** Bursts and pixel-shift series among the displayed files of a folder. */
   groupShots: (paths: string[]) => invoke<Stack[]>("group_shots", { paths }),
   /** Seconds each of `frames` is shown for when they play as a Live Photo. */

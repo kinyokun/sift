@@ -19,6 +19,8 @@ const THUMB_EDGE = 512;
 const THUMB_MIN = 110;
 /** Thumbnails for cells wider than this many device pixels are asked for at twice the size. */
 const THUMB_SHARP = 600;
+/** Thumbnails of the whole folder are made ahead once the grid has stood still this long. */
+const WARM_DELAY_MS = 1500;
 const OVERSCAN_ROWS = 4;
 const CELL_INSET = 5;
 /** A new cell waits this long before asking for its thumbnail, so rows flung past cost nothing. */
@@ -138,7 +140,7 @@ const Cell = memo(function Cell(props: {
       <div className={`cell-frame ${ready ? "" : "pending"}`} style={frame}>
         {asked && (
           <img
-            src={imageUrl("thumb", item.id, item.mtime, size * devicePixelRatio > THUMB_SHARP ? THUMB_EDGE * 2 : THUMB_EDGE)}
+            src={imageUrl("thumb", item.id, item.mtime, thumbEdge(size))}
             alt=""
             decoding="async"
             draggable={false}
@@ -237,6 +239,9 @@ const Cell = memo(function Cell(props: {
   );
 });
 
+/** The thumbnail size cells of `size` show. */
+const thumbEdge = (size: number) => (size * devicePixelRatio > THUMB_SHARP ? THUMB_EDGE * 2 : THUMB_EDGE);
+
 export function Library() {
   const t = useT();
   const s = useStore(
@@ -244,6 +249,7 @@ export function Library() {
       info: st.info,
       folder: st.folder,
       loading: st.loading,
+      reading: st.reading,
       items: st.items,
       ratings: st.ratings,
       dates: st.dates,
@@ -327,6 +333,18 @@ export function Library() {
   const first = Math.max(0, row - OVERSCAN_ROWS);
   const last = Math.min(rows, row + Math.ceil(box.height / pitch) + 1 + OVERSCAN_ROWS);
   const shown = items.slice(first * cols, last * cols);
+
+  // Scrolling finds the thumbnails ready: they are made ahead, top to bottom, for the whole folder.
+  const order = useMemo(() => items.map((e) => e.item.id).join("\n"), [items]);
+  const edge = thumbEdge(size);
+  useEffect(() => {
+    if (s.loading || !order) return;
+    const timer = setTimeout(() => void api.warmThumbs(order.split("\n"), edge).catch(() => {}), WARM_DELAY_MS);
+    return () => {
+      clearTimeout(timer);
+      void api.warmThumbs([], edge).catch(() => {});
+    };
+  }, [order, edge, s.loading]);
 
   const rowAt = useCallback((top: number) => Math.max(0, Math.floor((top - pad) / pitch)), [pad, pitch]);
   useLayoutEffect(() => setRow(rowAt(scroller.current?.scrollTop ?? 0)), [rowAt, items]);
@@ -722,6 +740,7 @@ export function Library() {
   const toggleTagFilter = (id: string) => act.setTagFilter(s.tagFilter.includes(id) ? s.tagFilter.filter((x) => x !== id) : [...s.tagFilter, id]);
   const tagLine = (item: Item) => (s.tags.length ? tagsOn(s.tags, s.tagged, item).map((tag) => `${tag.color}\t${tag.name}`).join("\n") : "");
   const here = s.folder ? folderName(s.folder) : "";
+  const readingNote = s.reading ? t.readingPhotos(s.reading.done, s.reading.total) : t.readingFolder;
   const folderItems: MenuItem[] = [
     { label: `${t.allFolders} · ${s.items.length}`, checked: s.subfolder == null, onSelect: () => act.setSubfolder(null) },
     "divider",
@@ -828,7 +847,7 @@ export function Library() {
           <IconButton icon="back" label={t.back} onClick={act.closeFolder} />
           <div className="toolbar-title" data-tauri-drag-region>
             <strong>{here}</strong>
-            <span>{s.loading ? t.readingFolder : `${s.subfolder ? `${s.subfolder} · ` : ""}${t.photos(photoCount)}`}</span>
+            <span>{s.loading ? readingNote : `${s.subfolder ? `${s.subfolder} · ` : ""}${t.photos(photoCount)}`}</span>
           </div>
           {s.deep && folders.length > 1 && <Menu label={t.subfolderPick} align="left" items={folderItems} button={<Icon name="tree" />} className={s.subfolder != null ? "on" : ""} />}
         </div>
@@ -924,7 +943,7 @@ export function Library() {
         {s.loading && (
           <div className="empty">
             <span className="spinner" />
-            <p>{t.readingFolder}</p>
+            <p>{readingNote}</p>
           </div>
         )}
         {!s.loading && items.length === 0 && (
