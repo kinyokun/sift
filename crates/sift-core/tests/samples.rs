@@ -301,6 +301,23 @@ fn level_matches_exiftool() {
     assert!(seen > 0 || samples().is_empty());
 }
 
+/// Adobe RGB as ExifTool reads the file: an EXIF ColorSpace other than sRGB,
+/// or a MakerNote's ColorSpace.
+#[test]
+fn adobe_rgb_matches_exiftool() {
+    let mut adobe = 0;
+    for f in samples() {
+        let Ok(out) = Command::new("exiftool").args(["-T", "-EXIF:ColorSpace", "-MakerNotes:ColorSpace"]).arg(&f).output() else { return };
+        let row = String::from_utf8_lossy(&out.stdout).trim_end().to_string();
+        let v: Vec<&str> = row.split('\t').collect();
+        let want = matches!(v[0], "Uncalibrated" | "Adobe RGB") || v[1] == "Adobe RGB";
+        let src = sift_core::io::Src::open(&f).unwrap();
+        assert_eq!(sift_core::exif::adobe_rgb(&sift_core::container::parse(&src)), want, "{}: {row}", name(&f));
+        adobe += want as usize;
+    }
+    assert!(adobe > 0 || samples().is_empty());
+}
+
 #[test]
 fn rating_round_trips_without_moving_image_data() {
     let dir = std::env::temp_dir().join(format!("sift-rating-{}", std::process::id()));

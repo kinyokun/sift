@@ -1,5 +1,7 @@
-use crate::container::Parsed;
-use crate::tiff::{Entry, Ifd, Tiff, T_ORIENTATION};
+use crate::container::{self, Parsed};
+use crate::io::Src;
+use crate::jpeg;
+use crate::tiff::{Entry, Ifd, Tiff, T_EXIF_IFD, T_ORIENTATION};
 use serde::Serialize;
 
 #[derive(Serialize, Clone, Debug, Default)]
@@ -44,6 +46,63 @@ pub fn orientation(p: &Parsed) -> u8 {
         .and_then(|(t, i)| i.get(T_ORIENTATION).and_then(|e| t.uint(e)))
         .filter(|v| (1..=8).contains(v))
         .unwrap_or(1) as u8
+}
+
+/// Whether the camera recorded the picture in Adobe RGB rather than sRGB.
+/// DCF has a camera say so with ColorSpace "uncalibrated" and the
+/// interoperability index R03; some cameras leave the index out (Canon
+/// CR3, Olympus), a few write ColorSpace 2, and Nikon, Canon and Pentax RAW
+/// files may say it in the MakerNote alone. "Uncalibrated" with R98, DCF's
+/// sRGB, is sRGB.
+pub fn adobe_rgb(p: &Parsed) -> bool {
+    // With a profile, "uncalibrated" says to look there.
+    if p.jpeg.as_ref().is_some_and(|info| info.icc) {
+        return false;
+    }
+    let named = p.exif.as_ref().and_then(|(t, exif)| exif.get(0xA001).map(|_| adobe_rgb_in(t, exif)));
+    named.unwrap_or(false) || maker_adobe_rgb(p).unwrap_or(false) || (named.is_none() && preview_adobe_rgb(p))
+}
+
+/// What the largest preview's own EXIF says: Panasonic RAW files keep their
+/// EXIF block whole only in the JPEG they embed.
+fn preview_adobe_rgb(p: &Parsed) -> bool {
+    let (Some((t, _)), Some(j)) = (&p.ifd0, p.largest_preview()) else { return false };
+    jpeg::scan(t.src, j.offset).filter(|info| !info.icc).and_then(|info| info.exif_base).is_some_and(|base| adobe_rgb_at(t.src, base))
+}
+
+fn adobe_rgb_in(t: &Tiff, exif: &Ifd) -> bool {
+    match exif.get(0xA001).and_then(|e| t.uint(e)) {
+        Some(2) => true,
+        Some(0xFFFF) => {
+            let interop = exif.get(0xA005).and_then(|e| t.uint(e)).and_then(|at| t.ifd(at));
+            interop.and_then(|i| t.ascii(i.get(0x0001)?)).is_none_or(|index| index != "R98")
+        }
+        _ => false,
+    }
+}
+
+/// [`adobe_rgb`] by the EXIF block (TIFF header first) at `base` alone.
+pub fn adobe_rgb_at(src: &Src, base: u64) -> bool {
+    let Some((t, off)) = Tiff::open(src, base) else { return false };
+    t.ifd(off).and_then(|ifd0| t.uint(ifd0.get(T_EXIF_IFD)?)).and_then(|at| t.ifd(at)).is_some_and(|exif| adobe_rgb_in(&t, &exif))
+}
+
+/// The ColorSpace of a Nikon MakerNote (0x001E, 2 for Adobe RGB), a Canon
+/// one (0x00B4, likewise) or a Pentax one (0x0037, 1 for Adobe RGB).
+fn maker_adobe_rgb(p: &Parsed) -> Option<bool> {
+    let mn = p.maker.as_ref()?;
+    if let Some((t, off)) = container::nikon_maker_tiff(mn.parent.src, mn) {
+        return Some(t.uint(t.ifd(off)?.get(0x001E)?)? == 2);
+    }
+    if let Some((crate::pentax::Kind::Pentax, t, ifd)) = crate::pentax::maker_ifd(mn) {
+        return Some(t.uint(ifd.get(0x0037)?)? == 1);
+    }
+    let (t, e) = find(p, 0x010F)?;
+    if !t.ascii(e)?.starts_with("Canon") {
+        return None;
+    }
+    let t = &mn.parent;
+    Some(t.uint(t.ifd_at(mn.pos)?.get(0x00B4)?)? == 2)
 }
 
 /// Looks a tag up in the Exif IFD first, then IFD0.

@@ -5,6 +5,7 @@ use crate::io::Src;
 
 pub const XMP_HEADER: &[u8] = b"http://ns.adobe.com/xap/1.0/\0";
 pub const EXIF_HEADER: &[u8] = b"Exif\0\0";
+pub const ICC_HEADER: &[u8] = b"ICC_PROFILE\0";
 
 #[derive(Clone, Copy, Debug)]
 pub struct Segment {
@@ -29,6 +30,8 @@ pub struct JpegInfo {
     /// Absolute position of the TIFF-style header of the Multi-Picture Format
     /// index (APP2 `MPF`), which lists the previews stored after the main image.
     pub mpf_base: Option<u64>,
+    /// It carries an ICC profile (APP2 `ICC_PROFILE`).
+    pub icc: bool,
     pub segments: Vec<Segment>,
 }
 
@@ -78,9 +81,11 @@ pub fn scan(src: &Src, start: u64) -> Option<JpegInfo> {
                 }
             }
             0xE2 => {
-                if src.read_upto(body, 4) == b"MPF\0" && info.mpf_base.is_none() {
+                let head = src.read_upto(body, ICC_HEADER.len());
+                if head.starts_with(b"MPF\0") && info.mpf_base.is_none() {
                     info.mpf_base = Some(body + 4);
                 }
+                info.icc |= head == ICC_HEADER;
             }
             0xC0..=0xCF if m != 0xC4 && m != 0xC8 && m != 0xCC => {
                 let d = src.read(body, 6)?;
@@ -99,6 +104,17 @@ pub fn scan(src: &Src, start: u64) -> Option<JpegInfo> {
 /// True for the JPEG flavours a browser can display (baseline/extended/progressive DCT).
 pub fn is_displayable(info: &JpegInfo) -> bool {
     matches!(info.sof, 0xC0..=0xC2) && matches!(info.components, 1 | 3)
+}
+
+/// An APP2 segment carrying `profile` (an ICC profile small enough for one).
+pub fn icc_app2(profile: &[u8]) -> Vec<u8> {
+    let mut seg = vec![0xFF, 0xE2];
+    seg.extend_from_slice(&((2 + ICC_HEADER.len() + 2 + profile.len()) as u16).to_be_bytes());
+    seg.extend_from_slice(ICC_HEADER);
+    // The first of one chunk.
+    seg.extend_from_slice(&[1, 1]);
+    seg.extend_from_slice(profile);
+    seg
 }
 
 /// A minimal EXIF APP1 segment carrying only an Orientation tag.

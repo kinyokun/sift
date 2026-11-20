@@ -221,6 +221,8 @@ For Nikon High Efficiency (HE / HE\*) NEF files, "Original (no look)" uses the s
 
 HEIF (HEIC from phones, HIF from cameras) is decoded by the system on Apple platforms and by a bundled decoder on Windows and Android (not yet tried on a real device). Wide-gamut photos are shown converted to sRGB, HDR photos brought into the range of an ordinary screen.
 
+Colour: photos are read by the colour profile they carry, or without one by the colour space the camera recorded (a camera set to Adobe RGB says so in its EXIF or maker notes), and converted to sRGB, so thumbnails, looks, the histogram and exports all show the same colours.
+
 ## Build
 
 Sift is a Rust core, a Tauri 2 shell and a React/TypeScript interface. You need Rust (stable), Node 22 and pnpm.

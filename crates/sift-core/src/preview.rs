@@ -1,6 +1,9 @@
-//! Display images: the embedded full-size JPEG passed through untouched,
-//! plus scaled renditions for grids and small screens.
+//! Display images: the embedded full-size JPEG passed through (at most
+//! given the colour profile it lacks), plus scaled renditions for grids and
+//! small screens. Pixels come out as sRGB whatever the picture's colours
+//! ([`crate::color`]).
 
+use crate::color::{self, Space};
 use crate::container::{self, Format, RecordedCrop};
 use crate::io::Src;
 use crate::tiff::{Tiff, T_ORIENTATION};
@@ -37,26 +40,27 @@ fn tag_orientation(data: Vec<u8>, orientation: u8) -> Vec<u8> {
 pub fn full(path: &Path) -> Result<Vec<u8>> {
     let src = Src::open(path)?;
     let p = container::parse(&src);
+    let adobe_rgb = exif::adobe_rgb(&p);
     match p.format {
-        Format::Jpeg => Ok(std::fs::read(path)?),
+        Format::Jpeg => Ok(color::profiled(std::fs::read(path)?, adobe_rgb)),
         // No webview shows HEIF everywhere, so it is handed over as a JPEG.
         Format::Heif => encode_jpeg(&crate::heif::decode(path, u32::MAX)?, 92),
         Format::Other => match formats::ext_of(path).as_str() {
             "png" | "webp" | "bmp" | "gif" => Ok(std::fs::read(path)?),
-            _ => encode_jpeg(&image::open(path)?.to_rgb8(), 92),
+            _ => encode_jpeg(&open(path)?, 92),
         },
         _ => {
             let Some(j) = p.largest_preview() else {
                 // A plain TIFF image has no embedded JPEG; decode it instead.
                 if !formats::is_raw(path) {
-                    return encode_jpeg(&image::open(path)?.to_rgb8(), 92);
+                    return encode_jpeg(&open(path)?, 92);
                 }
                 return Err(Error::NoPreview);
             };
             let data = src.read(j.offset, j.len as usize).ok_or(Error::Malformed)?;
             let data = match p.recorded_crop().filter(|c| c.fits(j.width, j.height)) {
-                Some(c) => encode_jpeg(&recorded(decode_jpeg(&data, u32::MAX)?, Some(c)), 92)?,
-                None => data,
+                Some(c) => encode_jpeg(&recorded(decode_embedded(&data, u32::MAX, adobe_rgb)?, Some(c)), 92)?,
+                None => color::profiled(data, adobe_rgb),
             };
             Ok(tag_orientation(data, exif::orientation(&p)))
         }
@@ -89,6 +93,12 @@ pub fn mime_of(data: &[u8]) -> &'static str {
 /// Decodes a JPEG using DCT-domain downscaling so the result's long edge is
 /// the smallest available size that is still at least `min_edge`.
 pub fn decode_jpeg(data: &[u8], min_edge: u32) -> Result<RgbImage> {
+    decode_embedded(data, min_edge, false)
+}
+
+/// [`decode_jpeg`] for a JPEG inside a file that says it is Adobe RGB
+/// (`adobe_rgb`), which counts when the JPEG itself says nothing.
+pub fn decode_embedded(data: &[u8], min_edge: u32, adobe_rgb: bool) -> Result<RgbImage> {
     let mut dec = jpeg_decoder::Decoder::new(Cursor::new(data));
     dec.read_info()?;
     let info = dec.info().ok_or(Error::Malformed)?;
@@ -98,6 +108,7 @@ pub fn decode_jpeg(data: &[u8], min_edge: u32) -> Result<RgbImage> {
     let px = dec.decode()?;
     let info = dec.info().ok_or(Error::Malformed)?;
     let (w, h) = (info.width as u32, info.height as u32);
+    let coded_rgb = info.pixel_format == jpeg_decoder::PixelFormat::RGB24;
     let rgb = match info.pixel_format {
         jpeg_decoder::PixelFormat::RGB24 => px,
         jpeg_decoder::PixelFormat::L8 => px.iter().flat_map(|&v| [v, v, v]).collect(),
@@ -112,7 +123,25 @@ pub fn decode_jpeg(data: &[u8], min_edge: u32) -> Result<RgbImage> {
             })
             .collect(),
     };
-    RgbImage::from_raw(w, h, rgb).ok_or(Error::Malformed)
+    let mut img = RgbImage::from_raw(w, h, rgb).ok_or(Error::Malformed)?;
+    if coded_rgb {
+        if let Some(space) = Space::of_jpeg(dec.icc_profile().as_deref(), dec.exif_data(), adobe_rgb) {
+            space.to_srgb(&mut img);
+        }
+    }
+    Ok(img)
+}
+
+/// sRGB pixels of a picture in a format `image` reads (PNG, TIFF, ...).
+pub fn open(path: &Path) -> Result<RgbImage> {
+    use image::ImageDecoder;
+    let mut decoder = image::ImageReader::open(path)?.into_decoder()?;
+    let profile = decoder.icc_profile().ok().flatten();
+    let mut img = DynamicImage::from_decoder(decoder)?.to_rgb8();
+    if let Some(space) = profile.as_deref().and_then(Space::from_icc) {
+        space.to_srgb(&mut img);
+    }
+    Ok(img)
 }
 
 /// Decodes a JPEG at full size and applies its own EXIF orientation.
@@ -173,9 +202,9 @@ pub fn pixels(path: &Path, edge: u32) -> Result<RgbImage> {
         None if p.format == Format::Heif => return crate::heif::decode(path, edge),
         Some(j) => {
             let data = src.read(j.offset, j.len as usize).ok_or(Error::Malformed)?;
-            (recorded(decode_jpeg(&data, need)?, crop), exif::orientation(&p))
+            (recorded(decode_embedded(&data, need, exif::adobe_rgb(&p))?, crop), exif::orientation(&p))
         }
-        None if !formats::is_raw(path) => (image::open(path)?.to_rgb8(), 1),
+        None if !formats::is_raw(path) => (open(path)?, 1),
         None => return Err(Error::NoPreview),
     };
     Ok(orient(fit(img, edge), orientation))
@@ -199,7 +228,7 @@ pub fn embedded_screen(path: &Path, edge: u32) -> Result<Option<Vec<u8>>> {
         // One that shows more than the picture would have to be cut first.
         .filter(|j| crop.is_none_or(|c| !c.fits(j.width, j.height)))
         .and_then(|j| src.read(j.offset, j.len as usize))
-        .map(|data| tag_orientation(data, exif::orientation(&p))))
+        .map(|data| color::profiled(tag_orientation(data, exif::orientation(&p)), exif::adobe_rgb(&p))))
 }
 
 /// A screen-size JPEG: the embedded preview when there is one, else a scaled copy.

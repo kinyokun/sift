@@ -221,6 +221,8 @@ iOS 和 Android 版目前需要自己构建，见 [AGENTS.md](AGENTS.md)。
 
 HEIF（手机的 HEIC、相机的 HIF）在 Apple 平台用系统解码，Windows 和 Android 用内置的解码器（还没有在实机上测试过）。广色域照片转成 sRGB 显示，HDR 照片压到普通屏幕的亮度范围。
 
+色彩：照片按自己带的色彩配置文件读取，没有配置文件的按相机记下的色彩空间读取（相机设成 Adobe RGB 时会写进 EXIF 或厂商信息），再统一转成 sRGB，所以缩略图、滤镜、直方图和导出的照片颜色一致。
+
 ## 构建
 
 Sift 由 Rust 核心、Tauri 2 外壳和 React/TypeScript 界面组成。需要 Rust（stable）、Node 22、pnpm。

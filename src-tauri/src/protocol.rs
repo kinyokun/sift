@@ -21,7 +21,7 @@ fn query(uri: &tauri::http::Uri, key: &str) -> Option<String> {
 
 /// A full-resolution development of a RAW that keeps the camera's look, cached on disk.
 pub fn developed(state: &AppState, path: &Path) -> sift_core::Result<Vec<u8>> {
-    cached(&cache_file(&state.cache_dir, "dev3", path, 0), || render::matched(path, DEVELOP_QUALITY).map_err(render::explain))
+    cached(&cache_file(&state.cache_dir, "dev4", path, 0), || render::matched(path, DEVELOP_QUALITY).map_err(render::explain))
 }
 
 /// A scaled rendition of `path`. RAW files whose previews are not JPEG (Canon
@@ -42,7 +42,7 @@ pub fn original(state: &AppState, path: &Path) -> sift_core::Result<Vec<u8>> {
 }
 
 /// Part of the cache key of rendered looks; bump when look rendering changes.
-const LOOK_RENDER_VERSION: u32 = 10;
+const LOOK_RENDER_VERSION: u32 = 11;
 
 /// Develops a NEF with Nikon's own renderer: the camera's Standard Picture
 /// Control for "no look" and `.cube` looks, the Picture Control itself for
@@ -138,7 +138,7 @@ fn image(state: &AppState, uri: &tauri::http::Uri) -> Result<Vec<u8>, String> {
     let out = match kind {
         "thumb" => {
             let edge = edge.clamp(64, 1024);
-            cached(&cache_file(&state.cache_dir, "thumb2", &path, edge), || scaled(state, &path, edge, THUMB_QUALITY))
+            cached(&cache_file(&state.cache_dir, "thumb3", &path, edge), || scaled(state, &path, edge, THUMB_QUALITY))
         }
         "screen" => {
             let edge = edge.clamp(512, 4096);
@@ -146,7 +146,7 @@ fn image(state: &AppState, uri: &tauri::http::Uri) -> Result<Vec<u8>, String> {
             // it is sent as is. Only files without one are scaled (and cached).
             match preview::embedded_screen(&path, edge) {
                 Ok(Some(data)) => Ok(data),
-                _ => cached(&cache_file(&state.cache_dir, "screen2", &path, edge), || scaled(state, &path, edge, SCREEN_QUALITY)),
+                _ => cached(&cache_file(&state.cache_dir, "screen3", &path, edge), || scaled(state, &path, edge, SCREEN_QUALITY)),
             }
         }
         "full" => match preview::full(&path) {

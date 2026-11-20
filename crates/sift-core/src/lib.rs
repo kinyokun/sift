@@ -3,6 +3,7 @@
 pub mod af;
 #[cfg(target_vendor = "apple")]
 pub mod apple;
+pub mod color;
 pub mod container;
 #[cfg(feature = "develop")]
 pub mod develop;

@@ -152,6 +152,6 @@ fn reference(path: &Path) -> Option<RgbImage> {
     let src = crate::io::Src::open(path).ok()?;
     let p = crate::container::parse(&src);
     let j = p.preview_for(REFERENCE_EDGE)?;
-    let img = preview::decode_jpeg(&src.read(j.offset, j.len as usize)?, REFERENCE_EDGE).ok()?;
+    let img = preview::decode_embedded(&src.read(j.offset, j.len as usize)?, REFERENCE_EDGE, crate::exif::adobe_rgb(&p)).ok()?;
     Some(preview::recorded(img, p.recorded_crop()))
 }

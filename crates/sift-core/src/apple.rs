@@ -83,8 +83,7 @@ impl Drop for Owned {
 /// records, for an RW2 the system develops whole (some it cuts itself).
 ///
 /// The system develops RAW files into Display P3. They are drawn into sRGB,
-/// like camera JPEGs, because everything here that reads pixels (looks, the
-/// histogram, thumbnails) ignores embedded profiles and takes them as sRGB.
+/// the colours everything here works on (`color`).
 pub fn render_jpeg(path: &Path, orientation: u8, crop: Option<crate::container::RecordedCrop>, quality: f32) -> Result<Vec<u8>> {
     let url = CFURL::from_path(path, false).ok_or(Error::Malformed)?;
     // SAFETY: every pointer passed below is a live Core Foundation object owned

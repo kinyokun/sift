@@ -159,9 +159,12 @@ fn with_orientation(data: &[u8], segments: &[jpeg::Segment], orientation: u8) ->
 /// EXIF (with the place it was taken), XMP, IPTC, comments, and the smaller
 /// pictures some cameras put after it. Its colour profile and coding tables
 /// stay, and so does how it is turned (`orientation`), as the only value of
-/// a new EXIF block. The picture is not encoded again.
+/// a new EXIF block. The picture is not encoded again. One that is Adobe
+/// RGB by its EXIF alone gets a profile that says so instead.
 pub fn stripped(data: &[u8], orientation: u8) -> Option<Vec<u8>> {
     let (header, sos, end) = segments(data)?;
+    let src = Src::mem(data.to_vec());
+    let adobe_rgb = jpeg::scan(&src, 0)?.exif_base.is_some_and(|base| crate::exif::adobe_rgb_at(&src, base));
     let mut out = Vec::with_capacity(end);
     out.extend_from_slice(&data[..2]);
     let mut kept = Vec::new();
@@ -182,7 +185,7 @@ pub fn stripped(data: &[u8], orientation: u8) -> Option<Vec<u8>> {
         }
     }
     out.extend_from_slice(&data[sos..end]);
-    Some(with_orientation(&out, &kept, orientation))
+    Some(crate::color::profiled(with_orientation(&out, &kept, orientation), adobe_rgb))
 }
 
 /// The orientation a JPEG records, 1 when it records none.
