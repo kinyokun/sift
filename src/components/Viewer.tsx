@@ -101,6 +101,8 @@ function InfoPanel({ item, meta, docked, crop, tags, histogram, onSaveLook }: In
     ],
     [t.afMode, meta?.af?.mode],
     [t.taken, x?.datetime],
+    [t.artist, x?.artist],
+    [t.copyright, x?.copyright],
     [t.dimensions, x?.width && x.height ? `${x.width} × ${x.height}` : ""],
     [t.fileSize, `${(item.size / 1048576).toFixed(1)} MB`],
     [

@@ -175,6 +175,7 @@ iOS and Android builds currently have to be built yourself; see [AGENTS.md](AGEN
 **More**
 
 - Export: copy / rename, a folder for each tag, find RAW files by name, info frames
+- Watermarks: text (with the year, artist, copyright, camera settings and more filled in) or a logo (PNG, JPEG, SVG and more, a plain background can be removed); one of nine places or dragged anywhere on the preview, tiled, at an angle, automatic black or white, with a shadow; keep several and switch between them
 - LAN transfer: download originals to a phone by QR code, or send photos back to the computer
 - Shortcuts are laid out for the left hand on the keyboard and the right hand on the mouse, and every one can be changed (Settings → Shortcuts); press `` ` `` to see them on a keyboard
 - In the viewer the scroll wheel zooms, goes to the next photo or pans, and a double-click zooms or goes back to the grid, as you choose (Settings → Mouse)
@@ -287,4 +288,4 @@ Models and fonts shipped with the app (in `crates/sift-core/assets`):
 - YuNet face detection (OpenCV Zoo, MIT)
 - YOLOX-Tiny object detection (Megvii, Apache-2.0), used to find animals
 - RTMPose-m AP-10K animal keypoints (OpenMMLab MMPose, Apache-2.0; the AP-10K dataset is CC BY 4.0), used to find animals' eyes
-- Inter font (SIL OFL 1.1), used for info frames
+- Inter font (SIL OFL 1.1), used for info frames and text watermarks

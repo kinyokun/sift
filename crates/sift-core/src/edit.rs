@@ -1,13 +1,13 @@
 //! What was set up for a photo while culling, put on its pixels when it is
 //! exported: turned by quarter turns, straightened and cut to its crop, made
-//! smaller, marked with a watermark. And the two changes a JPEG takes without
-//! its picture being encoded again: another orientation, and its metadata
-//! left out.
+//! smaller (watermarks are in `mark.rs`). And the two changes a JPEG takes
+//! without its picture being encoded again: another orientation, and its
+//! metadata left out.
 
 use crate::io::{u16_at, Src};
 use crate::jpeg;
 use crate::tiff::{Tiff, T_ORIENTATION};
-use image::{imageops, Rgb, RgbImage, RgbaImage};
+use image::{imageops, Rgb, RgbImage};
 
 /// `img` turned clockwise by `quarters` quarter turns.
 pub fn turn(img: RgbImage, quarters: u8) -> RgbImage {
@@ -99,65 +99,6 @@ pub fn shrink(img: RgbImage, edge: u32) -> RgbImage {
     let k = edge as f32 / long as f32;
     let (w, h) = (((img.width() as f32 * k).round() as u32).max(1), ((img.height() as f32 * k).round() as u32).max(1));
     imageops::resize(&img, w, h, imageops::FilterType::Lanczos3)
-}
-
-/// Where a watermark goes: a corner, the middle of a side, or the centre.
-#[derive(serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum Place {
-    Nw,
-    N,
-    Ne,
-    W,
-    C,
-    E,
-    Sw,
-    S,
-    Se,
-}
-
-/// Room between a watermark and the edges, as a share of the picture's shorter side.
-const MARK_MARGIN: f32 = 0.03;
-
-/// Lays `mark` over `img` at `place`, `size` wide as a share of the
-/// picture's shorter side (so it is the same on upright and level pictures),
-/// its own transparency times `opacity`.
-pub fn watermark(img: &mut RgbImage, mark: &RgbaImage, place: Place, size: f32, opacity: f32) {
-    let (iw, ih) = (img.width(), img.height());
-    let short = iw.min(ih) as f32;
-    let w = ((short * size.clamp(0.01, 1.0)).round() as u32).clamp(1, iw);
-    let h = ((w as f32 * mark.height() as f32 / mark.width().max(1) as f32).round() as u32).clamp(1, ih);
-    let w = if h == ih { ((h as f32 * mark.width() as f32 / mark.height().max(1) as f32).round() as u32).clamp(1, iw) } else { w };
-    let scaled = imageops::resize(mark, w, h, imageops::FilterType::Lanczos3);
-    let margin = (short * MARK_MARGIN).round() as u32;
-    let along = |room: u32, len: u32, at: u8| match at {
-        0 => margin.min(room - len),
-        1 => (room - len) / 2,
-        _ => room - len - margin.min(room - len),
-    };
-    let (col, row) = match place {
-        Place::Nw => (0, 0),
-        Place::N => (1, 0),
-        Place::Ne => (2, 0),
-        Place::W => (0, 1),
-        Place::C => (1, 1),
-        Place::E => (2, 1),
-        Place::Sw => (0, 2),
-        Place::S => (1, 2),
-        Place::Se => (2, 2),
-    };
-    let (x0, y0) = (along(iw, w, col), along(ih, h, row));
-    let opacity = opacity.clamp(0.0, 1.0);
-    for (x, y, m) in scaled.enumerate_pixels() {
-        let a = m.0[3] as f32 / 255.0 * opacity;
-        if a <= 0.0 {
-            continue;
-        }
-        let px = img.get_pixel_mut(x0 + x, y0 + y);
-        for k in 0..3 {
-            px.0[k] = (px.0[k] as f32 * (1.0 - a) + m.0[k] as f32 * a).round() as u8;
-        }
-    }
 }
 
 /// The header segments of a JPEG, then where its picture starts and ends.
@@ -295,21 +236,6 @@ mod tests {
         let row = |x: u32| (0..100).max_by_key(|&y| tilted.get_pixel(x, y).0[0]).unwrap() as i32;
         // Clockwise: the right end goes down on screen.
         assert!(row(90) - row(10) > 10, "{} {}", row(10), row(90));
-    }
-
-    #[test]
-    fn a_watermark_goes_in_its_corner_and_lets_the_picture_through() {
-        let mut img = RgbImage::from_pixel(400, 200, Rgb([0, 0, 0]));
-        let mark = RgbaImage::from_pixel(10, 5, image::Rgba([255, 255, 255, 255]));
-        watermark(&mut img, &mark, Place::Se, 0.25, 0.5);
-        // 50 px wide (a quarter of the shorter side), 6 px in from the edges.
-        let lit: Vec<(u32, u32)> = img.enumerate_pixels().filter(|p| p.2 .0[0] > 0).map(|p| (p.0, p.1)).collect();
-        let (x0, y0) = (lit.iter().map(|p| p.0).min().unwrap(), lit.iter().map(|p| p.1).min().unwrap());
-        let (x1, y1) = (lit.iter().map(|p| p.0).max().unwrap(), lit.iter().map(|p| p.1).max().unwrap());
-        assert_eq!((x1 + 1 + 6, y1 + 1 + 6), (400, 200));
-        assert_eq!(x1 - x0 + 1, 50);
-        assert_eq!(y1 - y0 + 1, 25);
-        assert!((120..=135).contains(&img.get_pixel(x0 + 25, y0 + 12).0[0]), "half opacity");
     }
 
     fn encoded(img: &RgbImage) -> Vec<u8> {

@@ -198,6 +198,55 @@ await session("looks", desktop, async (page, shot) => {
   await shot("export");
 });
 
+// Watermarks: text with fields, tiled, put on a spot of the preview, and a
+// picture (an SVG drawn by the webview); then an export that carries one.
+await session("watermark", { ...desktop, query: `&mark=${encodeURIComponent(join(tmpdir(), "sift-mark.svg"))}` }, async (page, shot) => {
+  writeFileSync(
+    join(tmpdir(), "sift-mark.svg"),
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 80"><circle cx="40" cy="40" r="30" fill="none" stroke="#fff" stroke-width="8"/><circle cx="40" cy="40" r="10" fill="#e33"/><rect x="88" y="22" width="140" height="12" rx="6" fill="#fff"/><rect x="88" y="46" width="96" height="12" rx="6" fill="#fff"/></svg>`,
+  );
+  const dest = join(tmpdir(), `sift-marked-${process.pid}`);
+  rmSync(dest, { recursive: true, force: true });
+  await openLibrary(page);
+  await page.evaluate((dir) => localStorage.setItem("sift.exportDest", dir), dest);
+  await page.locator('[aria-label="导出"]').click();
+  const preview = page.locator(".frame-preview img");
+  const settled = async () => {
+    await page.waitForTimeout(700);
+    await preview.waitFor({ timeout: 20000 });
+  };
+  await page.locator('.row:has(.row-label > span:text-is("水印")) [role="switch"]').click();
+  await settled();
+  await shot("text");
+  await page.locator(".mark-text textarea").fill("© {year} Sift Demo\n");
+  await page.locator(".mark-fields button", { hasText: "相机" }).click();
+  await page.getByRole("tab", { name: "粗" }).click();
+  await page.getByRole("tab", { name: "平铺满图" }).click();
+  await settled();
+  await shot("tiled");
+  await page.getByRole("tab", { name: "单个" }).click();
+  const box = await preview.boundingBox();
+  await page.mouse.move(box.x + box.width * 0.3, box.y + box.height * 0.3);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.2, { steps: 4 });
+  await page.mouse.up();
+  await settled();
+  console.log(`[watermark] placed at ${JSON.stringify(await page.evaluate(() => JSON.parse(localStorage.getItem("sift.exportOutput")).marks.map((m) => m.at)))}`);
+  await shot("placed");
+  await page.locator(".mark-presets button.add").click();
+  await page.getByRole("tab", { name: "图片", exact: true }).click();
+  await page.locator(".mark-presets img").waitFor();
+  await page.locator(".mark-places button").nth(8).click();
+  await settled();
+  await shot("picture");
+  await page.getByRole("button", { name: "下一张" }).click();
+  await settled();
+  await shot("next-photo");
+  await page.locator(".sheet button.primary").click();
+  await page.locator(".report strong").waitFor({ timeout: 60000 });
+  console.log(`[watermark] ${await page.locator(".report strong").textContent()}: ${readdirSync(dest).join(" ")}`);
+  await shot("exported");
+});
 // Nikon's engine (start the bridge with SIFT_NIKON_ROOT set): NP3 looks on a NEF come from it.
 await session("sdk", desktop, async (page, shot) => {
   const info = await (await fetch(`${bridge}/invoke/app_info`, { method: "POST", body: "{}" })).json();

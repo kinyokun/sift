@@ -95,6 +95,7 @@ pub fn run() {
             commands::preview_export,
             commands::set_watermark,
             commands::watermark,
+            commands::read_svg,
             commands::find_raws,
             commands::load_session,
             commands::save_session,

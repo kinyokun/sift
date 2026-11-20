@@ -70,11 +70,14 @@ fn run(state: &AppState, cmd: &str, args: &Value) -> Result<Response, String> {
             Ok(([(header::CONTENT_TYPE, "image/jpeg")], jpeg).into_response())
         }
         "set_watermark" => {
-            let data = std::fs::read(arg::<String>(args, "source")?).map_err(|e| e.to_string())?;
-            commands::keep_watermark(state, &data)?;
-            ok(Value::Null)
+            let data = match arg::<Option<Vec<u8>>>(args, "data")? {
+                Some(data) => data,
+                None => std::fs::read(arg::<String>(args, "source")?).map_err(|e| e.to_string())?,
+            };
+            json(&commands::keep_watermark(state, &data)?)
         }
-        "watermark" => Ok(([(header::CONTENT_TYPE, "image/png")], commands::watermark_png(state).unwrap_or_default()).into_response()),
+        "read_svg" => ok(Value::String(std::fs::read_to_string(arg::<String>(args, "source")?).map_err(|e| e.to_string())?)),
+        "watermark" => Ok(([(header::CONTENT_TYPE, "image/png")], commands::watermark_png(state, &arg::<String>(args, "id")?).unwrap_or_default()).into_response()),
         "export_files" => {
             let plan = arg(args, "plan")?;
             json(&commands::export_shots(state, &arg::<Vec<Vec<String>>>(args, "shots")?, &arg::<String>(args, "dest")?, &plan, |_| {})?)

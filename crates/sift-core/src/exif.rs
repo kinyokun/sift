@@ -29,6 +29,9 @@ pub struct Exif {
     pub manual_wb: Option<bool>,
     /// The flash fired.
     pub flash: Option<bool>,
+    /// Who took it and the copyright notice, as set in the camera.
+    pub artist: Option<String>,
+    pub copyright: Option<String>,
 }
 
 pub fn orientation(p: &Parsed) -> u8 {
@@ -79,6 +82,9 @@ pub fn read(p: &Parsed) -> Exif {
     x.metering = small(0x9207).filter(|v| (1..=6).contains(v)).map(|v| v as u8);
     x.manual_wb = small(0xA403).map(|v| v == 1);
     x.flash = small(0x9209).map(|v| v & 1 == 1);
+    x.artist = text(0x013B);
+    // The photographer's notice comes first; an editor's may follow after a NUL.
+    x.copyright = text(0x8298);
     x.width = pick(0xA002).and_then(|(t, e)| t.uint(e)).filter(|v| *v > 0);
     x.height = pick(0xA003).and_then(|(t, e)| t.uint(e)).filter(|v| *v > 0);
     if x.width.is_none() || x.height.is_none() {

@@ -6,6 +6,7 @@ use crate::exif::Exif;
 use ab_glyph::{point, Font, FontRef, FontVec, GlyphId, PxScale, ScaleFont, VariableFont};
 use image::{imageops, Rgb, RgbImage};
 use serde::Deserialize;
+use std::sync::OnceLock;
 
 static INTER: &[u8] = include_bytes!("../assets/Inter.ttf");
 
@@ -52,34 +53,43 @@ fn yes() -> bool {
     true
 }
 
-struct Fonts {
-    regular: FontRef<'static>,
+pub(crate) struct Fonts {
+    pub(crate) regular: FontRef<'static>,
     bold: FontRef<'static>,
-    cjk: Option<FontVec>,
+    /// Read from the system the first time a character needs it: the files are large.
+    cjk: OnceLock<Option<FontVec>>,
 }
 
 impl Fonts {
     fn load() -> Fonts {
+        Fonts::weighing(450.0, 650.0)
+    }
+
+    /// Inter at the weights (100 to 900) of its regular and bold text.
+    pub(crate) fn weighing(regular: f32, bold: f32) -> Fonts {
         let weight = |w: f32| {
             let mut f = FontRef::try_from_slice(INTER).expect("bundled font");
-            f.set_variation(b"wght", w);
+            f.set_variation(b"wght", w.clamp(100.0, 900.0));
             f
         };
-        let cjk = CJK_FONTS.iter().find_map(|p| FontVec::try_from_vec_and_index(std::fs::read(p).ok()?, 0).ok());
-        Fonts { regular: weight(450.0), bold: weight(650.0), cjk }
+        Fonts { regular: weight(regular), bold: weight(bold), cjk: OnceLock::new() }
+    }
+
+    fn cjk(&self) -> Option<&FontVec> {
+        self.cjk.get_or_init(|| CJK_FONTS.iter().find_map(|p| FontVec::try_from_vec_and_index(std::fs::read(p).ok()?, 0).ok())).as_ref()
     }
 }
 
-struct Line<'a> {
-    text: &'a str,
-    bold: bool,
-    size: f32,
-    color: [u8; 3],
+pub(crate) struct Line<'a> {
+    pub(crate) text: &'a str,
+    pub(crate) bold: bool,
+    pub(crate) size: f32,
+    pub(crate) color: [u8; 3],
 }
 
 /// Lays `text` out and calls `put(x, y, coverage)` for every covered pixel.
 /// Returns the advance width.
-fn layout(fonts: &Fonts, line: &Line, origin: (f32, f32), mut put: impl FnMut(i32, i32, f32)) -> f32 {
+pub(crate) fn layout(fonts: &Fonts, line: &Line, origin: (f32, f32), mut put: impl FnMut(i32, i32, f32)) -> f32 {
     let main = if line.bold { &fonts.bold } else { &fonts.regular };
     let scale = PxScale::from(line.size);
     let mut x = origin.0;
@@ -95,7 +105,7 @@ fn layout(fonts: &Fonts, line: &Line, origin: (f32, f32), mut put: impl FnMut(i3
             draw(main, id, x);
             x += sf.h_advance(id);
             prev = Some(id);
-        } else if let Some(cjk) = fonts.cjk.as_ref().filter(|f| f.glyph_id(ch).0 != 0) {
+        } else if let Some(cjk) = fonts.cjk().filter(|f| f.glyph_id(ch).0 != 0) {
             let id = cjk.glyph_id(ch);
             draw(cjk, id, x);
             x += cjk.as_scaled(scale).h_advance(id);
@@ -134,7 +144,7 @@ fn blend(img: &mut RgbImage, x: i32, y: i32, color: [u8; 3], a: f32) {
     }
 }
 
-fn width(fonts: &Fonts, line: &Line) -> f32 {
+pub(crate) fn width(fonts: &Fonts, line: &Line) -> f32 {
     layout(fonts, line, (0.0, 0.0), |_, _, _| {})
 }
 
@@ -148,7 +158,7 @@ fn draw(img: &mut RgbImage, fonts: &Fonts, line: &Line, x: f32, y: f32, align: f
     layout(fonts, line, (x, y), |px, py, c| blend(img, px, py, color, c));
 }
 
-fn camera_name(exif: &Exif) -> String {
+pub(crate) fn camera_name(exif: &Exif) -> String {
     let model = exif.model.clone().unwrap_or_default();
     let make = exif.make.clone().unwrap_or_default();
     let brand = make.split_whitespace().next().unwrap_or("");

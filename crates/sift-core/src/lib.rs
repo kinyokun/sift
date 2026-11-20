@@ -21,6 +21,7 @@ pub mod io;
 pub mod jpeg;
 pub mod live;
 pub mod look;
+pub mod mark;
 pub mod nikon;
 pub mod nksc;
 pub mod meta;

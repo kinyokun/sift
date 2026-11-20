@@ -76,7 +76,7 @@ w.__TAURI_INTERNALS__ = {
       const filters = (args as { options?: { filters?: { extensions: string[] }[] } })?.options?.filters ?? [];
       const extensions = filters.flatMap((f) => f.extensions);
       if (extensions.includes("app") || extensions.includes("exe")) return params.get("editor");
-      if (extensions.join() === "png") return params.get("mark");
+      if (extensions.includes("svg")) return params.get("mark");
       return filters.length ? params.getAll("look") : params.get("pick");
     }
     if (cmd.startsWith("plugin:")) return null;

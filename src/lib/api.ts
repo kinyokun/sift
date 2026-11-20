@@ -39,6 +39,9 @@ export type Exif = {
   metering: number | null;
   manual_wb: boolean | null;
   flash: boolean | null;
+  /** As set in the camera. */
+  artist: string | null;
+  copyright: string | null;
 };
 
 export type Histogram = { r: number[]; g: number[]; b: number[]; luma: number[]; shadows: number; highlights: number };
@@ -132,9 +135,32 @@ export type ExportKind = "all" | "raw" | "jpeg";
 export type CropBox = [number, number, number, number, number?];
 /** Where on a picture the watermark goes: a corner, the middle of a side, or the centre. */
 export type MarkPlace = "nw" | "n" | "ne" | "w" | "c" | "e" | "sw" | "s" | "se";
-/** The watermark (a PNG kept by the app) on exported pictures: `size` is its width as a share of the
- * picture's shorter side, `opacity` 0 to 1. */
-export type Watermark = { place: MarkPlace; size: number; opacity: number };
+export type MarkKind = "picture" | "text";
+/** The watermark on exported pictures: a picture the app keeps (`picture`, an id from [api.setWatermark];
+ * `knockout` takes out its plain background) or `text` in Inter at `weight` (100 to 900), with fields filled in
+ * from each photo: {year} {date} {artist} {copyright} {camera} {lens} {params} {file}. Sizes are shares of the
+ * picture's shorter side: a picture's width, the letters of text. `at` puts its centre on a spot (shares of the
+ * width and height) instead of `place`; `tile` repeats it over the whole picture, `gap` apart. `tint` is
+ * "own", "auto" (white or black, whichever stands out) or "#rrggbb"; `angle` is in degrees clockwise. */
+export type Watermark = {
+  kind: MarkKind;
+  picture: string;
+  knockout: boolean;
+  text: string;
+  weight: number;
+  place: MarkPlace;
+  at: [number, number] | null;
+  margin: number;
+  size: number;
+  opacity: number;
+  angle: number;
+  tile: boolean;
+  gap: number;
+  tint: string;
+  shadow: boolean;
+};
+/** A watermark picture the app keeps; `backdrop`: it has no transparency but a plain background that can go. */
+export type KeptMark = { id: string; backdrop: boolean };
 /** How exported pictures come out. `size` is the long edge (0: as they are); any size or a watermark
  * renders every photo again, at `quality`. With `strip`, nothing the camera recorded is kept. */
 export type Output = { size: number; quality: number; strip: boolean; watermark: Watermark | null };
@@ -243,10 +269,12 @@ export const api = {
   openWith: (paths: string[], program: string) => invoke<void>("open_with", { paths, program }),
   /** Starts dragging files out of the window while the mouse button is down (macOS, Windows). */
   dragOut: (paths: string[], icon: string, turn: number) => invoke<void>("drag_out", { paths, icon, turn }),
-  /** Makes a PNG (a path from the file dialog) the watermark the app keeps. */
-  setWatermark: (source: string) => invoke<void>("set_watermark", { source }),
-  /** The watermark kept, as PNG bytes; none when there is none. */
-  watermark: () => invoke<ArrayBuffer>("watermark"),
+  /** Keeps a picture (a path from the file dialog, or the bytes of a PNG) as a watermark. */
+  setWatermark: (source: string | null, data?: number[]) => invoke<KeptMark>("set_watermark", { source, data: data ?? null }),
+  /** The text of an SVG from the file dialog. */
+  readSvg: (source: string) => invoke<string>("read_svg", { source }),
+  /** A watermark picture as PNG bytes; none when there is none. */
+  watermark: (id: string) => invoke<ArrayBuffer>("watermark", { id }),
   findRaws: (picked: string, raws: string, dest: string, loose: boolean) =>
     invoke<CopyReport>("find_raws", { picked, raws, dest, loose }),
   loadSession: (folder: string) => invoke<Partial<Session> | null>("load_session", { folder }),

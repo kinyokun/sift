@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use sift_core::af::AfBox;
 use sift_core::export::{self, CopyReport, Progress};
 use sift_core::frame::FrameOptions;
-use sift_core::{edit, face, formats, frame, meta, nksc, preview, rating, remove, stack};
+use sift_core::{edit, face, formats, frame, mark, meta, nksc, preview, rating, remove, stack};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fs;
@@ -528,13 +528,33 @@ fn crop_parts(c: &Crop) -> Option<([f32; 4], f32)> {
     Some((rect, c.get(4).copied().unwrap_or(0.0)))
 }
 
-/// The watermark on exported pictures: where, its width as a share of the
-/// picture's shorter side, and how opaque.
-#[derive(Deserialize, Clone, Copy)]
+#[derive(Deserialize, Clone, Copy, Default, PartialEq, Eq, Debug)]
+#[serde(rename_all = "lowercase")]
+pub enum MarkKind {
+    #[default]
+    Picture,
+    Text,
+}
+
+/// The watermark on exported pictures: a picture the app keeps (`picture`,
+/// see [keep_watermark]; its plain ground taken out with `knockout`) or
+/// text with fields in Inter at `weight`, and how it is laid.
+#[derive(Deserialize, Clone, Debug)]
+#[serde(default)]
 pub struct Mark {
-    pub place: edit::Place,
-    pub size: f32,
-    pub opacity: f32,
+    pub kind: MarkKind,
+    pub picture: String,
+    pub knockout: bool,
+    pub text: String,
+    pub weight: f32,
+    #[serde(flatten)]
+    pub layout: mark::Layout,
+}
+
+impl Default for Mark {
+    fn default() -> Mark {
+        Mark { kind: MarkKind::Picture, picture: String::new(), knockout: false, text: String::new(), weight: 450.0, layout: mark::Layout::default() }
+    }
 }
 
 /// How exported pictures come out.
@@ -555,15 +575,29 @@ impl Default for Output {
     }
 }
 
-fn watermark_file(state: &AppState) -> PathBuf {
-    state.data_dir.join("watermark.png")
+/// Where the watermark picture `id` is kept; the empty id is the one
+/// picture earlier versions kept.
+fn watermark_file(state: &AppState, id: &str) -> CmdResult<PathBuf> {
+    if id.is_empty() {
+        return Ok(state.data_dir.join("watermark.png"));
+    }
+    if id.len() != 16 || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(format!("watermark: no picture {id}"));
+    }
+    Ok(state.data_dir.join("watermarks").join(format!("{id}.png")))
 }
 
-/// The watermark picture and how to lay it, when the output asks for one.
-fn mark_of(state: &AppState, output: &Output) -> CmdResult<Option<(image::RgbaImage, Mark)>> {
-    let Some(mark) = output.watermark else { return Ok(None) };
-    let img = image::open(watermark_file(state)).map_err(|e| format!("watermark: {e}"))?;
-    Ok(Some((img.to_rgba8(), mark)))
+/// The watermark the output asks for, ready to be laid.
+fn mark_of(state: &AppState, output: &Output) -> CmdResult<Option<mark::Watermark>> {
+    let Some(m) = &output.watermark else { return Ok(None) };
+    Ok(match m.kind {
+        MarkKind::Text => mark::Watermark::text(&m.text, m.weight, m.layout.clone()),
+        MarkKind::Picture => {
+            let img = image::open(watermark_file(state, &m.picture)?).map_err(|e| format!("watermark: {e}"))?.to_rgba8();
+            let img = if m.knockout { mark::knocked_out(img) } else { img };
+            Some(mark::Watermark::picture(&img, m.layout.clone()))
+        }
+    })
 }
 
 /// Upright full-size pixels of a shot with its look applied.
@@ -587,11 +621,13 @@ fn shaped(img: image::RgbImage, turn: u8, crop: Option<([f32; 4], f32)>) -> imag
     }
 }
 
-/// Made the size the output asks for, and watermarked.
-fn finished(img: image::RgbImage, output: &Output, mark: Option<&(image::RgbaImage, Mark)>) -> image::RgbImage {
+/// Made the size the output asks for, and watermarked; text on the mark is
+/// filled in from `source`, the photo's file.
+fn finished(img: image::RgbImage, output: &Output, mark: Option<&mark::Watermark>, source: &Path) -> image::RgbImage {
     let mut img = edit::shrink(img, output.size);
-    if let Some((png, m)) = mark {
-        edit::watermark(&mut img, png, m.place, m.size, m.opacity);
+    if let Some(mark) = mark {
+        let exif = if mark.needs_exif() { meta::read(source).map(|m| m.exif).unwrap_or_default() } else { Default::default() };
+        mark.apply(&mut img, &exif, &source.file_stem().unwrap_or_default().to_string_lossy());
     }
     img
 }
@@ -738,7 +774,7 @@ pub fn export_shots(state: &AppState, shots: &[Vec<String>], dest: &str, plan: &
                 (None, Ok(bytes)) => fs::write(&target, bytes).map_err(err),
                 (None, Err(Some(e))) => Err(e),
                 (None, Err(None)) => looked_pixels(state, shot, look)
-                    .map(|img| finished(shaped(img, turn, crop), output, mark.as_ref()))
+                    .map(|img| finished(shaped(img, turn, crop), output, mark.as_ref(), shot.first().map_or(Path::new(""), PathBuf::as_path)))
                     .and_then(|img| encoded(&img, output, look_source(shot).map(PathBuf::as_path)))
                     .and_then(|jpeg| fs::write(&target, jpeg).map_err(err)),
             };
@@ -999,7 +1035,7 @@ pub fn frame_files(state: &AppState, request: &FramedRequest, mut on_progress: i
                         None => best_pixels(state, path, &m)?,
                     };
                     let turn = request.turns.get(f).map_or(0, |t| t % 4);
-                    img = finished(shaped(img, turn, request.crops.get(f).and_then(crop_parts)), &output, mark.as_ref());
+                    img = finished(shaped(img, turn, request.crops.get(f).and_then(crop_parts)), &output, mark.as_ref(), path);
                     let picture = frame::render(&img, &m.exif, &request.options);
                     let jpeg = encoded(&picture, &output, Some(path)).map_err(sift_core::Error::Decode)?;
                     fs::write(&target, jpeg)?;
@@ -1034,7 +1070,7 @@ pub fn export_preview(state: &AppState, path: &str, options: Option<&FrameOption
     let file = state.check(path)?;
     let img = shaped(preview::pixels(&file, PREVIEW_EDGE).map_err(err)?, turn % 4, crop.and_then(crop_parts));
     let shown = Output { size: PREVIEW_EDGE, ..output.clone() };
-    let mut img = finished(img, &shown, mark_of(state, output)?.as_ref());
+    let mut img = finished(img, &shown, mark_of(state, output)?.as_ref(), &file);
     if let Some(options) = options {
         img = frame::render(&img, &meta::read(&file).map_err(err)?.exif, options);
     }
@@ -1046,36 +1082,83 @@ pub async fn preview_export(app: AppHandle, path: String, options: Option<FrameO
     blocking(move || export_preview(&app.state::<AppState>(), &path, options.as_ref(), &output, turn, crop.as_ref()).map(tauri::ipc::Response::new)).await
 }
 
-/// Keeps `data` (a PNG) as the watermark, after checking that it decodes.
-pub fn keep_watermark(state: &AppState, data: &[u8]) -> CmdResult<()> {
-    image::load_from_memory_with_format(data, image::ImageFormat::Png).map_err(|e| format!("watermark: {e}"))?;
-    write_atomic(&watermark_file(state), data).map_err(err)
+/// A watermark picture the app keeps: its id, and whether it has no
+/// transparency but a plain ground that can be taken out.
+#[derive(Serialize)]
+pub struct KeptMark {
+    id: String,
+    backdrop: bool,
 }
 
-/// The watermark kept, as PNG bytes; `None` when there is none.
-pub fn watermark_png(state: &AppState) -> Option<Vec<u8>> {
-    fs::read(watermark_file(state)).ok()
+/// Longest edge a watermark picture is kept at: more than a mark across a
+/// whole large photo needs.
+const MARK_EDGE: u32 = 4096;
+
+/// Keeps a picture (PNG, JPEG, WebP, TIFF, BMP or GIF) as a watermark, as a
+/// PNG named after what it holds, so that choosing it again keeps one copy.
+pub fn keep_watermark(state: &AppState, data: &[u8]) -> CmdResult<KeptMark> {
+    let img = image::load_from_memory(data).map_err(|e| format!("watermark: {e}"))?;
+    let img = if img.width().max(img.height()) > MARK_EDGE { img.resize(MARK_EDGE, MARK_EDGE, image::imageops::FilterType::Lanczos3) } else { img };
+    let img = img.to_rgba8();
+    let mut png = Vec::new();
+    img.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).map_err(err)?;
+    // FNV-1a: a name that stays the same for the same picture.
+    let hash = png.iter().fold(0xcbf2_9ce4_8422_2325u64, |h, &b| (h ^ b as u64).wrapping_mul(0x100_0000_01b3));
+    let id = format!("{hash:016x}");
+    let file = watermark_file(state, &id)?;
+    if !file.exists() {
+        write_atomic(&file, &png).map_err(err)?;
+    }
+    Ok(KeptMark { id, backdrop: mark::backdrop(&img).is_some() })
 }
 
-/// Makes the PNG at `source` (a path or a URL the file dialog gave) the watermark.
+/// The watermark picture `id` as PNG bytes; none when there is none.
+pub fn watermark_png(state: &AppState, id: &str) -> Option<Vec<u8>> {
+    fs::read(watermark_file(state, id).ok()?).ok()
+}
+
+/// What is in a file the file dialog gave (a path or a URL).
+fn picked_bytes(app: &AppHandle, source: &str) -> CmdResult<Vec<u8>> {
+    use std::io::Read;
+    use tauri_plugin_fs::{FilePath, FsExt, OpenOptions};
+    let mut opts = OpenOptions::new();
+    opts.read(true);
+    let mut data = Vec::new();
+    app.fs().open(source.parse::<FilePath>().map_err(err)?, opts).map_err(err)?.read_to_end(&mut data).map_err(err)?;
+    Ok(data)
+}
+
+/// Keeps the picture at `source` (from the file dialog) as a watermark, or
+/// `data`, a PNG the webview drew (of an SVG).
 #[tauri::command]
-pub async fn set_watermark(app: AppHandle, source: String) -> CmdResult<()> {
+pub async fn set_watermark(app: AppHandle, source: Option<String>, data: Option<Vec<u8>>) -> CmdResult<KeptMark> {
     blocking(move || {
-        use std::io::Read;
-        use tauri_plugin_fs::{FilePath, FsExt, OpenOptions};
-        let mut opts = OpenOptions::new();
-        opts.read(true);
-        let mut data = Vec::new();
-        app.fs().open(source.parse::<FilePath>().map_err(err)?, opts).map_err(err)?.read_to_end(&mut data).map_err(err)?;
+        let data = match (data, source) {
+            (Some(data), _) => data,
+            (None, Some(source)) => picked_bytes(&app, &source)?,
+            (None, None) => return Err("watermark: nothing chosen".into()),
+        };
         keep_watermark(&app.state::<AppState>(), &data)
     })
     .await
 }
 
-/// The watermark as PNG bytes, none when there is none.
+/// The text of an SVG from the file dialog, for the webview to draw.
 #[tauri::command]
-pub async fn watermark(app: AppHandle) -> CmdResult<tauri::ipc::Response> {
-    blocking(move || Ok(tauri::ipc::Response::new(watermark_png(&app.state::<AppState>()).unwrap_or_default()))).await
+pub async fn read_svg(app: AppHandle, source: String) -> CmdResult<String> {
+    blocking(move || {
+        if !source.to_ascii_lowercase().ends_with(".svg") {
+            return Err("not an SVG".into());
+        }
+        String::from_utf8(picked_bytes(&app, &source)?).map_err(err)
+    })
+    .await
+}
+
+/// The watermark picture `id` as PNG bytes, none when there is none.
+#[tauri::command]
+pub async fn watermark(app: AppHandle, id: String) -> CmdResult<tauri::ipc::Response> {
+    blocking(move || Ok(tauri::ipc::Response::new(watermark_png(&app.state::<AppState>(), &id).unwrap_or_default()))).await
 }
 
 /// Writes a file so that a crash or power cut leaves either the old or the
@@ -1367,5 +1450,14 @@ mod tests {
         fs::remove_file(root.join("b.jpg")).unwrap();
         assert_ne!(folder_stamp(&root, false).unwrap(), flat);
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_watermark_set_up_before_still_reads() {
+        let old: Mark = serde_json::from_str(r#"{"place":"sw","size":0.3,"opacity":0.5}"#).unwrap();
+        assert_eq!((old.kind, old.picture.as_str(), old.layout.place, old.layout.size, old.layout.opacity), (MarkKind::Picture, "", mark::Place::Sw, 0.3, 0.5));
+        assert_eq!(old.layout.margin, mark::Layout::default().margin);
+        let text: Mark = serde_json::from_str(r##"{"kind":"text","text":"© {year}","weight":700,"place":"c","at":[0.2,0.8],"tint":"#ffffff","tile":true,"angle":-30}"##).unwrap();
+        assert_eq!((text.kind, text.weight, text.layout.at, text.layout.tint, text.layout.tile), (MarkKind::Text, 700.0, Some([0.2, 0.8]), mark::Tint::Rgb([255; 3]), true));
     }
 }
