@@ -272,6 +272,35 @@ fn drive_mode_and_burst_frame_number_match_exiftool() {
         }
     }
 }
+/// The level as ExifTool reads it, roll clockwise and pitch upward.
+#[test]
+fn level_matches_exiftool() {
+    let mut seen = 0;
+    for f in samples() {
+        let Ok(out) = Command::new("exiftool").args(["-n", "-T", "-RollAngle", "-PitchAngle"]).arg(&f).output() else { return };
+        let row = String::from_utf8_lossy(&out.stdout).trim_end().to_string();
+        let v: Vec<Option<f32>> = row.split('\t').map(|s| s.parse().ok()).collect();
+        let got = meta::read(&f).unwrap().level;
+        let close = |a: f32, b: f32| (a - b).abs() < 0.06;
+        match (v[0], got) {
+            (Some(roll), Some(l)) => {
+                seen += 1;
+                assert!(close(l.roll, roll), "{}: roll {} vs {row}", name(&f), l.roll);
+                assert_eq!(l.pitch.is_some(), v[1].is_some(), "{}: pitch {:?} vs {row}", name(&f), l.pitch);
+                if let (Some(p), Some(q)) = (l.pitch, v[1]) {
+                    assert!(close(p, q), "{}: pitch {p} vs {row}", name(&f));
+                }
+            }
+            // iPhones only say which way gravity pulled.
+            (None, Some(_)) if name(&f).starts_with("Apple__") => {}
+            // Ricoh's GR bodies fill the record with zeros and no orientation.
+            (Some(0.0), None) if v[1] == Some(0.0) && name(&f).starts_with("Ricoh__") => {}
+            (want, got) => assert_eq!(want, got.map(|l| l.roll), "{}: {row}", name(&f)),
+        }
+    }
+    assert!(seen > 0 || samples().is_empty());
+}
+
 #[test]
 fn rating_round_trips_without_moving_image_data() {
     let dir = std::env::temp_dir().join(format!("sift-rating-{}", std::process::id()));

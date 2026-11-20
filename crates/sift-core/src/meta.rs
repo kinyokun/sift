@@ -2,6 +2,7 @@ use crate::af::{self, AfInfo};
 use crate::container::{self, Format};
 use crate::exif::{self, Exif};
 use crate::io::Src;
+use crate::level::{self, Level};
 use crate::{formats, pentax, rating, stack, Result};
 use serde::Serialize;
 use std::path::Path;
@@ -18,6 +19,8 @@ pub struct Meta {
     pub rating: u8,
     pub exif: Exif,
     pub af: Option<AfInfo>,
+    /// The camera's electronic level when it took the shot.
+    pub level: Option<Level>,
     pub look: Option<Look>,
     /// The file keeps its Picture Control where `nikon::record_look` can write
     /// another one, tone curve included.
@@ -124,6 +127,7 @@ pub fn read(path: &Path) -> Result<Meta> {
         (Some(make), model) => af::read(&p, make, model.as_deref().unwrap_or(""), orientation),
         _ => None,
     };
+    let level = exif.make.as_deref().and_then(|make| level::read(&p, make, exif.model.as_deref().unwrap_or("")));
     let raw = formats::is_raw(path);
     let (mut pw, mut ph) = p.largest_preview().map_or((0, 0), |j| (j.width, j.height));
     // Every rendition of an RW2 shot in another aspect ratio than the sensor's is cut to the picture.
@@ -155,6 +159,7 @@ pub fn read(path: &Path) -> Result<Meta> {
         look_recordable: nikon_recordable(&p),
         exif,
         af,
+        level,
         preview_width: pw,
         preview_height: ph,
         low_res: raw && pw.max(ph) <= LOW_RES_EDGE,

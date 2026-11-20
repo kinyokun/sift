@@ -19,6 +19,7 @@ pub mod histogram;
 pub mod frame;
 pub mod io;
 pub mod jpeg;
+pub mod level;
 pub mod live;
 pub mod look;
 pub mod mark;

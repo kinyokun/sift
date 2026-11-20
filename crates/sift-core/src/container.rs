@@ -353,6 +353,44 @@ pub fn sony_maker_ifd<'a>(p: &Parsed<'a>) -> Option<(Tiff<'a>, Ifd)> {
     Some((t, t.ifd_at(mn.pos + skip)?))
 }
 
+/// The Olympus MakerNote of cameras since about 2005: `OLYMPUS\0` and a byte
+/// order mark, or `OM SYSTEM\0\0\0` and one, then an IFD whose offsets count
+/// from the start of the note.
+pub fn olympus_maker_ifd<'a>(mn: &MakerNote<'a>) -> Option<(Tiff<'a>, Ifd)> {
+    let src = mn.parent.src;
+    let h = src.read(mn.pos, 16)?;
+    let (mark, skip) = if h.starts_with(b"OLYMPUS\0") {
+        (8, 12)
+    } else if h.starts_with(b"OM SYSTEM\0") {
+        (12, 16)
+    } else {
+        return None;
+    };
+    let le = match &h[mark..mark + 2] {
+        b"II" => true,
+        b"MM" => false,
+        _ => return None,
+    };
+    let t = Tiff { src, base: mn.pos, le };
+    Some((t, t.ifd(skip)?))
+}
+
+/// The Apple MakerNote: `Apple iOS\0`, a version, a byte order mark, then an
+/// IFD whose offsets count from the start of the note.
+pub fn apple_maker_ifd<'a>(mn: &MakerNote<'a>) -> Option<(Tiff<'a>, Ifd)> {
+    let src = mn.parent.src;
+    let h = src.read(mn.pos, 14)?;
+    if !h.starts_with(b"Apple iOS\0") {
+        return None;
+    }
+    let le = match &h[12..14] {
+        b"II" => true,
+        b"MM" => false,
+        _ => return None,
+    };
+    let t = Tiff { src, base: mn.pos, le };
+    Some((t, t.ifd(14)?))
+}
 // ---------------------------------------------------------------- ISO BMFF
 
 pub struct BmffBox {

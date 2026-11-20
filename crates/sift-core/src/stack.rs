@@ -14,7 +14,6 @@
 
 use crate::container::{self, MakerNote, Parsed};
 use crate::io::{u16_at, u32_at, Src};
-use crate::tiff::{Ifd, Tiff};
 use crate::{formats, Result};
 use serde::Serialize;
 use std::path::Path;
@@ -186,32 +185,10 @@ fn panasonic(mn: &MakerNote, make: &str, hint: &mut Hint) -> Option<()> {
     Some(())
 }
 
-/// The Olympus MakerNote of cameras since about 2005: `OLYMPUS\0` and a byte
-/// order mark, or `OM SYSTEM\0\0\0` and one, then an IFD whose offsets count
-/// from the start of the note.
-fn olympus_ifd<'a>(mn: &MakerNote<'a>) -> Option<(Tiff<'a>, Ifd)> {
-    let src = mn.parent.src;
-    let h = src.read(mn.pos, 16)?;
-    let (mark, skip) = if h.starts_with(b"OLYMPUS\0") {
-        (8, 12)
-    } else if h.starts_with(b"OM SYSTEM\0") {
-        (12, 16)
-    } else {
-        return None;
-    };
-    let le = match &h[mark..mark + 2] {
-        b"II" => true,
-        b"MM" => false,
-        _ => return None,
-    };
-    let t = Tiff { src, base: mn.pos, le };
-    Some((t, t.ifd(skip)?))
-}
-
 /// Olympus and OM System DriveMode (0x0600 of the CameraSettings IFD,
 /// MakerNote 0x2020): the mode, 0 for a single shot, then the frame's number.
 fn olympus(mn: &MakerNote, hint: &mut Hint) -> Option<()> {
-    let (t, ifd) = olympus_ifd(mn)?;
+    let (t, ifd) = container::olympus_maker_ifd(mn)?;
     let settings = t.ifd(t.uint(ifd.get(0x2020)?)?)?;
     let v = t.uints(settings.get(0x0600)?);
     hint.continuous = match *v.first()? {
@@ -225,26 +202,15 @@ fn olympus(mn: &MakerNote, hint: &mut Hint) -> Option<()> {
 }
 
 /// Apple BurstUUID (MakerNote 0x000B): the same for every frame of a burst.
-/// The note is `Apple iOS\0`, a version, a byte order mark, then an IFD whose
-/// offsets count from the start of the note.
 fn apple(mn: &MakerNote, hint: &mut Hint) -> Option<()> {
-    let src = mn.parent.src;
-    let h = src.read(mn.pos, 14)?;
-    if !h.starts_with(b"Apple iOS\0") {
-        return None;
-    }
-    let le = match &h[12..14] {
-        b"II" => true,
-        b"MM" => false,
-        _ => return None,
-    };
-    let t = Tiff { src, base: mn.pos, le };
-    let id = t.ascii(t.ifd(14)?.get(0x000B)?)?;
+    let (t, ifd) = container::apple_maker_ifd(mn)?;
+    let id = t.ascii(ifd.get(0x000B)?)?;
     // FNV-1a: a series id has to be a number.
     hint.series = Some(id.bytes().fold(0x811C_9DC5u32, |h, b| (h ^ b as u32).wrapping_mul(0x0100_0193)));
     hint.continuous = Some(true);
     Some(())
 }
+
 pub fn hint(p: &Parsed, path: &Path) -> Hint {
     let text = |tag: u16| [&p.exif, &p.ifd0].into_iter().flatten().find_map(|(t, i)| i.get(tag).and_then(|e| t.ascii(e)));
     let (make, model) = (text(0x010F), text(0x0110));
