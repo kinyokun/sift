@@ -6,7 +6,7 @@ import { api, isRawPath, type CropBox, type CopyReport, type ExportKind, type Fr
 import { useT } from "../lib/i18n";
 import { cropOf, flagOf, folderName, framesOf, lookOf, tagsOf, turnOf, useStore, visibleEntries } from "../lib/store";
 import { TagDot } from "../components/Tags";
-import { IconButton, Row, Segmented, Sheet, Toggle } from "../ui/controls";
+import { IconButton, NumberSlider, Row, Segmented, Sheet, Toggle } from "../ui/controls";
 import { MarkPanel, markReady, photoArea, pickPicture, savedMarks, toWatermark, usePictures, type MarkPreset } from "./Watermark";
 
 const LAST_DEST_KEY = "sift.exportDest";
@@ -441,10 +441,7 @@ export function ExportSheet({ onClose }: { onClose: () => void }) {
                   </select>
                 </Row>
                 <Row label={t.quality}>
-                  <span className="slider-value">
-                    <input className="slider" type="range" min={50} max={100} step={1} value={saved.quality} onChange={(e) => keep({ quality: Number(e.target.value) })} aria-label={t.quality} />
-                    <output>{saved.quality}</output>
-                  </span>
+                  <NumberSlider label={t.quality} min={50} max={100} step={1} value={saved.quality} onChange={(quality) => keep({ quality: Math.round(quality) })} />
                 </Row>
                 <Row label={t.stripMeta} hint={t.stripHint}>
                   <Toggle checked={saved.strip} onChange={(strip) => keep({ strip })} />

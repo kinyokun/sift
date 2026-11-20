@@ -7,7 +7,7 @@ import { tiltOf } from "../lib/level";
 import { NO_KEYS, RATE_ACTIONS, actionFor, isTyping, ratingOf, tagOf } from "../lib/shortcuts";
 import { cropOf, flagOf, lookOf, turnOf, useStore, wheelModeOf } from "../lib/store";
 import { fitCrop, turnRect, turnedSize } from "../lib/turn";
-import { IconButton, Menu, Stars, tipProps, type MenuItem } from "../ui/controls";
+import { IconButton, Menu, NumberSlider, Stars, tipProps, type MenuItem } from "../ui/controls";
 import { Icon } from "../ui/Icon";
 import { CROP_RATIOS, GUIDE_MODES, ROTATABLE_GUIDES, centeredCrop, parseRatio, ratioOf, swapRatio, type Crop } from "./Overlay";
 import { Histogram } from "./Histogram";
@@ -1102,23 +1102,22 @@ export function Viewer() {
                   <IconButton icon="swap" label={t.cropSwap} size={16} disabled={cropRatio === "free"} onClick={swapCrop} />
                 </div>
               )}
-              <label className="straighten" {...tipProps(t.straightenHint)}>
+              <div className="straighten" {...tipProps(t.straightenHint)}>
                 <span>{t.straighten}</span>
-                <input
-                  className="slider"
-                  type="range"
+                <NumberSlider
+                  label={t.straighten}
                   min={-45}
                   max={45}
                   step={0.1}
+                  digits={2}
+                  unit="°"
                   value={crop.angle ?? 0}
-                  aria-label={t.straighten}
-                  onPointerDown={() => (straightenFrom.current = crop)}
-                  onPointerUp={() => (straightenFrom.current = null)}
-                  onChange={(e) => straighten(Number(e.target.value))}
+                  onStart={() => (straightenFrom.current = crop)}
+                  onEnd={() => (straightenFrom.current = null)}
+                  onChange={straighten}
                   onDoubleClick={() => straighten(0)}
                 />
-                <output>{(crop.angle ?? 0).toFixed(1)}°</output>
-              </label>
+              </div>
               {currentTilt !== null && (
                 <button className="button" {...tipProps(t.straightenLevelHint(currentTilt.toFixed(1)))} onClick={() => straighten(Math.max(-45, Math.min(45, Math.round(currentTilt * 10) / 10)))}>
                   {t.straightenLevel}

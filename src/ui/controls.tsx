@@ -31,6 +31,108 @@ export function Segmented<T extends string>(props: {
   );
 }
 
+/** A number in `text` typed by hand: a comma may be the decimal point, a unit after it is left out. */
+export function typedNumber(text: string): number | null {
+  const m = /^\s*([-−+]?\s*(?:\d+(?:[.,]\d*)?|[.,]\d+))\s*[^\d.,]*$/.exec(text);
+  return m ? Number(m[1].replace(/[−\s]/g, (c) => (c === "−" ? "-" : "")).replace(",", ".")) : null;
+}
+
+/** A slider whose value also stands in a field to type it in: Enter or leaving the field sets it, Escape puts it
+ * back, ↑ and ↓ step. The field shows the value times `scale` (a share as a percentage), to `digits` decimals,
+ * followed by `unit`; a number typed in is held to the slider's range but not to its steps. `onStart` and `onEnd`
+ * bracket a drag of the slider and a visit to the field, the changes made in one go. */
+export function NumberSlider(props: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  onChange: (value: number) => void;
+  scale?: number;
+  digits?: number;
+  unit?: string;
+  className?: string;
+  onStart?: () => void;
+  onEnd?: () => void;
+  onDoubleClick?: () => void;
+}) {
+  const scale = props.scale ?? 1;
+  const digits = props.digits ?? 0;
+  const shown = String(Number((props.value * scale).toFixed(digits)));
+  const [text, setText] = useState<string | null>(null);
+  const [bad, setBad] = useState(false);
+  // Escape leaves the field without setting what was typed in it.
+  const dropping = useRef(false);
+  const clamp = (v: number) => Math.min(props.max, Math.max(props.min, v));
+  const set = (v: number) => {
+    const value = clamp(Number(v.toFixed(6)));
+    if (value !== props.value) props.onChange(value);
+  };
+  const typed = text === null ? null : typedNumber(text);
+  return (
+    <span className={`slider-value ${props.className ?? ""}`}>
+      <input
+        className="slider"
+        type="range"
+        min={props.min}
+        max={props.max}
+        step={props.step}
+        value={props.value}
+        aria-label={props.label}
+        onPointerDown={props.onStart}
+        onPointerUp={props.onEnd}
+        onDoubleClick={props.onDoubleClick}
+        onChange={(e) => props.onChange(Number(e.target.value))}
+      />
+      <label className={`num-field ${bad ? "bad" : ""}`}>
+        <input
+          value={text ?? shown}
+          inputMode="decimal"
+          spellCheck={false}
+          autoComplete="off"
+          size={Math.max(2, shown.length)}
+          aria-label={props.label}
+          aria-invalid={bad}
+          data-own-escape=""
+          onFocus={(e) => {
+            e.currentTarget.select();
+            props.onStart?.();
+          }}
+          onChange={(e) => {
+            setText(e.target.value);
+            setBad(false);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              if (text !== null && typed === null) setBad(true);
+              else e.currentTarget.blur();
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              e.stopPropagation();
+              dropping.current = true;
+              e.currentTarget.blur();
+            } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+              e.preventDefault();
+              const step = props.step * (e.shiftKey ? 10 : 1) * (e.key === "ArrowUp" ? 1 : -1);
+              set((typed === null ? props.value : Number(typed.toFixed(digits)) / scale) + step);
+              setText(null);
+              setBad(false);
+            }
+          }}
+          onBlur={() => {
+            if (!dropping.current && typed !== null) set(Number(typed.toFixed(digits)) / scale);
+            dropping.current = false;
+            setText(null);
+            setBad(false);
+            props.onEnd?.();
+          }}
+        />
+        {props.unit && <span>{props.unit}</span>}
+      </label>
+    </span>
+  );
+}
 export function Stars(props: { value: number; onChange?: (value: number) => void; size?: number; tips?: { label: string; key: string }[] }) {
   const size = props.size ?? 18;
   return (
@@ -152,7 +254,8 @@ export function Menu(props: { button: ReactNode; label: string; items: MenuItem[
 export function Sheet(props: { title: string; onClose?: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean; tabs?: ReactNode }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
+      // A field that puts back what was typed on Escape gets it first.
+      if (e.key === "Escape" && !(e.target as Element | null)?.closest?.("[data-own-escape]")) {
         e.stopPropagation();
         props.onClose?.();
       }

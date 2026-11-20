@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, type FrameStyle, type KeptMark, type MarkPlace, type Watermark } from "../lib/api";
 import { useT } from "../lib/i18n";
 import { Icon } from "../ui/Icon";
-import { Row, Segmented, Toggle, tipProps } from "../ui/controls";
+import { NumberSlider, Row, Segmented, Toggle, tipProps } from "../ui/controls";
 
 /** A watermark kept among the export settings; `backdrop` says its picture has a plain background that can go. */
 export type MarkPreset = Watermark & { id: string; backdrop?: boolean };
@@ -132,13 +132,10 @@ export function photoArea(style: FrameStyle | null, w: number, h: number): [numb
   return [m / w, m / h, pw / w, ph / h];
 }
 
-function Slider(props: { label: string; value: number; min: number; max: number; step: number; shown: string; onChange: (v: number) => void }) {
+function Slider(props: Parameters<typeof NumberSlider>[0]) {
   return (
     <Row label={props.label}>
-      <span className="slider-value">
-        <input className="slider" type="range" min={props.min} max={props.max} step={props.step} value={props.value} onChange={(e) => props.onChange(Number(e.target.value))} aria-label={props.label} />
-        <output>{props.shown}</output>
-      </span>
+      <NumberSlider {...props} />
     </Row>
   );
 }
@@ -184,7 +181,6 @@ export function MarkPanel(props: {
     { value: "#000000", label: t.colorBlack },
     { value: "auto", label: t.colorAuto },
   ];
-  const percent = (v: number) => `${Math.round(v * 100)}%`;
   return (
     <>
       <div className="row mark-presets">
@@ -280,13 +276,13 @@ export function MarkPanel(props: {
           </div>
         </Row>
       )}
-      <Slider label={t.watermarkSize} value={mark.size} min={min} max={max} step={step} shown={percent(mark.size / max)} onChange={(size) => onChange({ size })} />
-      <Slider label={t.watermarkOpacity} value={mark.opacity} min={0.1} max={1} step={0.05} shown={percent(mark.opacity)} onChange={(opacity) => onChange({ opacity })} />
-      <Slider label={t.watermarkAngle} value={mark.angle} min={-90} max={90} step={1} shown={`${mark.angle}°`} onChange={(angle) => onChange({ angle })} />
+      <Slider label={t.watermarkSize} value={mark.size} min={min} max={max} step={step} scale={100 / max} unit="%" onChange={(size) => onChange({ size })} />
+      <Slider label={t.watermarkOpacity} value={mark.opacity} min={0.1} max={1} step={0.05} scale={100} unit="%" onChange={(opacity) => onChange({ opacity })} />
+      <Slider label={t.watermarkAngle} value={mark.angle} min={-90} max={90} step={1} digits={2} unit="°" onChange={(angle) => onChange({ angle })} />
       {mark.tile ? (
-        <Slider label={t.watermarkGap} value={mark.gap} min={0} max={0.5} step={0.01} shown={percent(mark.gap / 0.5)} onChange={(gap) => onChange({ gap })} />
+        <Slider label={t.watermarkGap} value={mark.gap} min={0} max={0.5} step={0.01} scale={100 / 0.5} unit="%" onChange={(gap) => onChange({ gap })} />
       ) : (
-        !mark.at && <Slider label={t.watermarkMargin} value={mark.margin} min={0} max={0.1} step={0.005} shown={percent(mark.margin / 0.1)} onChange={(margin) => onChange({ margin })} />
+        !mark.at && <Slider label={t.watermarkMargin} value={mark.margin} min={0} max={0.1} step={0.005} scale={100 / 0.1} unit="%" onChange={(margin) => onChange({ margin })} />
       )}
       <Row label={t.watermarkShadow}>
         <Toggle checked={mark.shadow} onChange={(shadow) => onChange({ shadow })} />

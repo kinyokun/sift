@@ -428,12 +428,50 @@ button.primary:disabled,
   gap: 8px;
 }
 
-.slider-value output {
-  min-width: 2.6em;
-  text-align: right;
+/* The value beside a slider, typed over to set it exactly. */
+.num-field {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  min-width: 3.6em;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: var(--r-sm);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
+  background: var(--fill);
   color: var(--text-2);
+  cursor: text;
+  line-height: 24px;
+}
+
+.num-field:hover {
+  color: var(--text);
+}
+
+.num-field:focus-within {
+  color: var(--text);
+  box-shadow: 0 0 0 1.5px var(--tint);
+}
+
+.num-field input {
+  min-width: 1.6em;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: right;
+  outline: none;
+}
+
+.num-field span {
+  margin-left: 1px;
+}
+
+.num-field.bad {
+  color: var(--red);
+  box-shadow: 0 0 0 1.5px var(--red);
 }
 
 .stars {
@@ -2011,13 +2049,6 @@ kbd {
   width: 140px;
 }
 
-.straighten output {
-  min-width: 3.2em;
-  text-align: right;
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  color: var(--text-2);
-}
 
 /* Compare: each pane has a bar of its own, and a picker to put any photo in it. */
 .slot-bar {
