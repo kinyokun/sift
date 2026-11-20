@@ -53,20 +53,28 @@ export const RATE_ACTIONS: Action[] = ["rate0", "rate1", "rate2", "rate3", "rate
 /** The first tags of a folder, in the order they were made, each have a key of their own. */
 export const TAG_ACTIONS: Action[] = ["tag1", "tag2", "tag3", "tag4", "tag5", "tag6", "tag7", "tag8", "tag9"];
 
-const APPLE = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+export const APPLE = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+
+// What moves a file to the trash in Finder and in Explorer.
+const DELETE = APPLE ? "Mod+Backspace" : "Delete";
 
 /** A binding is modifiers plus one key, such as `Alt+D`, `ArrowLeft` or `Space`.
- * `Mod` is Command on Apple devices and Ctrl elsewhere. An empty string means unassigned. */
+ * `Mod` is Command on Apple devices and Ctrl elsewhere. An empty string means unassigned.
+ *
+ * Laid out for the left hand on the keyboard and the right on the mouse: A and D turn the
+ * pages and W and S go through a burst (the arrow keys do too), the keys around them do what
+ * is done to every photo, and a modifier gives a key's less frequent variant. Delete stays
+ * where the system has it, out of reach of a slip. */
 export const DEFAULT_KEYS: Record<Action, string> = {
   prev: "A",
   next: "D",
-  stackPrev: "ArrowUp",
-  stackNext: "ArrowDown",
-  pick: "P",
+  stackPrev: "W",
+  stackNext: "S",
+  // F for flag; pressing it again, or X again, takes the flag off.
+  pick: "F",
   reject: "X",
-  unflag: "U",
-  // What moves a file to the trash in Finder and in Explorer.
-  delete: APPLE ? "Mod+Backspace" : "Delete",
+  unflag: "Shift+F",
+  delete: DELETE,
   rate0: "0",
   rate1: "1",
   rate2: "2",
@@ -86,30 +94,53 @@ export const DEFAULT_KEYS: Record<Action, string> = {
   tag9: "Shift+9",
   eye: "E",
   zoom: "Z",
-  af: "F",
-  // Not the letter O: on a key cap it cannot be told apart from the 0 that clears a rating.
-  original: "N",
+  af: "Q",
+  original: "V",
   lookPrev: "Mod+A",
   lookNext: "Mod+D",
+  wall: "Shift+V",
+  clipping: "B",
+  guidesPrev: "Shift+G",
+  guides: "G",
+  flip: "Alt+G",
+  crop: "R",
+  rotateLeft: "Alt+A",
+  rotateRight: "Alt+D",
+  editor: "Mod+E",
+  compare: "C",
+  panes: "Shift+C",
+  side: "Shift+Tab",
+  link: "Alt+C",
+  // Tab hides the panels in Lightroom and Photoshop too.
+  info: "Tab",
+  immersive: "Space",
+  refresh: "Mod+R",
+  help: "`",
+};
+
+/** The defaults up to `KEYS_VERSION` 9, so a saved binding still at its old default can be moved to the new one. */
+export const OLD_DEFAULT_KEYS: Record<Action, string> = {
+  ...DEFAULT_KEYS,
+  stackPrev: "ArrowUp",
+  stackNext: "ArrowDown",
+  pick: "P",
+  unflag: "U",
+  af: "F",
+  original: "N",
   wall: "W",
   clipping: "H",
   guidesPrev: "Alt+A",
   guides: "Alt+D",
   flip: "Alt+R",
-  crop: "R",
-  // As in Lightroom and Bridge.
   rotateLeft: "Mod+[",
   rotateRight: "Mod+]",
-  editor: "Mod+E",
-  compare: "C",
-  panes: "Shift+C",
   side: "Tab",
   link: "L",
   info: "I",
-  immersive: "Space",
-  refresh: "Mod+R",
-  help: "`",
 };
+
+/** No action bound, for where there is no keyboard. */
+export const NO_KEYS = Object.fromEntries(ACTIONS.map((a) => [a, ""])) as Record<Action, string>;
 
 const MODIFIER_KEYS = ["Shift", "Control", "Alt", "Meta"];
 

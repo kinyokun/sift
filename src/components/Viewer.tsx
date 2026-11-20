@@ -698,11 +698,13 @@ export function Viewer() {
       }
       const action = actionFor(st.settings.keys, e);
       if (!action) {
-        // Arrow keys always step, unless they were assigned to something.
+        // Arrow keys always step (up and down through a burst), unless they were assigned to something.
         if (e.metaKey || e.ctrlKey || e.altKey) return;
         if (e.key === "ArrowRight") return step(1, e.repeat);
         if (e.key === "ArrowLeft") return step(-1, e.repeat);
         if (e.key === "?") return st.setSheet("help");
+        if (e.key === "ArrowDown") return step(1, e.repeat, true);
+        if (e.key === "ArrowUp") return step(-1, e.repeat, true);
         return;
       }
       e.preventDefault();

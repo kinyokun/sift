@@ -71,7 +71,7 @@ await session("desktop", desktop, async (page, shot) => {
   await openLibrary(page);
   await page.locator(".cell").nth(1).click();
   await page.keyboard.press("3");
-  await page.keyboard.press("P");
+  await page.keyboard.press("F");
   await page.locator(".cell").nth(3).click();
   await page.keyboard.press("X");
   await page.locator(".cell").nth(0).click();
@@ -80,9 +80,9 @@ await session("desktop", desktop, async (page, shot) => {
   await page.keyboard.press("Enter");
   await page.locator(".tier.full.ready").waitFor({ timeout: 20000 });
   await shot("viewer");
-  await page.keyboard.press("I");
+  await page.keyboard.press("Tab");
   await shot("viewer-no-sidebar");
-  await page.keyboard.press("I");
+  await page.keyboard.press("Tab");
   await page.keyboard.press("Z");
   await shot("viewer-100");
   await page.keyboard.press("Z");
@@ -98,11 +98,11 @@ await session("desktop", desktop, async (page, shot) => {
   await page.keyboard.press("ArrowRight");
   await page.locator(".tier.full.ready").waitFor({ timeout: 30000 });
   await shot("viewer-pair");
-  await page.keyboard.press("N");
+  await page.keyboard.press("V");
   await page.waitForTimeout(300);
   await page.locator(".tier.full.ready").waitFor({ timeout: 30000 });
   await shot("viewer-original");
-  await page.keyboard.press("N");
+  await page.keyboard.press("V");
   await page.keyboard.press("ArrowLeft");
   await page.keyboard.press("C");
   await page.locator(".pane").nth(1).locator(".tier.full.ready").waitFor({ timeout: 20000 });
@@ -156,6 +156,19 @@ await session("animals", desktop, async (page, shot) => {
   }
 });
 
+// AF points on every photo of a folder: run on a folder of camera samples.
+await session("af", desktop, async (page, shot) => {
+  await openLibrary(page);
+  const count = await page.locator(".cell").count();
+  await page.locator(".cell").first().dblclick();
+  for (let i = 0; i < count; i++) {
+    await page.locator(".tier.full.ready").waitFor({ timeout: 20000 });
+    await page.waitForTimeout(800);
+    await shot(`af-${i + 1}`);
+    await page.keyboard.press("ArrowRight");
+  }
+});
+
 // Import looks, apply one per photo, and export with them.
 await session("looks", desktop, async (page, shot) => {
   if (!lookFiles.length) return console.log("[looks] skipped: set LOOKS=a.cube,b.NP3");
@@ -179,7 +192,7 @@ await session("looks", desktop, async (page, shot) => {
     await shot(name);
   }
   await pickLook("TealOrange");
-  await page.keyboard.press("P");
+  await page.keyboard.press("F");
   await page.keyboard.press("Escape");
   await page.locator('[aria-label="导出"]').click();
   await shot("export");
@@ -232,12 +245,12 @@ await session("tools", desktop, async (page, shot) => {
   await page.locator('.dock [aria-label="滤镜"]').click();
   await page.getByRole("menuitem", { name: "导入滤镜" }).click();
   await page.waitForTimeout(1200);
-  await page.keyboard.press("H");
+  await page.keyboard.press("B");
   await page.locator(".tier.clip").waitFor({ timeout: 20000 });
   const mask = await page.locator(".tier.clip").evaluate((img) => img.decode().then(() => `${img.naturalWidth}x${img.naturalHeight}`));
   console.log(`[tools] clipping warning: ${mask}, button on: ${await page.locator('.dock [aria-label="过曝 / 欠曝警告"]').getAttribute("aria-pressed")}`);
   await shot("clipping");
-  await page.keyboard.press("H");
+  await page.keyboard.press("B");
   console.log(`[tools] clipping off: ${(await page.locator(".tier.clip").count()) === 0}`);
   const save = page.getByRole("button", { name: "存入滤镜库" });
   if (await save.count()) {
@@ -247,7 +260,7 @@ await session("tools", desktop, async (page, shot) => {
     await shot("recipe-saved");
   } else console.log("[tools] this photo has no recipe to keep (or the library has it already)");
   const t0 = Date.now();
-  await page.keyboard.press("W");
+  await page.keyboard.press("Shift+V");
   await page.locator(".look-wall").waitFor();
   await page.waitForFunction(() => document.querySelectorAll(".look-tile-image.loading").length === 0, null, { timeout: 120000 });
   console.log(`[tools] wall: ${await page.locator(".look-tile").count()} tiles in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
@@ -668,7 +681,7 @@ await session("hold", { ...desktop, platform: "windows" }, async (page) => {
   // Comparing, the pane in use is the one that waits; the other keeps its photo.
   await open(true);
   await page.keyboard.press("C");
-  await page.keyboard.press("Tab");
+  await page.keyboard.press("Shift+Tab");
   await page.waitForTimeout(600 + slow * 2);
   const names = () => page.locator(".slot-name span").allTextContents();
   const [left] = await names();
@@ -680,7 +693,7 @@ await session("hold", { ...desktop, platform: "windows" }, async (page) => {
   await page.waitForTimeout(600 + slow * 2);
   const marked = await position();
   for (let i = 0; i < 5; i++) {
-    await page.keyboard.press("P");
+    await page.keyboard.press("F");
     await page.waitForTimeout(50);
   }
   await page.waitForTimeout(300 + slow * 2);
@@ -691,7 +704,7 @@ await session("hold", { ...desktop, platform: "windows" }, async (page) => {
     await page.waitForTimeout(250 + slow);
     picks.push(await page.locator(".dock .pick.on").count());
   }
-  console.log(`[hold] P five times 50 ms apart, pictures ${slow} ms late: ${marked} -> ${moved}; picked, going back over them: ${picks.join(" ")} (want 1 1 1 1 1)`);
+  console.log(`[hold] F five times 50 ms apart, pictures ${slow} ms late: ${marked} -> ${moved}; picked, going back over them: ${picks.join(" ")} (want 1 1 1 1 1)`);
 
   // A picture that cannot be had holds nothing up; one that never arrives holds the page for two seconds, not for ever.
   const lost = { how: "", url: "" };
@@ -802,13 +815,13 @@ await session("crop", desktop, async (page, shot) => {
   await page.keyboard.press("Enter");
   await page.waitForTimeout(300);
   await shot("confirmed");
-  for (let i = 0; i < 5; i++) await page.keyboard.press("Alt+D");
+  for (let i = 0; i < 5; i++) await page.keyboard.press("G");
   await shot("golden-triangle");
-  await page.keyboard.press("Alt+R");
+  await page.keyboard.press("Alt+G");
   await shot("golden-triangle-rotated");
-  await page.keyboard.press("Alt+A");
-  await page.keyboard.press("Alt+A");
-  await page.keyboard.press("Alt+R");
+  await page.keyboard.press("Shift+G");
+  await page.keyboard.press("Shift+G");
+  await page.keyboard.press("Alt+G");
   await shot("spiral-rotated");
   await page.keyboard.press("Meta+D");
   await page.waitForTimeout(400);
@@ -999,9 +1012,9 @@ await session("compare", desktop, async (page, shot) => {
   const after = await names();
   console.log(`[compare] next in pane 3 only: changed ${after.map((n, i) => n !== before[i]).join(",")} (want false,false,true,false)`);
   console.log(`[compare] active after its arrow: ${await page.locator(".slot-bar.active .slot-number").textContent()} (want 3)`);
-  await page.keyboard.press("Tab");
+  await page.keyboard.press("Shift+Tab");
   await page.keyboard.press("3");
-  console.log(`[compare] Tab then 3: pane ${await page.locator(".slot-bar.active .slot-number").textContent()} has ${await page.locator(".slot-bar.active .slot-stars").textContent().catch(() => "none")} (want 4, ★3)`);
+  console.log(`[compare] Shift+Tab then 3: pane ${await page.locator(".slot-bar.active .slot-number").textContent()} has ${await page.locator(".slot-bar.active .slot-stars").textContent().catch(() => "none")} (want 4, ★3)`);
   await page.keyboard.press("ArrowRight");
   console.log(`[compare] → moves pane 4 only: ${JSON.stringify(await names())}`);
   await page.locator(".slot-bar").first().locator(".slot-number").click();
@@ -1027,7 +1040,7 @@ await session("compare", desktop, async (page, shot) => {
   await page.locator(".cell").nth(1).click();
   await page.locator(".cell").nth(4).click({ modifiers: ["ControlOrMeta"] });
   await page.locator(".cell").nth(6).click({ modifiers: ["ControlOrMeta"] });
-  await page.locator(".selection-bar .icon-button").last().click();
+  await page.locator('.selection-bar [aria-label="对比所选"]').click();
   await page.locator(".slot").nth(2).locator(".tier.full.ready").waitFor({ timeout: 30000 });
   console.log(`[compare] from the grid selection: ${JSON.stringify(await names())}`);
   await shot("from-grid");
@@ -1161,7 +1174,7 @@ if (!only || only.includes("folders")) {
       await openLibrary(page);
       console.log(`[folders] a folder with no photos of its own: ${await cells()} photos (want 7), "${await toast()}"`);
       await page.locator(".cell").nth(0).click();
-      await page.keyboard.press("P");
+      await page.keyboard.press("F");
       console.log(`[folders] picking day 1/a.jpg leaves day 2/a.jpg alone: ${await page.locator(".cell-flag.pick").count()} picked (want 1)`);
       await shot("all");
       await page.locator('[aria-label="只看其中一个文件夹"]').click();

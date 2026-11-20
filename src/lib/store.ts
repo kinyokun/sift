@@ -15,7 +15,7 @@ import {
   type UpdateOffer,
   type UpdateProgress,
 } from "./api";
-import { DEFAULT_KEYS, resolveKeys, type Action } from "./shortcuts";
+import { DEFAULT_KEYS, OLD_DEFAULT_KEYS, resolveKeys, type Action } from "./shortcuts";
 import { quarter, turnRect } from "./turn";
 
 export type FlagFilter = "all" | "picked" | "unflagged" | "rejected";
@@ -91,7 +91,7 @@ export type Settings = {
 
 const SETTINGS_KEY = "sift.settings";
 const MAX_RECENTS = 6;
-const KEYS_VERSION = 9;
+const KEYS_VERSION = 10;
 /** The colours a tag can have; a tag keeps its place in this list. */
 export const TAG_COLORS = ["#ff453a", "#ff9f0a", "#ffd60a", "#30d158", "#64d2ff", "#0a84ff", "#bf5af2", "#ff6eb4"];
 const MAX_TAG_NAME = 40;
@@ -140,14 +140,14 @@ function loadSettings(): Settings {
   try {
     const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
     let keys = { ...DEFAULT_KEYS };
-    // Versions 4 to 9 only added actions; bindings saved since version 3 carry over.
-    if (saved.keysVersion >= 3 && saved.keysVersion <= KEYS_VERSION) keys = resolveKeys(saved.keys || {});
-    else if (saved.keysVersion === 2) {
-      // Version 2 put "original" on the letter O, which reads like the 0 of
-      // "clear rating". Move it unless the user had already changed it; every
-      // other customised binding is kept.
-      const { original, ...rest } = saved.keys || {};
-      keys = resolveKeys(original === "O" ? rest : { ...rest, original });
+    if (saved.keysVersion === KEYS_VERSION) keys = resolveKeys(saved.keys || {});
+    else if (saved.keysVersion >= 2 && saved.keysVersion < KEYS_VERSION) {
+      // Versions 4 to 9 only added actions. Version 10 laid the defaults out for the left hand:
+      // a binding still at its old default takes the new one, every one the user chose stays.
+      // Version 2 had "original" on the letter O, which reads like the 0 of "clear rating".
+      const old = saved.keysVersion === 2 ? { ...OLD_DEFAULT_KEYS, original: "O" } : OLD_DEFAULT_KEYS;
+      const kept = Object.entries(saved.keys || {}).filter(([a, k]) => old[a as Action] !== k);
+      keys = resolveKeys(Object.fromEntries(kept));
     }
     // Up to 0.4.2 the wheel either zoomed or did not.
     const { wheelZoom, ...rest } = saved;

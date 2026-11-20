@@ -680,6 +680,8 @@ export function Library() {
       else if (action === "unflag") st.flag(targets, 0);
       else if (action === "next") move(1);
       else if (action === "prev") move(-1);
+      else if (action === "stackNext") move(cols);
+      else if (action === "stackPrev") move(-cols);
       else if (action === "compare" && targets.length > 1 && targets.length <= MAX_PANES) st.openViewer(targets[0], targets);
     };
     window.addEventListener("keydown", onKey);

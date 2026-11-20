@@ -48,7 +48,7 @@ Press `E` to zoom to the eyes. Sift looks for faces first; when there is no pers
 </tr>
 </table>
 
-Press `F` to show the AF points that Nikon, Canon, Sony, Fujifilm and Panasonic bodies record, placed correctly for orientation and crop. The info panel next to it lists the camera, lens, exposure, focus mode, Picture Control or film simulation, and a histogram.
+Press `Q` to show the AF points that Nikon, Canon, Sony, Fujifilm, Panasonic, Pentax and Ricoh bodies record, placed correctly for orientation and crop. The info panel next to it lists the camera, lens, exposure, focus mode, Picture Control or film simulation, and a histogram.
 
 <p align="center"><img src="docs/readme/focus-en.webp" alt="A Nikon Z fc NEF with the AF box on the flower, the info panel and histogram on the right" width="88%"></p>
 
@@ -67,7 +67,7 @@ On macOS and Windows a burst can become a Live Photo: drag the ends of the timel
 
 ## Looks
 
-Import `.cube`, `.3dl`, HaldCLUT `.png` and Nikon `.NP3` looks. Press `W` to see every look on one photo at once and click to apply it; select several photos in the grid to apply it to all of them. Shots with a RAW are rendered from the RAW, so looks never stack on the in-camera Picture Control. For photos taken with a Nikon Imaging Cloud or custom recipe, you can save that recipe as an NP3 and use it on other photos.
+Import `.cube`, `.3dl`, HaldCLUT `.png` and Nikon `.NP3` looks. Press `Shift+V` to see every look on one photo at once and click to apply it; select several photos in the grid to apply it to all of them. Shots with a RAW are rendered from the RAW, so looks never stack on the in-camera Picture Control. For photos taken with a Nikon Imaging Cloud or custom recipe, you can save that recipe as an NP3 and use it on other photos.
 
 <p align="center"><img src="docs/readme/look-wall-en.webp" alt="The look wall: ten looks on the same CR3" width="88%"></p>
 
@@ -75,7 +75,7 @@ Import `.cube`, `.3dl`, HaldCLUT `.png` and Nikon `.NP3` looks. Press `W` to see
 
 ## Compare and exposure
 
-Press `C` to compare photos side by side: two, three or four at a time (`Shift+C` switches, four make a 2 × 2 grid). Each pane is controlled on its own: click its title bar to put any photo of the folder in it, step it with its own arrows, or click a frame in the burst strip to show that frame in the pane you are on; zoom and pan can stay in sync across all of them. Select two to four photos in the grid and press `C` to compare exactly those. Press `H` to mark blown highlights (red) and crushed shadows (blue), using the same thresholds as the histogram.
+Press `C` to compare photos side by side: two, three or four at a time (`Shift+C` switches, four make a 2 × 2 grid). Each pane is controlled on its own: click its title bar to put any photo of the folder in it, step it with its own arrows, or click a frame in the burst strip to show that frame in the pane you are on; zoom and pan can stay in sync across all of them. Select two to four photos in the grid and press `C` to compare exactly those. Press `B` to mark blown highlights (red) and crushed shadows (blue), using the same thresholds as the histogram.
 
 <table>
 <tr>
@@ -184,25 +184,23 @@ iOS and Android builds currently have to be built yourself; see [AGENTS.md](AGEN
 <summary><b>Common shortcuts</b></summary>
 
 - `A` / `D` or `←` / `→`: previous / next photo
-- `↑` / `↓`: previous / next stack (bursts, pixel shift)
-- `P` / `X` / `U`: pick / reject / unflag
+- `W` / `S` or `↑` / `↓`: previous / next stack (bursts, pixel shift)
+- `F` / `X`: pick / reject (press again to clear); `Shift+F`: unflag
 - `0`–`5`: rating
 - `T`: tags; `Shift+1`–`Shift+9`: put on / take off tags 1–9
 - `Z`: 100% / fit
 - `E`: eye close-up
-- `F`: AF points
-- `N`: original (no look)
+- `Q`: AF points
+- `V`: original (no look); `Shift+V`: look wall
 - `⌘A` / `⌘D`: previous / next look (Ctrl on Windows)
-- `W`: look wall
-- `H`: clipping warning
-- `C`: compare (in the grid, the 2–4 selected photos)
-- `Shift+C`: 2 / 3 / 4 photos in compare
-- `Tab`: next pane in compare
-- `R`: crop preview
-- `I`: info panel
-- `⌘R`: refresh the folder (Ctrl on Windows)
+- `B`: clipping warning
+- `G` / `Shift+G`: next / previous composition guide; `Alt+G`: turn the guide
+- `R`: crop preview; `Alt+A` / `Alt+D`: rotate 90° left / right
+- `C`: compare (in the grid, the 2–4 selected photos); `Shift+C`: 2 / 3 / 4 photos; `Shift+Tab`: next pane; `Alt+C`: link zoom
+- `Tab`: info panel
+- `⌘E`: edit in another app; `⌘R`: refresh the folder (Ctrl on Windows)
 - `Space`: hide the interface
-- `` ` ``: all shortcuts
+- `` ` ``: keyboard map
 
 </details>
 
