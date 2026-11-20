@@ -85,9 +85,13 @@ export type AppInfo = {
   trash?: boolean;
 };
 
-/** A newer release; `notes` is its section of CHANGELOG.md. */
-export type UpdateOffer = { version: string; current: string; notes: string };
-export type UpdateProgress = { downloaded: number; total: number | null; installing: boolean };
+/** One release's section of CHANGELOG.md. */
+export type Release = { version: string; date: string | null; notes: string };
+/** A newer release. `releases`: what changed since the installed version, newest first. `delta_size`: what there
+ * is to download when only the changed parts are. `ready`: downloaded and waiting to be put in place. */
+export type UpdateOffer = { version: string; current: string; releases: Release[]; delta_size: number | null; ready: boolean };
+/** `step`: downloading, laying the new version out beside the installed one, or putting it in place. */
+export type UpdateProgress = { downloaded: number; total: number | null; step: "download" | "prepare" | "install" };
 
 export type CopyReport = {
   copied: number;
@@ -292,10 +296,15 @@ export const api = {
   transferStop: () => invoke<void>("transfer_stop"),
   /** Looks for a newer release; resolves to `null` when this is the newest. */
   updateCheck: () => invoke<UpdateOffer | null>("update_check"),
-  /** Downloads and installs the release found by `updateCheck`, then restarts the app: it settles only by rejecting
-   * ("cancelled" after `updateCancel`). Progress arrives as `update-progress` events. */
+  /** Downloads and prepares the release found by `updateCheck` (only the changed parts where it can); it is put in
+   * place when the app quits. Rejects with "cancelled" after `updateCancel`. Progress arrives as `update-progress` events. */
+  updateDownload: () => invoke<void>("update_download"),
+  /** Puts the release found by `updateCheck` in place, downloading it first if need be, and restarts the app: it
+   * settles only by rejecting. */
   updateInstall: () => invoke<void>("update_install"),
   updateCancel: () => invoke<void>("update_cancel"),
+  /** Throws away a downloaded release, so it is not put in place on quitting. */
+  updateDiscard: () => invoke<void>("update_discard"),
   /** Tells the macOS menu bar which language the app is shown in. */
   setMenuLanguage: (lang: "zh" | "en") => invoke<void>("set_menu_language", { lang }),
 };

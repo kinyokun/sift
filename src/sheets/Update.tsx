@@ -1,6 +1,6 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
-import type { ReactNode } from "react";
-import type { UpdateProgress } from "../lib/api";
+import { useEffect, useState, type ReactNode } from "react";
+import type { Release, UpdateProgress } from "../lib/api";
 import { useT } from "../lib/i18n";
 import { useStore } from "../lib/store";
 import { Row, Sheet, Toggle } from "../ui/controls";
@@ -23,7 +23,7 @@ function inline(text: string): ReactNode[] {
 }
 
 /** Release notes are a section of CHANGELOG.md: headings, bullet lists and paragraphs.
- * They arrive over the network, so they are laid out here and never inserted as HTML. */
+ * They may arrive over the network, so they are laid out here and never inserted as HTML. */
 function Notes({ text }: { text: string }) {
   const blocks: ReactNode[] = [];
   let items: string[] = [];
@@ -51,21 +51,67 @@ function Notes({ text }: { text: string }) {
     }
   }
   flush();
-  return <div className="update-notes">{blocks}</div>;
+  return <>{blocks}</>;
+}
+
+/** Releases one after the other, each under its version and date. */
+export function ReleaseNotes({ releases }: { releases: Release[] }) {
+  const t = useT();
+  return (
+    <div className="update-notes">
+      {releases.map((r) => (
+        <section key={r.version} className="release">
+          <h4>
+            {r.version}
+            {r.date && <span>{r.date}</span>}
+          </h4>
+          {r.notes.trim() ? <Notes text={r.notes} /> : <p className="dim">{t.updateNoNotes}</p>}
+        </section>
+      ))}
+    </div>
+  );
+}
+
+/** The releases in CHANGELOG.md, newest first, without the unreleased changes. */
+export function parseChangelog(text: string): Release[] {
+  const releases: Release[] = [];
+  let current: { release: Release; lines: string[] } | null = null;
+  const finish = () => {
+    if (current) releases.push({ ...current.release, notes: current.lines.join("\n").trim() });
+  };
+  for (const line of text.split(/\r?\n/)) {
+    const head = line.match(/^## \[([^\]]+)\](?:\s+-\s+(.+))?\s*$/);
+    if (head) {
+      finish();
+      current = head[1].toLowerCase() === "unreleased" ? null : { release: { version: head[1], date: head[2]?.trim() ?? null, notes: "" }, lines: [] };
+      continue;
+    }
+    // The link definitions at the end belong to no release.
+    if (/^\[[^\]]+\]:\s+\S+/.test(line)) {
+      finish();
+      current = null;
+      continue;
+    }
+    current?.lines.push(line);
+  }
+  finish();
+  return releases;
 }
 
 const megabytes = (bytes: number) => (bytes / 1048576).toFixed(1);
 
-function Download({ progress, installing }: { progress: UpdateProgress | null; installing: boolean }) {
+function Progress({ progress, installing }: { progress: UpdateProgress | null; installing: boolean }) {
   const t = useT();
-  const { downloaded = 0, total = null } = progress ?? {};
+  const { downloaded = 0, total = null, step = "download" } = progress ?? {};
   const size = total ? `${megabytes(downloaded)} / ${megabytes(total)} MB` : downloaded ? `${megabytes(downloaded)} MB` : "";
+  const label = installing || step === "install" ? t.updateInstalling : step === "prepare" ? t.updatePreparing : `${t.updateDownloading} ${size}`;
+  const done = installing || step !== "download" ? 1 : total ? downloaded / total : 0;
   return (
     <div className="progress">
       <div className="progress-track">
-        <div style={{ width: `${installing ? 100 : total ? (downloaded / total) * 100 : 0}%` }} />
+        <div style={{ width: `${done * 100}%` }} />
       </div>
-      <small>{installing ? t.updateInstalling : `${t.updateDownloading} ${size}`}</small>
+      <small>{label}</small>
     </div>
   );
 }
@@ -75,19 +121,29 @@ export function UpdateSheet({ onClose }: { onClose: () => void }) {
   const { phase, offer, progress, error } = useStore((s) => s.update);
   const act = useStore.getState();
   if (!offer) return null;
-  const busy = phase === "downloading" || phase === "installing";
-  const failed = phase === "failed";
+  const downloading = phase === "downloading";
+  const installing = phase === "installing";
+  // Closing while it downloads leaves the download running, to be offered again once it is done.
+  const later = () => {
+    act.updateLater();
+    onClose();
+  };
   return (
     <Sheet
       title={t.updateTitle}
-      onClose={busy ? undefined : onClose}
+      onClose={installing ? undefined : later}
       footer={
-        busy ? (
+        downloading || installing ? (
           <>
-            <Download progress={progress} installing={phase === "installing"} />
-            {phase === "downloading" && <button onClick={act.cancelUpdate}>{t.cancel}</button>}
+            <Progress progress={progress} installing={installing} />
+            {downloading && (
+              <>
+                <button onClick={act.cancelUpdate}>{t.cancel}</button>
+                <button onClick={later}>{t.updateLater}</button>
+              </>
+            )}
           </>
-        ) : failed ? (
+        ) : phase === "failed" ? (
           <>
             <button onClick={openReleases}>{t.updateOpenReleases}</button>
             <span className="spacer" />
@@ -100,9 +156,9 @@ export function UpdateSheet({ onClose }: { onClose: () => void }) {
           <>
             <button onClick={act.skipUpdate}>{t.updateSkip}</button>
             <span className="spacer" />
-            <button onClick={onClose}>{t.updateLater}</button>
+            <button onClick={later}>{t.updateLater}</button>
             <button className="primary" onClick={act.installUpdate}>
-              {t.updateNow}
+              {phase === "ready" ? t.updateRestart : t.updateNow}
             </button>
           </>
         )
@@ -111,8 +167,11 @@ export function UpdateSheet({ onClose }: { onClose: () => void }) {
       <div className="update">
         <p className="update-versions">
           Sift {offer.current} <span aria-hidden="true">→</span> <strong>{offer.version}</strong>
+          {offer.delta_size != null && phase !== "ready" && <span> · {t.updateDeltaSize(megabytes(offer.delta_size))}</span>}
         </p>
-        {failed && (
+        {phase === "ready" && <p className="note">{t.updateReadyNote}</p>}
+        {downloading && <p className="note">{t.updateBackgroundNote}</p>}
+        {phase === "failed" && (
           <p className="note bad">
             {t.updateFailed}
             {error ? ` · ${error}` : ""}
@@ -120,8 +179,22 @@ export function UpdateSheet({ onClose }: { onClose: () => void }) {
             {t.updateFailedHint}
           </p>
         )}
-        {offer.notes.trim() ? <Notes text={offer.notes} /> : <p className="note">{t.updateNoNotes}</p>}
+        <ReleaseNotes releases={offer.releases} />
       </div>
+    </Sheet>
+  );
+}
+
+/** Every release so far, from the CHANGELOG.md this build was made with. */
+export function ChangelogSheet({ onClose }: { onClose: () => void }) {
+  const t = useT();
+  const [releases, setReleases] = useState<Release[] | null>(null);
+  useEffect(() => {
+    import("../../CHANGELOG.md?raw").then(({ default: text }) => setReleases(parseChangelog(text))).catch(() => setReleases([]));
+  }, []);
+  return (
+    <Sheet title={t.changelog} onClose={onClose} wide>
+      {releases && <ReleaseNotes releases={releases} />}
     </Sheet>
   );
 }
@@ -139,6 +212,7 @@ export function UpdateSettings() {
     : phase === "current" ? t.updateCurrent
     : checkFailed ? t.updateCheckFailed
     : phase === "downloading" || phase === "installing" ? t.updateDownloading
+    : phase === "ready" && offer ? t.updateReady(offer.version)
     : offer ? t.updateAvailable(offer.version)
     : undefined;
   return (
@@ -156,8 +230,14 @@ export function UpdateSettings() {
             </button>
           )}
         </Row>
-        <Row label={t.updateAuto}>
-          <Toggle checked={auto} onChange={(checkUpdates) => act.setSettings({ checkUpdates })} />
+        <Row label={t.updateAuto} hint={t.updateAutoHint}>
+          <Toggle
+            checked={auto}
+            onChange={(checkUpdates) => {
+              act.setSettings({ checkUpdates });
+              if (checkUpdates) act.checkUpdate();
+            }}
+          />
         </Row>
       </div>
       {checkFailed && (

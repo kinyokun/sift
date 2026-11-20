@@ -54,6 +54,8 @@ pub fn run() {
             std::fs::create_dir_all(&data)?;
             app.manage(AppState::new(cache, data));
             menu::restore(app.handle());
+            #[cfg(desktop)]
+            update::startup(app.handle());
             #[cfg(all(desktop, debug_assertions))]
             update::unattended(app.handle());
             Ok(())
@@ -107,14 +109,23 @@ pub fn run() {
             commands::import_files,
             commands::save_to_photos,
             update::update_check,
+            update::update_download,
             update::update_install,
             update::update_cancel,
+            update::update_discard,
             transfer_start,
             transfer_stop,
             menu::set_menu_language,
             handoff::open_with,
             handoff::drag_out,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Sift");
+        .build(tauri::generate_context!())
+        .expect("error while building Sift")
+        .run(|app, event| {
+            #[cfg(desktop)]
+            if let tauri::RunEvent::Exit = event {
+                update::on_exit(app);
+            }
+            let _ = (app, event);
+        });
 }

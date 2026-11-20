@@ -20,19 +20,22 @@ import { quarter, turnRect } from "./turn";
 
 export type FlagFilter = "all" | "picked" | "unflagged" | "rejected";
 export type SortBy = "name" | "time" | "rating" | "size";
-export type SheetName = "export" | "findraw" | "transfer" | "settings" | "help" | "keys" | "update" | "delete";
+export type SheetName = "export" | "findraw" | "transfer" | "settings" | "help" | "keys" | "update" | "changelog" | "delete";
 
 /** What the delete sheet asks about: photos by id. `forGood`: they would not go into a trash. `why`: the
  * trash did not take them, and this is what the system said. `busy` while they are being deleted. */
 export type DeleteRequest = { ids: string[]; forGood: boolean; why?: string; busy?: boolean };
 
 /** Where the updater stands. `offer` is kept for as long as a newer release is known;
- * "failed" without one means the check failed, with one the download or installation. */
+ * "failed" without one means the check failed, with one the download or installation.
+ * "ready": downloaded, to be put in place on quitting or with a restart. `restart`: restart as
+ * soon as the download is done, as asked; otherwise a finished download is offered. */
 export type UpdateState = {
-  phase: "idle" | "checking" | "current" | "available" | "downloading" | "installing" | "failed";
+  phase: "idle" | "checking" | "current" | "available" | "downloading" | "ready" | "installing" | "failed";
   offer: UpdateOffer | null;
   progress: UpdateProgress | null;
   error: string | null;
+  restart?: boolean;
 };
 
 /** The scroll wheel in the viewer zooms, goes to the photo after or before, or moves a
@@ -81,7 +84,8 @@ export type Settings = {
   keysVersion: number;
   onboarded: boolean;
   recents: string[];
-  /** Look for a newer release when the app starts (builds that update themselves). */
+  /** Look for a newer release at launch and every few hours, and download it in the background
+   * (builds that update themselves). */
   checkUpdates: boolean;
   /** The release the user chose not to be asked about again. */
   skippedUpdate: string | null;
@@ -110,6 +114,8 @@ const UNSETTLED_MS = 15000;
 const SAVE_DELAY_MS = 250;
 /** The update check waits this long after launch, so reopening the last folder goes first. */
 const UPDATE_CHECK_DELAY_MS = 3000;
+/** While the app stays open, updates are looked for again this often. */
+const UPDATE_CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
 const NO_UPDATE: UpdateState = { phase: "idle", offer: null, progress: null, error: null };
 
 const defaults: Settings = {
@@ -266,13 +272,18 @@ type State = {
   notify: (text: string) => void;
   /** Saves photos to the system photo library (iOS), Live Photos as Live Photos. */
   saveToPhotos: (items: Item[]) => Promise<void>;
-  /** Looks for a newer release. The check at launch asks nothing about a skipped release and
-   * keeps quiet when it fails; one the user asked for (`manual`) always shows what it found. */
+  /** Looks for a newer release, and with automatic updates on downloads it in the background. A check
+   * made by itself asks nothing about a skipped release and keeps quiet when it fails; one the user
+   * asked for (`manual`) always shows what it found. */
   checkUpdate: (manual?: boolean) => Promise<void>;
-  /** Downloads and installs the release on offer; the app restarts when it is in place. */
+  /** Downloads the release on offer; once done it is offered with a restart, or put in place on quitting. */
+  downloadUpdate: () => Promise<void>;
+  /** Puts the release on offer in place, downloading it first if need be; the app restarts. */
   installUpdate: () => Promise<void>;
+  /** The update sheet was put aside: a download goes on without restarting at the end. */
+  updateLater: () => void;
   cancelUpdate: () => void;
-  /** Stops asking about the release on offer. */
+  /** Stops asking about the release on offer, and drops it if it was downloaded. */
   skipUpdate: () => void;
 };
 
@@ -437,6 +448,16 @@ let toastSeq = 0;
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
 /** An update was found while another sheet was open; it is offered when that one closes. */
 let offerWaiting = false;
+
+type Get = () => State;
+
+/** Shows the update sheet, without taking the place of a sheet in use other than Settings. */
+function offerUpdate(get: Get) {
+  const { sheet } = get();
+  if (!sheet || sheet === "settings") get().setSheet("update");
+  else offerWaiting = sheet !== "update";
+}
+
 const pendingMeta = new Map<string, Promise<Meta | null>>();
 /** The first reading of the folder that is open, while it runs. */
 let reading: Promise<void> | null = null;
@@ -507,6 +528,17 @@ export const useStore = create<State>((set, get) => {
   const save = () => {
     clearTimeout(saveTimer);
     saveTimer = setTimeout(saveNow, SAVE_DELAY_MS);
+  };
+
+  /** Puts a downloaded release in place; the app restarts, so progress is written first. */
+  const restartIntoUpdate = async (offer: UpdateOffer) => {
+    saveNow();
+    set({ update: { ...NO_UPDATE, phase: "installing", offer } });
+    try {
+      await api.updateInstall();
+    } catch (e) {
+      set({ update: { ...NO_UPDATE, phase: "failed", offer, error: String(e) } });
+    }
   };
 
   /** Keeps a tag's name to offer it in the folders opened later, newest first. */
@@ -717,7 +749,11 @@ export const useStore = create<State>((set, get) => {
     init: async () => {
       const info = await api.appInfo();
       set({ info });
-      if (info.updater && get().settings.checkUpdates) setTimeout(() => get().checkUpdate(), UPDATE_CHECK_DELAY_MS);
+      if (info.updater) {
+        const auto = () => get().settings.checkUpdates && get().checkUpdate();
+        setTimeout(auto, UPDATE_CHECK_DELAY_MS);
+        setInterval(auto, UPDATE_CHECK_EVERY_MS);
+      }
       document.documentElement.dataset.platform = info.platform;
       document.documentElement.dataset.mobile = String(info.mobile);
       api.listLooks().then((library) => set({ library })).catch(() => {});
@@ -1090,39 +1126,55 @@ export const useStore = create<State>((set, get) => {
     checkUpdate: async (manual = false) => {
       const { info, update } = get();
       if (!info?.updater || ["checking", "downloading", "installing"].includes(update.phase)) return;
-      set({ update: { ...NO_UPDATE, phase: "checking" } });
+      set({ update: { ...update, phase: "checking", error: null } });
       try {
         const offer = await api.updateCheck();
-        set({ update: { ...NO_UPDATE, phase: offer ? "available" : "current", offer } });
-        if (!offer || (!manual && offer.version === get().settings.skippedUpdate)) return;
-        // A sheet in use is not replaced, except Settings, where the check was asked for.
-        const { sheet } = get();
-        if (!sheet || sheet === "settings") get().setSheet("update");
-        else offerWaiting = sheet !== "update";
+        if (!offer) return set({ update: { ...NO_UPDATE, phase: "current" } });
+        set({ update: { ...NO_UPDATE, phase: offer.ready ? "ready" : "available", offer } });
+        if (manual) return offerUpdate(get);
+        if (offer.ready || offer.version === get().settings.skippedUpdate) return;
+        if (get().settings.checkUpdates) await get().downloadUpdate();
+        else offerUpdate(get);
       } catch (e) {
-        set({ update: manual ? { ...NO_UPDATE, phase: "failed", error: String(e) } : NO_UPDATE });
+        // A check of its own that fails leaves things as they were.
+        set({ update: manual ? { ...NO_UPDATE, phase: "failed", error: String(e) } : update });
+      }
+    },
+
+    downloadUpdate: async () => {
+      const { offer, phase, restart } = get().update;
+      if (!offer || ["downloading", "ready", "installing"].includes(phase)) return;
+      set({ update: { phase: "downloading", offer, progress: null, error: null, restart } });
+      const off = await listen<UpdateProgress>("update-progress", ({ payload }) => {
+        const now = get().update;
+        if (now.phase === "downloading") set({ update: { ...now, progress: payload } });
+      }).catch(() => null);
+      try {
+        await api.updateDownload();
+        const ready = { ...offer, ready: true };
+        if (get().update.restart) return restartIntoUpdate(ready);
+        set({ update: { ...NO_UPDATE, phase: "ready", offer: ready } });
+        offerUpdate(get);
+      } catch (e) {
+        const error = String(e);
+        set({ update: error === "cancelled" ? { ...NO_UPDATE, phase: "available", offer } : { ...NO_UPDATE, phase: "failed", offer, error } });
+      } finally {
+        off?.();
       }
     },
 
     installUpdate: async () => {
       const { offer, phase } = get().update;
-      if (!offer || phase === "downloading" || phase === "installing") return;
-      // The app restarts by itself at the end, so progress is written now.
-      saveNow();
-      set({ update: { phase: "downloading", offer, progress: null, error: null } });
-      const off = await listen<UpdateProgress>("update-progress", ({ payload }) => {
-        const now = get().update.phase;
-        if (now !== "downloading" && now !== "installing") return;
-        set({ update: { phase: payload.installing ? "installing" : "downloading", offer, progress: payload, error: null } });
-      }).catch(() => null);
-      try {
-        await api.updateInstall();
-      } catch (e) {
-        const error = String(e);
-        set({ update: error === "cancelled" ? { ...NO_UPDATE, phase: "available", offer } : { phase: "failed", offer, progress: null, error } });
-      } finally {
-        off?.();
-      }
+      if (!offer || phase === "installing") return;
+      if (phase === "ready") return restartIntoUpdate(offer);
+      if (phase === "downloading") return set({ update: { ...get().update, restart: true } });
+      set({ update: { ...get().update, restart: true } });
+      await get().downloadUpdate();
+    },
+
+    updateLater: () => {
+      const { update } = get();
+      if (update.restart) set({ update: { ...update, restart: false } });
     },
 
     cancelUpdate: () => {
@@ -1130,8 +1182,12 @@ export const useStore = create<State>((set, get) => {
     },
 
     skipUpdate: () => {
-      const { offer } = get().update;
+      const { offer, phase } = get().update;
       if (offer) get().setSettings({ skippedUpdate: offer.version });
+      if (offer && phase === "ready") {
+        api.updateDiscard().catch(() => {});
+        set({ update: { ...NO_UPDATE, phase: "available", offer: { ...offer, ready: false } } });
+      }
       get().setSheet(null);
     },
   };

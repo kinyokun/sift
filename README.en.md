@@ -144,7 +144,7 @@ From [Releases](https://github.com/kinyokun/sift/releases/latest):
 
 The macOS installer is signed and notarized by Apple and opens normally. The Windows installer is not yet signed: if SmartScreen appears, click "More info → Run anyway".
 
-After that there is no need to come back here: the official installers check for a new version at launch (this can be turned off under Settings → About) and download and install it from within the app. The check and the download go through GitHub accelerators that are reachable from mainland China first, and every update package is verified against its signature. Versions up to 0.3.4 have no updater, so they need one more manual install. The `.app.tar.gz` and `latest.json` in a release are for the updater, not for downloading by hand.
+After that there is no need to come back here: the official installers check for a new version at launch and every 6 hours, download it in the background and offer a restart, or install it when you quit (under Settings → About, automatic updates can be turned off in favour of checking by hand). From 0.6.3 on, only what changed between two versions is downloaded, usually a few MB. The check and the download go through GitHub accelerators that are reachable from mainland China first, and every package and delta is verified against its signature. Versions up to 0.3.4 have no updater, so they need one more manual install. The `.app.tar.gz`, `.delta`, `latest.json` and `updates.json` files in a release are for the updater, not for downloading by hand.
 
 Every release includes `SHA256SUMS.txt` for checking the files. An installer that will not open (macOS reports an input/output error or a damaged disk image) is usually an incomplete download: if `shasum -a 256 <file>` (`certutil -hashfile <file> SHA256` on Windows) gives a value that is not the one in `SHA256SUMS.txt`, download it again.
 
@@ -181,7 +181,7 @@ iOS and Android builds currently have to be built yourself; see [AGENTS.md](AGEN
 - LAN transfer: download originals to a phone by QR code, or send photos back to the computer
 - Shortcuts are laid out for the left hand on the keyboard and the right hand on the mouse, and every one can be changed (Settings → Shortcuts); press `` ` `` to see them on a keyboard
 - In the viewer the scroll wheel zooms, goes to the next photo or pans, and a double-click zooms or goes back to the grid, as you choose (Settings → General)
-- In-app updates: the official macOS / Windows installers check for new versions and install them from within the app
+- In-app updates: the official macOS / Windows installers check for and download new versions in the background, only what changed, and install them on restart or quit
 
 <details>
 <summary><b>Common shortcuts</b></summary>

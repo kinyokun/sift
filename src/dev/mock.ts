@@ -5,7 +5,8 @@
 // The bridge has no updater, so the update screens are driven from here:
 // `&update=0.4.0` offers that version, `&update=none` finds nothing and
 // `&update=fail` fails the check; `&install=fail` breaks the download part
-// way and `&install=stall` leaves it there.
+// way and `&install=stall` leaves it there. The download is a 7.1 MB delta,
+// or with `&delta=none` the 187 MB package.
 //
 // Deleting: `&trash=none` plays a platform without a trash, and with
 // `&trash=refuse` the trash takes nothing, as on a network share.
@@ -35,25 +36,43 @@ const UPDATE_NOTES = `### 新增
 `;
 
 let cancelled = false;
-async function fakeInstall() {
+/** The version the fake download has finished, as the app keeps it until it quits. */
+let downloaded: string | null = null;
+const MB = 1048576;
+
+/** The releases from the installed one to `found`: `found` itself and, for show, the one before it. */
+function releases(found: string) {
+  const [major, minor, patch] = found.split(".").map(Number);
+  const list = [{ version: found, date: "2026-11-21", notes: UPDATE_NOTES }];
+  if (patch > 0) list.push({ version: `${major}.${minor}.${patch - 1}`, date: "2026-11-20", notes: "### 修复\n\n- 导出大量照片时进度条不再停在 99%" });
+  return list;
+}
+
+async function fakeDownload(found: string) {
   const mode = params.get("install");
-  const total = 187 * 1048576;
+  const total = params.get("delta") === "none" ? 187 * MB : 7.1 * MB;
   cancelled = false;
   for (let step = 1; step <= 20; step++) {
     await wait(120);
     if (cancelled) throw "cancelled";
-    emit("update-progress", { downloaded: (total * step) / 20, total, installing: false });
+    emit("update-progress", { downloaded: (total * step) / 20, total, step: "download" });
     if (step === 8 && mode === "fail") throw "error sending request for url (https://ghfast.top/…)";
     if (step === 8 && mode === "stall") {
       while (!cancelled) await wait(100);
       throw "cancelled";
     }
   }
-  emit("update-progress", { downloaded: total, total, installing: true });
+  emit("update-progress", { downloaded: total, total, step: "prepare" });
+  await wait(600);
+  downloaded = found;
+}
+
+async function fakeInstall(found: string) {
+  if (downloaded !== found) await fakeDownload(found);
+  emit("update-progress", { downloaded: 0, total: null, step: "install" });
   // The real app restarts here.
   return new Promise(() => {});
 }
-
 w.__TAURI_INTERNALS__ = {
   metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main", windowLabel: "main" } },
   transformCallback(fn: unknown) {
@@ -87,10 +106,13 @@ w.__TAURI_INTERNALS__ = {
       if (found === "fail") throw "error sending request for url (https://github.com/kinyokun/sift/releases/latest/download/latest.json)";
       if (!found || found === "none") return null;
       const info = await (await fetch(`${base}/invoke/app_info`, { method: "POST", body: "{}" })).json();
-      return { version: found, current: info.version, notes: UPDATE_NOTES };
+      const delta_size = params.get("delta") === "none" ? null : 7.1 * MB;
+      return { version: found, current: info.version, releases: releases(found), delta_size, ready: downloaded === found };
     }
-    if (cmd === "update_install") return fakeInstall();
+    if (cmd === "update_download") return fakeDownload(params.get("update")!);
+    if (cmd === "update_install") return fakeInstall(params.get("update")!);
     if (cmd === "update_cancel") return void (cancelled = true);
+    if (cmd === "update_discard") return void (downloaded = null);
     if (cmd === "delete_photos" && params.get("trash") === "refuse") {
       const { shots, forGood } = args as { shots: string[][]; forGood: boolean };
       if (!forGood) return { failed: shots.map((_, i) => i), reason: "The volume does not have a trash." };

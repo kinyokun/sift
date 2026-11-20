@@ -89,6 +89,8 @@ Windows 包目前未签名，SmartScreen 会提示 “未知发布者”。
 
 仓库配置了 `TAURI_SIGNING_PRIVATE_KEY`（`pnpm tauri signer generate` 生成的更新签名私钥；私钥有密码时再配 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`）时，构建出的应用带应用内更新，更新包（Windows 的 `-setup.exe`、macOS 的 `.app.tar.gz`）会用它签名；对应的公钥写在 `src-tauri/tauri.conf.json` 的 `plugins.updater.pubkey` 里。发版时 `scripts/latest-json.mjs` 把版本号、更新说明（`CHANGELOG.md` 里那一节）、下载地址和签名写进 `latest.json`，随 Release 一起上传。已安装的应用读取的是最新一个正式 Release 里的 `latest.json`，所以草稿和预发布都不会被推送。
 
+发正式版时，`scripts/deltas.mjs` 还会从此前最近 5 个正式版（0.6.3 起）各做一份到新版的增量补丁（`Sift_<新版>_from_<旧版>_<macos|windows>.delta`，由 `crates/sift-delta` 生成，做完会按应用的做法还原一遍并和新版逐文件比对），用同一个私钥签名，再写出 `updates.json`：列出这些补丁和之前各版发布的、基础版本仍在最近 30 个正式版里的补丁，附上完整安装包大小和 `CHANGELOG.md` 里所有版本的说明。`updates.json` 也签名，`latest.json` 里记着它的地址和签名。应用从中挑总下载量最小的一串补丁，没有合适的就下完整安装包。补丁存放在发布它的那个 Release 里，所以旧 Release 的附件不要删。
+
 没有这个密钥（例如 fork）时构建照常进行，只是应用里没有更新功能。私钥要另外备份：丢了以后，已安装的版本无法再验证新的更新包，只能请用户手动重装一次。
 
 ### 尼康引擎（仅官方构建）

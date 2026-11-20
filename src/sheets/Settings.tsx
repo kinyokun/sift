@@ -264,6 +264,11 @@ export function SettingsSheet({ onClose }: { onClose: () => void }) {
             </Row>
           </div>
           <div className="group">
+            <Row label={t.changelog}>
+              <button className="link" onClick={() => useStore.getState().setSheet("changelog")}>
+                {t.view}
+              </button>
+            </Row>
             <Row label={t.sourceCode} hint="GPL-3.0">
               <button className="link" onClick={() => openLink(REPO)}>
                 GitHub

@@ -3,7 +3,8 @@
 //   node scripts/latest-json.mjs <dir> <tag> <owner/repo> [notes.md]
 // Every update package needs its signature next to it (<file>.sig, written by
 // `tauri build` when the update key is set). With no signature at all, as in a
-// fork without the key, nothing is written.
+// fork without the key, nothing is written. When the folder has a signed
+// updates.json (scripts/deltas.mjs), latest.json points to it.
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -31,14 +32,14 @@ const packages = [
   { suffix: "-setup.exe", targets: ["windows-x86_64"] },
 ];
 
-const platforms = {};
-for (const { suffix, targets } of packages) {
-  const found = signed.filter((f) => f.endsWith(suffix) && files.includes(f));
-  if (found.length !== 1) fail(`expected one signed *${suffix} in ${dir}, found ${found.length}`);
-  const [file] = found;
+// SIFT_RELEASE_URL, for tests, is where the files are served instead of GitHub.
+const base = process.env.SIFT_RELEASE_URL ?? `https://github.com/${repo}/releases/download/${tag}/`;
+const url = (file) => `${base}${encodeURIComponent(file)}`;
+
+// The app only takes what is signed for the version it is offered as, so a
+// file signed for another version would be refused by everyone.
+function signature(file) {
   const signature = readFileSync(join(dir, `${file}.sig`), "utf8").trim();
-  // The app only installs a package whose signature names the version it is
-  // offered as, so one signed for another version would be refused by everyone.
   const comment = Buffer.from(signature, "base64")
     .toString("utf8")
     .split("\n")
@@ -47,8 +48,16 @@ for (const { suffix, targets } of packages) {
   if (signedVersion !== `version:${version}`) {
     fail(`${file}.sig is signed for ${signedVersion ?? "no version"}, not ${version}`);
   }
-  const url = `https://github.com/${repo}/releases/download/${tag}/${encodeURIComponent(file)}`;
-  for (const target of targets) platforms[target] = { signature, url };
+  return signature;
+}
+
+const platforms = {};
+for (const { suffix, targets } of packages) {
+  const found = signed.filter((f) => f.endsWith(suffix) && files.includes(f));
+  if (found.length !== 1) fail(`expected one signed *${suffix} in ${dir}, found ${found.length}`);
+  const [file] = found;
+  const entry = { signature: signature(file), url: url(file) };
+  for (const target of targets) platforms[target] = entry;
 }
 
 const manifest = {
@@ -57,5 +66,8 @@ const manifest = {
   pub_date: new Date().toISOString(),
   platforms,
 };
+if (signed.includes("updates.json") && files.includes("updates.json")) {
+  manifest.catalogue = { url: url("updates.json"), signature: signature("updates.json") };
+}
 writeFileSync(join(dir, "latest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
-console.log(`latest.json: ${version} for ${Object.keys(platforms).join(", ")}`);
+console.log(`latest.json: ${version} for ${Object.keys(platforms).join(", ")}${manifest.catalogue ? ", with updates.json" : ""}`);

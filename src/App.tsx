@@ -11,7 +11,7 @@ import { DeleteSheet } from "./sheets/Delete";
 import { ExportSheet, FindRawSheet, TransferSheet } from "./sheets/Export";
 import { KeysOverlay } from "./sheets/Keys";
 import { HelpSheet, SettingsSheet } from "./sheets/Settings";
-import { UpdateSheet } from "./sheets/Update";
+import { ChangelogSheet, UpdateSheet } from "./sheets/Update";
 import { Tips } from "./ui/Tip";
 
 /** Toasts are raised with short codes so the store stays free of UI text. */
@@ -118,6 +118,7 @@ export function App() {
       {sheet === "help" && <HelpSheet onClose={close} />}
       {sheet === "keys" && <KeysOverlay onClose={close} />}
       {sheet === "update" && <UpdateSheet onClose={close} />}
+      {sheet === "changelog" && <ChangelogSheet onClose={() => setSheet("settings")} />}
       {sheet === "delete" && <DeleteSheet />}
       <Toast />
       <Tips />

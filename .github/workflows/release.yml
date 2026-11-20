@@ -59,15 +59,22 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      HAS_UPDATER: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
           path: out
           merge-multiple: true
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
       - uses: actions/setup-node@v7
         with:
           node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
       # Artifacts keep their folders (release/bundle/nsis/…); release files go flat.
       # The macOS update package is built as Sift.app.tar.gz and gets the same
       # kind of name as the installers.
@@ -87,8 +94,23 @@ jobs:
           ' CHANGELOG.md > notes.md
           [ -s notes.md ] || echo "See CHANGELOG.md." > notes.md
           cat notes.md
+      # Deltas from the releases just before this one, signed, and updates.json,
+      # which lists them and those earlier releases published (see
+      # scripts/deltas.mjs). Pre-releases are not offered as updates.
+      - name: Deltas
+        if: env.HAS_UPDATER == 'true' && !contains(github.ref_name, '-')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          command -v 7z || sudo apt-get install -y p7zip-full
+          pnpm install --frozen-lockfile
+          cargo build --release --locked -p sift-delta
+          node scripts/deltas.mjs dist "$GITHUB_REF_NAME" "$GITHUB_REPOSITORY" target/release/sift-delta
       # latest.json is what installed copies read to learn of this version; it
-      # carries the signatures, so the .sig files are not published.
+      # carries the signatures (updates.json those of the deltas), so the .sig
+      # files are not published.
       - name: Update manifest
         run: |
           node scripts/latest-json.mjs dist "$GITHUB_REF_NAME" "$GITHUB_REPOSITORY" notes.md

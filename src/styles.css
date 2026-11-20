@@ -3087,6 +3087,28 @@ textarea.text {
   margin-top: 0;
 }
 
+.update-notes .release + .release {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--hairline);
+}
+
+.update-notes h4 {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.update-notes h4 span {
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 400;
+}
+
 .update-notes ul {
   margin: 0;
   padding-left: 18px;
