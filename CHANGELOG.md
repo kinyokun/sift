@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-11-20
+
 ### 新增
 
 - 调参数的滑杆旁边的数值都可以直接输入（水印的大小、不透明度、角度、间距和边距，导出的 JPG 质量，裁剪时的拉直角度）：点一下数值输入，回车或点别处生效，Esc 放弃；也可以按 ↑ / ↓ 微调，按住 Shift 一次走 10 步。输入的值不受滑杆步长限制，比如水印角度可以填 -12.5°
@@ -240,7 +242,8 @@
 - 导出（复制 / 重命名 / 找回 RAW / 参数相框）、局域网传输、自定义快捷键
 - 中文 / 英文界面
 
-[Unreleased]: https://github.com/kinyokun/sift/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/kinyokun/sift/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/kinyokun/sift/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/kinyokun/sift/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/kinyokun/sift/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/kinyokun/sift/compare/v0.4.4...v0.5.0
