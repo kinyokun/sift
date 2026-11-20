@@ -2,6 +2,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { chooseEditor, editorName } from "../lib/editor";
+import { importLooks } from "../lib/looks";
 import { useT } from "../lib/i18n";
 import { ACTIONS, DEFAULT_KEYS, comboOf, keyCaps, type Action } from "../lib/shortcuts";
 import { useStore, wheelModeOf, type Settings, type WheelMode } from "../lib/store";
@@ -199,7 +200,12 @@ export function SettingsSheet({ onClose }: { onClose: () => void }) {
           </>
         )}
 
-        <h4>{t.lookManage}</h4>
+        <h4>
+          {t.lookManage}
+          <button className="link" onClick={importLooks}>
+            {t.lookImport}
+          </button>
+        </h4>
         <div className="group">
           {library.map((l) => (
             <Row key={l.id} label={l.name} hint={l.id}>

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { open } from "@tauri-apps/plugin-dialog";
 import { NO_LOOK, api, fileName, imageUrl, isHeifPath, isRawPath, type Item, type Meta, type Tag } from "../lib/api";
 import { editIn } from "../lib/editor";
+import { importLooks } from "../lib/looks";
 import { useT } from "../lib/i18n";
 import { actionFor, isTyping, ratingOf, tagOf } from "../lib/shortcuts";
 import { cropOf, flagOf, lookOf, turnOf, useStore, wheelModeOf } from "../lib/store";
@@ -650,20 +650,6 @@ export function Viewer() {
   };
 
   const toggleOriginal = () => chooseLook(current && lookOf(looks, current) === NO_LOOK ? null : NO_LOOK);
-
-  const importLooks = async () => {
-    const picked = await open({ multiple: true, filters: [{ name: "Looks", extensions: ["cube", "CUBE", "3dl", "3DL", "png", "PNG", "np3", "NP3"] }] });
-    const sources = Array.isArray(picked) ? picked : picked ? [picked] : [];
-    if (!sources.length) return;
-    try {
-      const before = library.length;
-      const next = await api.importLooks(sources);
-      useStore.getState().setLibrary(next);
-      useStore.getState().notify(`lookImported:${Math.max(next.length - before, sources.length)}`);
-    } catch (e) {
-      useStore.getState().notify(String(e));
-    }
-  };
 
   /** Saves the recipe the current photo was shot with to the look library. */
   const saveCameraLook = async () => {

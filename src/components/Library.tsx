@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { NO_LOOK, api, imageUrl, isRawPath, type Item, type StackKind } from "../lib/api";
 import { editIn } from "../lib/editor";
+import { importLooks } from "../lib/looks";
 import { useT } from "../lib/i18n";
 import { actionFor, isTyping, keyOf, ratingOf, tagOf } from "../lib/shortcuts";
 import { useShallow } from "zustand/react/shallow";
@@ -765,6 +766,8 @@ export function Library() {
     { label: t.original, onSelect: () => applyLook(NO_LOOK) },
     ...(s.library.length ? ["divider" as const] : []),
     ...s.library.map((l) => ({ label: l.name, onSelect: () => applyLook(l.id) })),
+    "divider",
+    { label: t.lookImport, icon: "plus", onSelect: importLooks },
   ];
 
   const switchFolder = async () => {
