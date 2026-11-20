@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use sift_core::af::AfBox;
 use sift_core::export::{self, CopyReport, Progress};
 use sift_core::frame::FrameOptions;
-use sift_core::{edit, face, formats, frame, mark, meta, nksc, preview, rating, remove, stack};
+use sift_core::{edit, face, formats, frame, hdr, mark, meta, nksc, preview, rating, remove, stack};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fs;
@@ -626,10 +626,30 @@ fn shaped(img: image::RgbImage, turn: u8, crop: Option<([f32; 4], f32)>) -> imag
 fn finished(img: image::RgbImage, output: &Output, mark: Option<&mark::Watermark>, source: &Path) -> image::RgbImage {
     let mut img = edit::shrink(img, output.size);
     if let Some(mark) = mark {
-        let exif = if mark.needs_exif() { meta::read(source).map(|m| m.exif).unwrap_or_default() } else { Default::default() };
-        mark.apply(&mut img, &exif, &source.file_stem().unwrap_or_default().to_string_lossy());
+        marked(&mut img, mark, source);
     }
     img
+}
+
+fn marked(img: &mut image::RgbImage, mark: &mark::Watermark, source: &Path) {
+    let exif = if mark.needs_exif() { meta::read(source).map(|m| m.exif).unwrap_or_default() } else { Default::default() };
+    mark.apply(img, &exif, &source.file_stem().unwrap_or_default().to_string_lossy());
+}
+
+/// An HDR photo exported as one: turned, cut to its crop, made the size the
+/// output asks for and watermarked as [`shaped`] and [`finished`] do, then
+/// encoded as a JPEG with a gain map. `None` when `path` is no HDR photo
+/// this build reads.
+fn finished_hdr(path: &Path, turn: u8, crop: Option<([f32; 4], f32)>, output: &Output, mark: Option<&mark::Watermark>) -> CmdResult<Option<Vec<u8>>> {
+    let Some(picture) = hdr::picture(path, u32::MAX).map_err(err)? else { return Ok(None) };
+    let mut picture = picture.map(|img| shaped(img, turn, crop)).shrink(output.size);
+    if let Some(mark) = mark {
+        let before = picture.base.clone();
+        marked(&mut picture.base, mark, path);
+        picture.settle(&before);
+    }
+    let quality = output.quality.clamp(1, 100);
+    picture.encode(quality, |jpeg| if output.strip { jpeg } else { sift_core::live::described(jpeg, path) }).map(Some).map_err(err)
 }
 
 /// A JPEG of `img` at the output's quality, carrying what `source` records
@@ -682,7 +702,8 @@ enum Job {
 fn rewritten(data: &[u8], turn: u8, strip: bool) -> Option<Vec<u8>> {
     let o = edit::turned_orientation(edit::orientation_of(data), turn);
     if strip {
-        edit::stripped(data, o)
+        // A gain map is no metadata: it is the photo's HDR.
+        edit::stripped(data, o).map(|bare| hdr::kept(bare, data))
     } else if turn != 0 {
         edit::reoriented(data, o)
     } else {
@@ -773,10 +794,21 @@ pub fn export_shots(state: &AppState, shots: &[Vec<String>], dest: &str, plan: &
                 (Some(first), _) => export::copy_file(first, &target, &state.cancel).map_err(err),
                 (None, Ok(bytes)) => fs::write(&target, bytes).map_err(err),
                 (None, Err(Some(e))) => Err(e),
-                (None, Err(None)) => looked_pixels(state, shot, look)
-                    .map(|img| finished(shaped(img, turn, crop), output, mark.as_ref(), shot.first().map_or(Path::new(""), PathBuf::as_path)))
-                    .and_then(|img| encoded(&img, output, look_source(shot).map(PathBuf::as_path)))
-                    .and_then(|jpeg| fs::write(&target, jpeg).map_err(err)),
+                (None, Err(None)) => {
+                    // A look is made for ordinary pictures: a shot with one comes out as one.
+                    let hdr = match (look, shot.first()) {
+                        (None, Some(first)) if hdr::kind(first).is_some() => finished_hdr(first, turn, crop, output, mark.as_ref()),
+                        _ => Ok(None),
+                    };
+                    match hdr {
+                        Ok(Some(jpeg)) => Ok(jpeg),
+                        Ok(None) => looked_pixels(state, shot, look)
+                            .map(|img| finished(shaped(img, turn, crop), output, mark.as_ref(), shot.first().map_or(Path::new(""), PathBuf::as_path)))
+                            .and_then(|img| encoded(&img, output, look_source(shot).map(PathBuf::as_path))),
+                        Err(e) => Err(e),
+                    }
+                    .and_then(|jpeg| fs::write(&target, jpeg).map_err(err))
+                }
             };
             match written {
                 Ok(()) => {

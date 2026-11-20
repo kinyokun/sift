@@ -4,7 +4,7 @@
 
 use crate::state::{cache_file, cached, AppState};
 use percent_encoding::percent_decode_str;
-use sift_core::{formats, preview, render, Error};
+use sift_core::{formats, hdr, preview, render, Error};
 use std::path::Path;
 use tauri::http::{header, Response, StatusCode};
 
@@ -135,6 +135,9 @@ fn image(state: &AppState, uri: &tauri::http::Uri) -> Result<Vec<u8>, String> {
     let path = state.check(&query(uri, "p").ok_or("missing path")?)?;
     let edge: u32 = query(uri, "e").and_then(|e| e.parse().ok()).unwrap_or(0);
     let kind = uri.path().trim_matches('/');
+    // HDR photos are asked for as ordinary pictures when HDR is not to be shown.
+    let sdr = query(uri, "sdr").is_some();
+    let hdr = matches!(kind, "screen" | "full").then(|| hdr::kind(&path)).flatten();
     let out = match kind {
         "thumb" => {
             let edge = edge.clamp(64, 1024);
@@ -142,14 +145,24 @@ fn image(state: &AppState, uri: &tauri::http::Uri) -> Result<Vec<u8>, String> {
         }
         "screen" => {
             let edge = edge.clamp(512, 4096);
-            // Cameras embed a screen-size preview in RAW and JPEG files alike;
-            // it is sent as is. Only files without one are scaled (and cached).
-            match preview::embedded_screen(&path, edge) {
-                Ok(Some(data)) => Ok(data),
-                _ => cached(&cache_file(&state.cache_dir, "screen3", &path, edge), || scaled(state, &path, edge, SCREEN_QUALITY)),
+            // An HDR photo goes as a JPEG with a gain map, which webviews show in HDR.
+            let hdr = hdr.filter(|_| !sdr).and_then(|_| cached(&cache_file(&state.cache_dir, "hdr1", &path, edge), || hdr::jpeg(&path, edge, SCREEN_QUALITY)?.ok_or(Error::NoPreview)).ok());
+            match hdr {
+                Some(data) => Ok(data),
+                // Cameras embed a screen-size preview in RAW and JPEG files alike;
+                // it is sent as is. Only files without one are scaled (and cached).
+                None => match preview::embedded_screen(&path, edge) {
+                    Ok(Some(data)) => Ok(data),
+                    _ => cached(&cache_file(&state.cache_dir, "screen3", &path, edge), || scaled(state, &path, edge, SCREEN_QUALITY)),
+                },
             }
         }
+        // A JPEG with a gain map is passed through as it is; an HDR HEIF is made into one, once.
+        "full" if hdr.is_some() && !sdr && !formats::is_jpeg(&path) => {
+            cached(&cache_file(&state.cache_dir, "hdrfull1", &path, 0), || hdr::jpeg(&path, u32::MAX, DEVELOP_QUALITY)?.ok_or(Error::NoPreview)).or_else(|_| preview::full(&path))
+        }
         "full" => match preview::full(&path) {
+            Ok(data) if hdr.is_some() && sdr => Ok(hdr::without_gain_map(data)),
             // RAW files without a usable JPEG (HEVC previews, some DNGs) are developed instead.
             Err(Error::NoPreview) if formats::is_raw(&path) => developed(state, &path),
             other => other,
