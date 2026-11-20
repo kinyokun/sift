@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-20
+
 ### 新增
 
 - 显示宾得和理光相机记录的对焦点（查看页按 `Q`）：K-1、K-3 系列、KP、K-70、K-S2、645Z 等单反画出取景器里选中的对焦点，合焦的点画成合焦样式；实时取景的反差对焦区域、K-3 Mark III 和理光 GR III / GR IIIx 记录的对焦区域按实际位置画出，较早的 GR 也能显示。宾得对焦点在画面上的位置参考了 Focus Points 插件（Apache-2.0）的测量数据。手动对焦的照片不画框
@@ -207,7 +209,8 @@
 - 导出（复制 / 重命名 / 找回 RAW / 参数相框）、局域网传输、自定义快捷键
 - 中文 / 英文界面
 
-[Unreleased]: https://github.com/kinyokun/sift/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/kinyokun/sift/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/kinyokun/sift/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/kinyokun/sift/compare/v0.4.4...v0.5.0
 [0.4.4]: https://github.com/kinyokun/sift/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/kinyokun/sift/compare/v0.4.2...v0.4.3
