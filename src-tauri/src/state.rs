@@ -18,7 +18,11 @@ pub struct AppState {
     pub eyes: Mutex<HashMap<String, Option<crate::commands::EyeTarget>>>,
     /// What each file read so far says about its burst or pixel-shift series.
     pub series: Mutex<HashMap<String, sift_core::stack::Hint>>,
+    /// Briefs read before, by folder.
+    pub briefs: crate::briefs::Kept,
     pub cancel: Arc<AtomicBool>,
+    /// Counts the folders thumbnails were made ahead for; a run for an earlier one stops.
+    pub warming: std::sync::atomic::AtomicU64,
     /// Bounds concurrent image decodes so a fast scroll cannot saturate the CPU.
     pub image_slots: Arc<tokio::sync::Semaphore>,
     pub transfer: Mutex<Option<crate::transfer::Handle>>,
@@ -41,7 +45,9 @@ impl AppState {
             animals: OnceLock::new(),
             eyes: Mutex::new(HashMap::new()),
             series: Mutex::new(HashMap::new()),
+            briefs: Default::default(),
             cancel: Arc::new(AtomicBool::new(false)),
+            warming: Default::default(),
             image_slots: Arc::new(tokio::sync::Semaphore::new(workers)),
             transfer: Mutex::new(None),
             looks: Mutex::new(HashMap::new()),

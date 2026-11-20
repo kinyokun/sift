@@ -1,3 +1,4 @@
+pub mod briefs;
 pub mod commands;
 pub mod handoff;
 pub mod menu;
@@ -78,6 +79,8 @@ pub fn run() {
             commands::folder_changes,
             commands::read_meta,
             commands::read_briefs,
+            commands::kept_briefs,
+            commands::warm_thumbs,
             commands::group_shots,
             commands::live_photo_pace,
             commands::save_live_photo,

@@ -121,6 +121,23 @@ fn clipping_png(state: &AppState, path: &Path, look: Option<&str>, edge: u32) ->
 
 const MAX_LOOK_EDGE: u32 = 4096;
 
+/// Makes the grid's thumbnails of `paths` ahead, in order, on half the cores
+/// (the ones asked for on screen go first), until `stale` says to stop.
+pub fn warm_thumbs(state: &AppState, paths: &[String], edge: u32, stale: impl Fn() -> bool + Sync) {
+    let edge = edge.clamp(64, 1024);
+    let threads = std::thread::available_parallelism().map_or(2, |n| n.get() / 2).max(2);
+    crate::briefs::each(paths, threads, |p| {
+        let Ok(path) = state.check(p) else { return };
+        if stale() {
+            return;
+        }
+        let file = cache_file(&state.cache_dir, "thumb3", &path, edge);
+        if !file.exists() {
+            let _ = cached(&file, || scaled(state, &path, edge, THUMB_QUALITY));
+        }
+    });
+}
+
 fn look_jpeg(state: &AppState, path: &Path, look: &str, edge: u32) -> sift_core::Result<Vec<u8>> {
     // Renders by Nikon's SDK and by our own approximation never share a cache entry.
     let engine = if state.nikon_for(path).is_some() { "n" } else { "" };

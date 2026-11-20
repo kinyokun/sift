@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use sift_core::af::AfBox;
 use sift_core::export::{self, CopyReport, Progress};
 use sift_core::frame::FrameOptions;
-use sift_core::{edit, face, formats, frame, hdr, mark, meta, nksc, preview, rating, remove, stack};
+use sift_core::{edit, face, formats, frame, hdr, mark, meta, preview, rating, remove, stack};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fs;
@@ -199,14 +199,18 @@ pub fn scan(dir: &Path, pair: bool, prefer_raw: bool, deep: bool) -> CmdResult<V
             }
         }
     }
+    for g in &mut groups {
+        // The first file of a pair is the one displayed: the camera's JPEG,
+        // or the RAW's embedded preview when the user prefers that.
+        g.sort_by_key(|p| if prefer_raw { (!formats::is_raw(p), false) } else { (!formats::is_jpeg(p), formats::is_raw(p)) });
+    }
+    // One round trip each on a network share, so all at once.
+    let stats = crate::briefs::each(&groups, crate::briefs::READERS, |g| stat(&g[0]));
     Ok(groups
         .into_iter()
-        .map(|mut g| {
-            // The first file of a pair is the one displayed: the camera's JPEG,
-            // or the RAW's embedded preview when the user prefers that.
-            g.sort_by_key(|p| if prefer_raw { (!formats::is_raw(p), false) } else { (!formats::is_jpeg(p), formats::is_raw(p)) });
+        .zip(stats)
+        .map(|(g, (size, mtime))| {
             let primary = &g[0];
-            let (size, mtime) = stat(primary);
             Item {
                 id: primary.to_string_lossy().into_owned(),
                 name: primary.file_name().unwrap_or_default().to_string_lossy().into_owned(),
@@ -245,38 +249,7 @@ pub async fn read_meta(app: AppHandle, path: String) -> CmdResult<meta::Meta> {
     blocking(move || meta::read(&app.state::<AppState>().check(&path)?).map_err(err)).await
 }
 
-/// Rating and capture time for many files at once, in input order.
-pub fn briefs_of(state: &AppState, paths: &[String]) -> Vec<meta::Brief> {
-    let files: Vec<Option<PathBuf>> = paths.iter().map(|p| state.check(p).ok()).collect();
-    let workers = std::thread::available_parallelism().map_or(4, |n| n.get()).min(8);
-    let chunk = files.len().div_ceil(workers).max(1);
-    let mut out = vec![meta::Brief::default(); files.len()];
-    // What Nikon's software keeps about each folder: one listing each, and none where it has kept nothing.
-    let mut sidecars: HashMap<&Path, Option<nksc::Sidecars>> = HashMap::new();
-    for dir in files.iter().flatten().filter_map(|f| f.parent()) {
-        sidecars.entry(dir).or_insert_with(|| nksc::Sidecars::of(dir));
-    }
-    let sidecars = &sidecars;
-    std::thread::scope(|s| {
-        for (slots, part) in out.chunks_mut(chunk).zip(files.chunks(chunk)) {
-            s.spawn(move || {
-                for (slot, f) in slots.iter_mut().zip(part) {
-                    let Some(f) = f else { continue };
-                    *slot = meta::brief(f).unwrap_or_default();
-                    // Stars given in Nikon's software are only in its sidecar, so they are the newer word.
-                    let given = f.parent().and_then(|dir| sidecars.get(dir)?.as_ref()).and_then(|kept| kept.rating(f));
-                    slot.rating = given.unwrap_or(slot.rating);
-                }
-            });
-        }
-    });
-    // The series each file belongs to is kept for `stacks_of`, which needs the whole folder at once.
-    let mut series = state.series.lock().unwrap();
-    for (path, brief) in paths.iter().zip(&out) {
-        series.insert(path.clone(), brief.series.clone());
-    }
-    out
-}
+pub use crate::briefs::{briefs_of, kept_of};
 
 /// Shots that belong together, by the path they are displayed by.
 #[derive(Serialize)]
@@ -329,7 +302,7 @@ pub fn stacks_of(state: &AppState, paths: &[String]) -> Vec<Stack> {
         paths.iter().filter(|p| !series.contains_key(*p)).cloned().collect()
     };
     if !unread.is_empty() {
-        briefs_of(state, &unread);
+        briefs_of(state, &unread, false);
     }
     let series = state.series.lock().unwrap();
     let hints: Vec<stack::Hint> = paths.iter().map(|p| series.get(p).cloned().unwrap_or_default()).collect();
@@ -401,8 +374,28 @@ pub async fn save_live_photo(app: AppHandle, frames: Vec<String>, key: usize, he
 }
 
 #[tauri::command]
-pub async fn read_briefs(app: AppHandle, paths: Vec<String>) -> CmdResult<Vec<meta::Brief>> {
-    blocking(move || Ok(briefs_of(&app.state::<AppState>(), &paths))).await
+pub async fn read_briefs(app: AppHandle, paths: Vec<String>, fresh: Option<bool>) -> CmdResult<Vec<meta::Brief>> {
+    blocking(move || Ok(briefs_of(&app.state::<AppState>(), &paths, fresh.unwrap_or(false)))).await
+}
+
+/// Starts making the grid's thumbnails of `paths` ahead, in the background;
+/// a run started before stops (none is started for no paths).
+#[tauri::command]
+pub fn warm_thumbs(app: AppHandle, paths: Vec<String>, edge: u32) {
+    use std::sync::atomic::Ordering::Relaxed;
+    let run = app.state::<AppState>().warming.fetch_add(1, Relaxed) + 1;
+    if paths.is_empty() {
+        return;
+    }
+    std::thread::spawn(move || {
+        let state = app.state::<AppState>();
+        protocol::warm_thumbs(&state, &paths, edge, || state.warming.load(Relaxed) != run);
+    });
+}
+
+#[tauri::command]
+pub async fn kept_briefs(app: AppHandle, paths: Vec<String>) -> CmdResult<Vec<Option<meta::Brief>>> {
+    blocking(move || Ok(kept_of(&app.state::<AppState>(), &paths))).await
 }
 
 /// Writes the rating to every file of a shot; reports where it was stored.
@@ -1327,6 +1320,7 @@ pub async fn app_info(app: AppHandle) -> CmdResult<AppInfo> {
 pub async fn clear_cache(app: AppHandle) -> CmdResult<()> {
     blocking(move || {
         let state = app.state::<AppState>();
+        state.briefs.clear();
         let _ = fs::remove_dir_all(&state.cache_dir);
         fs::create_dir_all(&state.cache_dir).map_err(err)
     })

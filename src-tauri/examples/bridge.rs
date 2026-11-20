@@ -46,7 +46,13 @@ fn run(state: &AppState, cmd: &str, args: &Value) -> Result<Response, String> {
         }
         "folder_changes" => json(&commands::folder_stamp(&state.check(&arg::<String>(args, "path")?)?, arg(args, "deep")?)?),
         "read_meta" => json(&sift_core::meta::read(&state.check(&arg::<String>(args, "path")?)?).map_err(|e| e.to_string())?),
-        "read_briefs" => json(&commands::briefs_of(state, &arg::<Vec<String>>(args, "paths")?)),
+        "warm_thumbs" => {
+            let run = state.warming.fetch_add(1, Ordering::Relaxed) + 1;
+            protocol::warm_thumbs(state, &arg::<Vec<String>>(args, "paths")?, arg(args, "edge")?, || state.warming.load(Ordering::Relaxed) != run);
+            ok(Value::Null)
+        }
+        "kept_briefs" => json(&commands::kept_of(state, &arg::<Vec<String>>(args, "paths")?)),
+        "read_briefs" => json(&commands::briefs_of(state, &arg::<Vec<String>>(args, "paths")?, arg::<Option<bool>>(args, "fresh")?.unwrap_or(false))),
         "group_shots" => json(&commands::stacks_of(state, &arg::<Vec<String>>(args, "paths")?)),
         "live_photo_pace" => json(&commands::live_pace(state, &arg::<Vec<String>>(args, "frames")?)),
         "save_live_photo" => json(&commands::live_photo(state, &arg::<Vec<String>>(args, "frames")?, arg(args, "key")?, arg::<Option<bool>>(args, "heif")?.unwrap_or(false), |_| {})?),
