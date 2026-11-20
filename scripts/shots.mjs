@@ -117,7 +117,8 @@ await session("desktop", desktop, async (page, shot) => {
   await page.locator(".frame-preview img").waitFor({ timeout: 20000 });
   await shot("export-frame");
   await page.keyboard.press("Escape");
-  await page.locator('[aria-label="传输"]').click();
+  await page.locator('[aria-label="更多"]').click();
+  await page.getByRole("menuitem", { name: "局域网传输" }).click();
   await page.locator(".qr svg").waitFor();
   await shot("transfer");
   await page.keyboard.press("Escape");
@@ -281,7 +282,7 @@ await session("sdk", desktop, async (page, shot) => {
   await page.keyboard.press("Escape");
   await page.locator('[aria-label="更多"]').click();
   await page.getByRole("menuitem", { name: "设置" }).click();
-  await page.getByText("管理滤镜").scrollIntoViewIfNeeded();
+  await page.locator(".sheet-tabs").getByRole("tab", { name: "滤镜" }).click();
   await shot("settings-looks");
 });
 
@@ -474,7 +475,7 @@ await session("select-phone", phone, async (page, shot) => {
   await page.locator(".cell").nth(4).tap();
   console.log(`[select-phone] two taps more: "${await page.locator(".selection-bar strong").textContent()}"`);
   await shot("selecting");
-  await page.locator(".selection-bar").getByText("完成").tap();
+  await page.locator('.selection-bar [aria-label="完成"]').tap();
   await page.locator(".cell").nth(1).tap();
   console.log(`[select-phone] after Done a tap opens the photo: ${(await page.locator(".viewer").count()) > 0}`);
 });
@@ -519,8 +520,8 @@ await session("mouse", { ...desktop, platform: "windows" }, async (page, shot) =
   const settings = async (...choices) => {
     await page.locator('[aria-label="更多"]').click();
     await page.getByRole("menuitem", { name: "设置" }).click();
-    for (const name of choices) await page.locator(".sheet").getByRole("tab", { name, exact: true }).click();
-    const chosen = await page.locator('.sheet [role="tab"][aria-selected="true"]').allTextContents();
+    for (const name of choices) await page.locator(".sheet-body").getByRole("tab", { name, exact: true }).click();
+    const chosen = await page.locator('.sheet-body [role="tab"][aria-selected="true"]').allTextContents();
     return chosen.slice(1).join(", ");
   };
   const position = async () => Number((await page.locator(".viewer-title span").first().textContent()).split("/")[0]);
@@ -605,8 +606,8 @@ await session("mouse", { ...desktop, platform: "windows" }, async (page, shot) =
   await page.keyboard.press("Escape");
   await page.keyboard.press("Escape");
   await page.locator('[aria-label="更多"]').click();
-  await page.getByRole("menuitem", { name: "帮助" }).click();
-  const rows = await page.locator(".key-list > div").allTextContents();
+  await page.getByRole("menuitem", { name: "快捷键" }).click();
+  const rows = await page.locator(".keys-overlay footer section > div").allTextContents();
   console.log(`[mouse] help lists: ${rows.filter((r) => /滚轮|双击/.test(r)).join(" | ")}`);
   await shot("help");
   await page.keyboard.press("Escape");
@@ -1143,7 +1144,7 @@ await session("compare", desktop, async (page, shot) => {
   console.log(`[compare] C: ${JSON.stringify(await names())} (want the photo and the next)`);
   await page.locator(".slot-name").nth(1).click();
   const option = page.locator(".compare-picker button").nth(Number(process.env.PICK ?? 0));
-  const picked = await option.getAttribute("title");
+  const picked = await option.getAttribute("aria-label");
   await shot("picker");
   await option.click();
   console.log(`[compare] picker put ${picked} in pane 2: ${JSON.stringify(await names())}, picker open: ${await page.locator(".compare-picker").count()}`);
@@ -1214,7 +1215,7 @@ await session("update", { ...desktop, query: "&update=0.4.0&install=stall" }, as
   const settings = async () => {
     await page.locator('[aria-label="更多"]').click();
     await page.getByRole("menuitem", { name: "设置" }).click();
-    await page.getByText("软件更新").scrollIntoViewIfNeeded();
+    await page.locator(".sheet-tabs").getByRole("tab", { name: "关于" }).click();
   };
   const t0 = Date.now();
   await dialog.waitFor({ timeout: 10000 });
@@ -1268,7 +1269,7 @@ await session("update-en", { ...desktop, scheme: "light", lang: "en-US", platfor
   await openLibrary(page);
   await page.locator('[aria-label="More"]').click();
   await page.getByRole("menuitem", { name: "Settings" }).click();
-  await page.getByText("Updates", { exact: true }).scrollIntoViewIfNeeded();
+  await page.locator(".sheet-tabs").getByRole("tab", { name: "About" }).click();
   await shot("settings");
 });
 
@@ -1285,6 +1286,7 @@ for (const [name, query, view] of [
     const prompted = await page.locator(".sheet").count();
     await page.locator('[aria-label="更多"]').click();
     await page.getByRole("menuitem", { name: "设置" }).click();
+    await page.locator(".sheet-tabs").getByRole("tab", { name: "关于" }).click();
     const section = page.locator(".sheet h4", { hasText: "软件更新" });
     const shown = await section.count();
     let result = "";
@@ -1369,7 +1371,7 @@ if (!only || only.includes("folders")) {
       await page.reload();
       await page.locator(".cell img").first().waitFor();
       console.log(`[folders] reopened: ${await cells()} photos (want 1), folder button: ${await page.locator('[aria-label="只看其中一个文件夹"]').count()} (want 0)`);
-      await page.locator('[aria-label="更多"]').click();
+      await page.locator('.toolbar [aria-label="排序"]').click();
       await page.getByRole("menuitem", { name: "包含子文件夹里的照片" }).click();
       console.log(`[folders] subfolders switched on: ${await until(7)} (want 7), picked kept: ${await page.locator(".cell-flag.pick").count()} (want 1)`);
       await page.locator('[aria-label="只看其中一个文件夹"]').click();
@@ -1444,14 +1446,14 @@ if (!only || only.includes("tags") || only.includes("tags-phone")) {
       // Several photos at once, from the bar that comes up for them.
       await cell(2).click();
       await cell(3).click({ modifiers: ["ControlOrMeta"] });
-      await page.locator(".selection-bar [aria-label='给所选照片打标签']").click();
-      await page.locator(".selection-bar .tag-menu").getByRole("menuitemcheckbox", { name: "合影" }).click();
+      await page.locator(".toolbar [aria-label='给所选照片打标签']").click();
+      await page.locator(".toolbar .tag-menu").getByRole("menuitemcheckbox", { name: "合影" }).click();
       console.log(`[tags] 合影 on two selected photos: ${JSON.stringify([await on(2), await on(3)])}, bar ${JSON.stringify(await bar())}`);
       await shot("selection-bar");
       await page.keyboard.press("Escape");
       // A key for a tag that does not exist yet opens the menu to make it.
       await page.keyboard.press("Shift+3");
-      console.log(`[tags] Shift+3 with two tags opens the menu: ${await page.locator(".selection-bar .tag-menu").count()} (want 1)`);
+      console.log(`[tags] Shift+3 with two tags opens the menu: ${await page.locator(".toolbar .tag-menu").count()} (want 1)`);
       await add("客户");
       await page.keyboard.press("Escape");
       await page.keyboard.press("Escape");
@@ -1565,6 +1567,7 @@ if (!only || only.includes("tags") || only.includes("tags-phone")) {
       await page.keyboard.press("Escape");
       await page.locator('[aria-label="更多"]').click();
       await page.getByRole("menuitem", { name: "设置" }).click();
+      await page.locator(".sheet-tabs").getByRole("tab", { name: "快捷键" }).click();
       await page.locator(".group.keys .row", { hasText: "打上 / 去掉标签 1" }).scrollIntoViewIfNeeded();
       await shot("settings-keys");
     });
@@ -1590,13 +1593,13 @@ if (!only || only.includes("tags") || only.includes("tags-phone")) {
       await page.getByRole("menuitem", { name: "选择照片" }).tap();
       await page.locator(".cell").nth(1).tap();
       await page.locator(".cell").nth(2).tap();
-      await page.locator(".selection-bar [aria-label='给所选照片打标签']").tap();
+      await page.locator(".toolbar [aria-label='给所选照片打标签']").tap();
       await shot("selection-menu");
       const bar = await page.locator(".selection-bar").boundingBox();
-      const pop = await page.locator(".selection-bar .tag-menu").boundingBox();
+      const pop = await page.locator(".toolbar .tag-menu").boundingBox();
       const reach = await page.evaluate(() => Math.max(...[...document.querySelector(".selection-bar").children].map((el) => el.getBoundingClientRect().right)));
       console.log(`[tags-phone] selection bar ${Math.round(bar.x)}..${Math.round(bar.x + bar.width)}, its buttons end at ${Math.round(reach)}, its menu ${Math.round(pop.x)}..${Math.round(pop.x + pop.width)} of 390`);
-      await page.locator(".selection-bar .tag-menu").getByRole("menuitemcheckbox", { name: "小明" }).tap();
+      await page.locator(".toolbar .tag-menu").getByRole("menuitemcheckbox", { name: "小明" }).tap();
       console.log(`[tags-phone] tagged from the bar: ${JSON.stringify(await page.locator(".tag-bar button:not(.clear)").allTextContents())}`);
     });
     rmSync(root, { recursive: true, force: true });

@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { imageUrl, type Item } from "../lib/api";
 import { useT } from "../lib/i18n";
 import { flagOf, turnOf, useStore } from "../lib/store";
+import { tipProps } from "../ui/controls";
 import { Icon } from "../ui/Icon";
 
 /** Photos the viewer can put side by side. */
@@ -37,15 +38,15 @@ export function SlotBar({ number, item, index, total, active, picking, top, onAc
   return (
     <div className={`slot-bar glass ${active ? "active" : ""}`} style={{ top: top + 6 }} onPointerDown={onActivate}>
       <b className="slot-number">{number}</b>
-      <button className="slot-name" data-picker-toggle title={t.compareChoose} aria-label={t.compareChoose} aria-expanded={picking} onClick={onPick}>
+      <button className="slot-name" data-picker-toggle {...tipProps(t.compareChoose)} aria-label={t.compareChoose} aria-expanded={picking} onClick={onPick}>
         <span>{item.name}</span>
         <small>
           {index + 1}/{total}
         </small>
         <Icon name="wall" size={13} />
       </button>
-      {flag === 1 && <i className="slot-flag pick" title={t.pick} />}
-      {flag === -1 && <i className="slot-flag reject" title={t.reject} />}
+      {flag === 1 && <i className="slot-flag pick" />}
+      {flag === -1 && <i className="slot-flag reject" />}
       {stars > 0 && <i className="slot-stars">★{stars}</i>}
       <button className="slot-step" aria-label={t.actions.prev} disabled={index === 0} onClick={() => onStep(-1)}>
         <Icon name="back" size={15} />
@@ -100,7 +101,8 @@ export function ComparePicker({ items, current, marks, top, bottom, onChoose, on
             aria-selected={it.id === current}
             className={`${it.id === current ? "on" : ""} ${flagOf(flags, it) === -1 ? "rejected" : ""} ${turn ? "turned" : ""} ${turn % 2 ? "quarter" : ""}`}
             style={turn ? ({ "--turn": `${turn * 90}deg` } as React.CSSProperties) : undefined}
-            title={it.name}
+            {...tipProps(it.name)}
+            aria-label={it.name}
             onClick={() => onChoose(it.id)}
           >
             <img src={imageUrl("thumb", it.id, it.mtime, 512)} alt="" loading="lazy" decoding="async" draggable={false} />

@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { imageUrl, type Item, type StackKind } from "../lib/api";
 import { useT } from "../lib/i18n";
 import { flagOf, turnOf, useStore } from "../lib/store";
+import { tipProps } from "../ui/controls";
 import { Icon } from "../ui/Icon";
 
 /** Same rendition as the grid, so the thumbnails are already cached. */
@@ -49,7 +50,7 @@ export function StackStrip({ kind, frames, current, marks, onChoose, onLivePhoto
               key={f.id}
               className={`${f.id === current ? "on" : ""} ${flag === -1 ? "rejected" : ""} ${turn ? "turned" : ""} ${turn % 2 ? "quarter" : ""}`}
               style={turn ? ({ "--turn": `${turn * 90}deg` } as React.CSSProperties) : undefined}
-              title={f.name}
+              {...tipProps(f.name)}
               aria-label={f.name}
               aria-current={f.id === current}
               onClick={() => onChoose(f.id)}
@@ -65,7 +66,7 @@ export function StackStrip({ kind, frames, current, marks, onChoose, onLivePhoto
         })}
       </div>
       {onLivePhoto && (
-        <button className="stack-strip-action" title={t.livePhotoHint} onClick={onLivePhoto}>
+        <button className="button" {...tipProps(t.livePhotoHint)} onClick={onLivePhoto}>
           <Icon name="live" size={15} />
           {t.livePhoto}
         </button>

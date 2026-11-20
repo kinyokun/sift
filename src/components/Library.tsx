@@ -6,7 +6,7 @@ import { useT } from "../lib/i18n";
 import { actionFor, isTyping, keyOf, ratingOf, tagOf } from "../lib/shortcuts";
 import { useShallow } from "zustand/react/shallow";
 import { flagOf, folderName, framesOf, lookOf, tagsOf, turnOf, useStore, visibleEntries, type Entry, type FlagFilter, type SortBy } from "../lib/store";
-import { IconButton, Menu, Segmented, Stars, type MenuItem } from "../ui/controls";
+import { IconButton, Menu, Segmented, Stars, tipProps, type MenuItem } from "../ui/controls";
 import { Icon } from "../ui/Icon";
 import { useWheelSize } from "../lib/wheelSize";
 import { chooseFolder, importPhotos } from "./Welcome";
@@ -166,7 +166,7 @@ const Cell = memo(function Cell(props: {
             </span>
           )}
           {props.look && (
-            <span className="cell-look" title={props.look}>
+            <span className="cell-look" {...tipProps(props.look)}>
               <Icon name="look" size={11} />
             </span>
           )}
@@ -181,7 +181,7 @@ const Cell = memo(function Cell(props: {
                 </span>
               ))
             ) : (
-              <span title={tags.map(([, name]) => name).join(", ")}>
+              <span {...tipProps(tags.map(([, name]) => name).join(", "))}>
                 {tags.slice(0, MAX_TAG_DOTS).map(([color, name]) => (
                   <TagDot key={name} color={Number(color)} />
                 ))}
@@ -193,7 +193,7 @@ const Cell = memo(function Cell(props: {
         {props.stack && (
           <button
             className={`cell-stack ${props.stack}`}
-            title={props.stackLabel}
+            {...tipProps(props.stackLabel)}
             aria-label={props.stackLabel}
             tabIndex={-1}
             onClick={(e) => {
@@ -222,7 +222,6 @@ const Cell = memo(function Cell(props: {
         role="checkbox"
         aria-checked={selected}
         aria-label={props.checkLabel}
-        title={props.checkLabel}
         tabIndex={-1}
         onClick={(e) => {
           e.stopPropagation();
@@ -297,8 +296,7 @@ export function Library() {
   useEffect(() => () => clearTimeout(collapse.current), []);
   /** Set while the click that ends a drag is still to come. */
   const dragged = useRef(false);
-  const toolbarTags = useRef<TagMenuHandle>(null);
-  const barTags = useRef<TagMenuHandle>(null);
+  const tagMenu = useRef<TagMenuHandle>(null);
 
   useLayoutEffect(() => {
     const el = scroller.current;
@@ -660,8 +658,7 @@ export function Library() {
           }
           if (!action || action === "immersive") return;
       }
-      // The tags open from the bar for several photos while it is up, else from the toolbar.
-      const openTags = () => (e.preventDefault(), (barTags.current ?? toolbarTags.current)?.open());
+      const openTags = () => (e.preventDefault(), tagMenu.current?.open());
       if (action === "tags") return openTags();
       if (!targets.length) return;
       const tagAt = tagOf(action);
@@ -746,11 +743,15 @@ export function Library() {
     ["rating", t.sortRating],
     ["size", t.sortSize],
   ];
-  const sortItems: MenuItem[] = [
+  // How the grid is ordered, and what it takes in.
+  const viewItems: MenuItem[] = [
     ...sorts.map(([by, label]) => ({ label, checked: s.sortBy === by, onSelect: () => act.setSettings({ sortBy: by }) })),
     "divider",
     { label: t.sortAsc, checked: !s.sortDesc, onSelect: () => act.setSettings({ sortDesc: false }) },
     { label: t.sortDesc, checked: s.sortDesc, onSelect: () => act.setSettings({ sortDesc: true }) },
+    ...(!mobile || s.stacks.length ? ["divider" as const] : []),
+    ...(mobile ? [] : [{ label: t.subfolders, checked: s.subfolders, onSelect: () => (act.setSettings({ subfolders: !s.subfolders }), void act.reload()) } as MenuItem]),
+    ...(s.stacks.length ? [{ label: t.stackPhotos, checked: s.stacking, onSelect: () => act.setSettings({ stacks: !s.stacking }) } as MenuItem] : []),
   ];
 
   /** Sets one look on every selected photo; "original" only where there is a RAW. */
@@ -781,18 +782,18 @@ export function Library() {
     }
   };
 
+  const targetIds = () => frames(s.selection.length ? s.selection : s.cursor ? [s.cursor] : []).map((m) => m.id);
   const moreItems: MenuItem[] = [
     { label: mobile ? t.importPhotos : t.openFolder, icon: mobile ? "plus" : "folder", onSelect: switchFolder },
     ...(mobile ? [{ label: t.selectPhotos, icon: "check", onSelect: () => setSelecting(true) } as MenuItem] : []),
-    ...(mobile ? [] : [{ label: t.findRaw, icon: "raw", onSelect: () => act.setSheet("findraw") } as MenuItem]),
     { label: t.refresh, icon: "refresh", onSelect: () => void act.refresh(true) },
     "divider",
-    { label: t.deleteSelected, icon: "trash", onSelect: () => act.deletePhotos(frames(s.selection.length ? s.selection : s.cursor ? [s.cursor] : []).map((m) => m.id)) },
-    ...(counts.rejected ? [{ label: t.deleteRejected(counts.rejected), icon: "trash", onSelect: deleteRejected } as MenuItem] : []),
+    { label: t.transferTitle, icon: "transfer", onSelect: () => act.setSheet("transfer") },
+    ...(mobile ? [] : [{ label: t.findRaw, icon: "raw", onSelect: () => act.setSheet("findraw") } as MenuItem]),
     "divider",
-    ...(mobile ? [] : [{ label: t.subfolders, checked: s.subfolders, onSelect: () => (act.setSettings({ subfolders: !s.subfolders }), void act.reload()) } as MenuItem]),
-    ...(s.stacks.length ? [{ label: t.stackPhotos, checked: s.stacking, onSelect: () => act.setSettings({ stacks: !s.stacking }) } as MenuItem] : []),
-    ...(!mobile || s.stacks.length ? ["divider" as const] : []),
+    { label: t.deleteSelected, icon: "trash", danger: true, onSelect: () => act.deletePhotos(targetIds()) },
+    ...(counts.rejected ? [{ label: t.deleteRejected(counts.rejected), icon: "trash", danger: true, onSelect: deleteRejected } as MenuItem] : []),
+    "divider",
     { label: t.settings, icon: "gear", onSelect: () => act.setSheet("settings") },
     ...(mobile ? [] : [{ label: t.keysTitle, icon: "keyboard", onSelect: () => act.setSheet("keys") } as MenuItem]),
     { label: t.help, icon: "help", onSelect: () => act.setSheet("help") },
@@ -809,7 +810,6 @@ export function Library() {
   const flagAll = (value: number) => chosen.length && act.flag(chosen, value);
   // Like a look from the toolbar, a tag goes on what is selected, or on the photo the keys act on.
   const tagTargets = useMemo(() => frames(s.selection.length ? s.selection : s.cursor ? [s.cursor] : []), [frames, s.selection, s.cursor]);
-  const barTargets = useMemo(() => frames(s.selection), [frames, s.selection]);
 
   return (
     <div className="library">
@@ -826,37 +826,38 @@ export function Library() {
         <div className="toolbar-side end">
           {!mobile && (
             <input
-              className="size-slider"
+              className="slider size-slider"
               type="range"
               min={THUMB_MIN}
               max={thumbMax}
               step={2}
               value={Math.min(s.thumb, thumbMax)}
-              title={`${t.size} · ${t.pinchOrCtrl}`}
+              {...tipProps(`${t.size} · ${t.pinchOrCtrl}`)}
               aria-label={t.size}
               onChange={(e) => act.setSettings({ thumb: Number(e.target.value) })}
             />
           )}
-          <Menu label={t.sort} items={sortItems} button={<Icon name="sort" />} />
-          <Menu label={t.stars} items={starItems} button={<><Icon name="star" fill={s.minStars > 0} />{s.minStars > 0 && <b>{s.minStars}</b>}</>} />
+          <Menu label={t.stars} items={starItems} className={s.minStars > 0 ? "on" : ""} button={<><Icon name="star" fill={s.minStars > 0} />{s.minStars > 0 && <b>{s.minStars}</b>}</>} />
+          <Menu label={t.sort} items={viewItems} button={<Icon name="sort" />} />
+          <i className="toolbar-sep" />
           <Menu label={t.lookApply} items={lookItems} button={<Icon name="look" />} />
-          <TagMenu ref={toolbarTags} label={t.tagApply} targets={tagTargets} />
-          <IconButton icon="transfer" label={t.transfer} onClick={() => act.setSheet("transfer")} />
+          <TagMenu ref={tagMenu} label={t.tagApply} targets={tagTargets} />
+          <i className="toolbar-sep" />
           <IconButton icon="export" label={t.export} onClick={() => act.setSheet("export")} />
           <Menu label={t.more} items={moreItems} button={<Icon name="more" />} />
         </div>
         {s.tags.length > 0 && (
           <div className="tag-bar" role="group" aria-label={t.tags}>
             {s.tags.map((tag) => (
-              <button key={tag.id} className={s.tagFilter.includes(tag.id) ? "on" : ""} aria-pressed={s.tagFilter.includes(tag.id)} title={t.tagFilter} onClick={() => toggleTagFilter(tag.id)}>
+              <button key={tag.id} className={s.tagFilter.includes(tag.id) ? "on" : ""} aria-pressed={s.tagFilter.includes(tag.id)} onClick={() => toggleTagFilter(tag.id)}>
                 <TagDot color={tag.color} />
                 {tag.name}
                 <i>{tagCounts.get(tag.id) ?? 0}</i>
               </button>
             ))}
             {s.tagFilter.length > 0 && (
-              <button className="clear" onClick={() => act.setTagFilter([])}>
-                {t.tagFilterClear}
+              <button className="clear" aria-label={t.tagFilterClear} {...tipProps(t.tagFilterClear)} onClick={() => act.setTagFilter([])}>
+                <Icon name="x" size={13} />
               </button>
             )}
           </div>
@@ -920,34 +921,32 @@ export function Library() {
 
       {bar && (
         <div className="selection-bar glass" role="toolbar" aria-label={t.selectedCount(chosen.length)}>
+          <IconButton icon="x" size={18} label={mobile ? t.done : t.deselect} className="deselect" onClick={clearSelection} keys={mobile ? undefined : ["Escape"]} />
           <strong>{t.selectedCount(chosen.length)}</strong>
-          <Stars value={sharedRating} size={17} onChange={(n) => chosen.length && act.rate(chosen, n)} />
-          <span className="selection-flags">
-            <button className="flag-button pick" title={t.pick} aria-label={t.pick} onClick={() => flagAll(1)}>
-              <Icon name="check" size={15} />
-            </button>
-            <button className="flag-button reject" title={t.reject} aria-label={t.reject} onClick={() => flagAll(-1)}>
-              <Icon name="x" size={15} />
-            </button>
-            <button className="flag-button" title={t.actions.unflag} aria-label={t.actions.unflag} onClick={() => flagAll(0)}>
-              <Icon name="flagOff" size={15} />
-            </button>
-          </span>
-          <Menu label={t.lookApply} items={lookItems} button={<Icon name="look" />} up />
-          <TagMenu ref={barTags} label={t.tagApply} targets={barTargets} up />
-          <IconButton icon="rotate" label={t.actions.rotateRight} onClick={() => act.turn(chosen, 1)} />
-          {!mobile && <IconButton icon="openIn" label={t.actions.editor} onClick={() => void editIn(frames(s.selection))} />}
-          {s.info?.save_to_photos && <IconButton icon="save" label={t.saveToPhotos} onClick={() => act.saveToPhotos(frames(s.selection))} />}
-          {chosen.length > 1 && chosen.length <= MAX_PANES && (
-            <IconButton icon="compare" label={t.compareSelected} onClick={() => act.openViewer(chosen[0], chosen)} />
-          )}
-          <IconButton icon="trash" label={t.delete} onClick={() => act.deletePhotos(chosen)} />
           <button className="text-button select-all" onClick={selectAll}>
             {t.selectAll}
           </button>
-          <button className="text-button strong" onClick={clearSelection}>
-            {mobile ? t.done : t.deselect}
-          </button>
+          <i className="bar-sep" />
+          <Stars value={sharedRating} size={17} onChange={(n) => chosen.length && act.rate(chosen, n)} />
+          <span className="selection-flags">
+            <button className="flag-button pick" {...tipProps(t.pick)} aria-label={t.pick} onClick={() => flagAll(1)}>
+              <Icon name="check" size={15} />
+            </button>
+            <button className="flag-button reject" {...tipProps(t.reject)} aria-label={t.reject} onClick={() => flagAll(-1)}>
+              <Icon name="x" size={15} />
+            </button>
+            <button className="flag-button" {...tipProps(t.actions.unflag)} aria-label={t.actions.unflag} onClick={() => flagAll(0)}>
+              <Icon name="flagOff" size={15} />
+            </button>
+          </span>
+          <i className="bar-sep" />
+          <IconButton icon="rotate" label={t.actions.rotateRight} onClick={() => act.turn(chosen, 1)} />
+          {chosen.length > 1 && chosen.length <= MAX_PANES && (
+            <IconButton icon="compare" label={t.compareSelected} onClick={() => act.openViewer(chosen[0], chosen)} />
+          )}
+          {!mobile && <IconButton icon="openIn" label={t.actions.editor} onClick={() => void editIn(frames(s.selection))} />}
+          {s.info?.save_to_photos && <IconButton icon="save" label={t.saveToPhotos} onClick={() => act.saveToPhotos(frames(s.selection))} />}
+          <IconButton icon="trash" label={t.delete} className="danger" onClick={() => act.deletePhotos(chosen)} />
         </div>
       )}
     </div>

@@ -3,9 +3,10 @@ import { useT } from "../lib/i18n";
 import { ACTIONS, APPLE, keyCaps, type Action } from "../lib/shortcuts";
 import { useStore, wheelModeOf } from "../lib/store";
 
-type Group = "nav" | "mark" | "inspect" | "look" | "compare" | "app";
+export type Group = "nav" | "mark" | "inspect" | "look" | "compare" | "app";
 
-const GROUPS: Record<Group, Action[]> = {
+/** The actions by what they are for: the colours of the keyboard map, the sections of the list in Settings. */
+export const GROUPS: Record<Group, Action[]> = {
   nav: ["prev", "next", "stackPrev", "stackNext"],
   mark: ["pick", "reject", "unflag", "delete", "rate0", "rate1", "rate2", "rate3", "rate4", "rate5", "tags", "tag1", "tag2", "tag3", "tag4", "tag5", "tag6", "tag7", "tag8", "tag9"],
   inspect: ["eye", "zoom", "af", "clipping", "level", "guides", "guidesPrev", "flip", "crop", "rotateLeft", "rotateRight", "info", "immersive"],

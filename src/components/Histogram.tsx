@@ -69,8 +69,8 @@ export function Histogram({ request, crop }: Props) {
         <path className="b" d={area(b, peak)} />
         <path className="l" d={area(luma, peak)} />
       </svg>
-      <i className={`clip low ${data.shadows > CLIP_WARNING ? "on" : ""}`} title={`${t.clippedShadows} ${(data.shadows * 100).toFixed(1)}%`} />
-      <i className={`clip high ${data.highlights > CLIP_WARNING ? "on" : ""}`} title={`${t.clippedHighlights} ${(data.highlights * 100).toFixed(1)}%`} />
+      <i className={`clip low ${data.shadows > CLIP_WARNING ? "on" : ""}`} data-tip={`${t.clippedShadows} ${(data.shadows * 100).toFixed(1)}%`} />
+      <i className={`clip high ${data.highlights > CLIP_WARNING ? "on" : ""}`} data-tip={`${t.clippedHighlights} ${(data.highlights * 100).toFixed(1)}%`} />
     </figure>
   );
 }

@@ -3,7 +3,7 @@ import { NO_LOOK, imageUrl, isRawPath, type Item, type LookInfo } from "../lib/a
 import { useT } from "../lib/i18n";
 import { useStore } from "../lib/store";
 import { useWheelSize } from "../lib/wheelSize";
-import { Icon } from "../ui/Icon";
+import { IconButton, tipProps } from "../ui/controls";
 
 /** Long edge of a tile's rendition. */
 const TILE_EDGE = 640;
@@ -76,22 +76,20 @@ export function LookWall({ item, source, looks, current, turn, onChoose, onClose
     <div className="look-wall" onClick={onClose}>
       <header>
         <strong>{t.lookWallTitle}</strong>
-        <span>{t.lookWallHint}</span>
+        <span className="spacer" />
         <input
-          className="size-slider wall-size"
+          className="slider size-slider wall-size"
           type="range"
           min={TILE_MIN}
           max={tileMax}
           step={2}
           value={shown}
-          title={`${t.size} · ${t.pinchOrCtrl}`}
+          {...tipProps(`${t.size} · ${t.pinchOrCtrl}`)}
           aria-label={t.size}
           onClick={(e) => e.stopPropagation()}
           onChange={(e) => setTile(Number(e.target.value))}
         />
-        <button className="icon-button on-dark" aria-label={t.cancel} title={t.cancel} onClick={onClose}>
-          <Icon name="x" />
-        </button>
+        <IconButton icon="x" label={t.close} onClick={onClose} keys={["Escape"]} />
       </header>
       <div className="look-wall-grid" ref={grid} style={{ "--tile": `${shown}px` } as CSSProperties}>
         {tiles.map((tile, i) => (

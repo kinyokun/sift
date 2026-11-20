@@ -99,7 +99,7 @@ export function Welcome() {
         <section className="recents">
           <h3>{t.recent}</h3>
           {recents.map((r) => (
-            <button key={r} onClick={() => openFolder(r)} title={r}>
+            <button key={r} onClick={() => openFolder(r)}>
               <Icon name="folder" size={18} />
               <span>{folderName(r)}</span>
               <small>{r}</small>
@@ -108,9 +108,14 @@ export function Welcome() {
         </section>
       )}
 
-      <button className="link help-link" onClick={() => setSheet("help")}>
-        {t.help}
-      </button>
+      <nav className="welcome-links">
+        <button className="link" onClick={() => setSheet("settings")}>
+          {t.settings}
+        </button>
+        <button className="link" onClick={() => setSheet("help")}>
+          {t.help}
+        </button>
+      </nav>
     </main>
   );
 }

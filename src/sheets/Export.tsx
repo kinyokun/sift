@@ -6,7 +6,7 @@ import { api, isRawPath, type CropBox, type CopyReport, type ExportKind, type Fr
 import { useT } from "../lib/i18n";
 import { cropOf, flagOf, folderName, framesOf, lookOf, tagsOf, turnOf, useStore, visibleEntries } from "../lib/store";
 import { TagDot } from "../components/Tags";
-import { Row, Segmented, Sheet, Toggle } from "../ui/controls";
+import { IconButton, Row, Segmented, Sheet, Toggle } from "../ui/controls";
 import { MarkPanel, markReady, photoArea, pickPicture, savedMarks, toWatermark, usePictures, type MarkPreset } from "./Watermark";
 
 const LAST_DEST_KEY = "sift.exportDest";
@@ -356,7 +356,7 @@ export function ExportSheet({ onClose }: { onClose: () => void }) {
                 </Row>
               )}
               {tags.length > 0 && (
-                <Row label={t.exportByTag} hint={t.exportByTagHint}>
+                <Row label={t.exportByTag} hint={byTag ? t.exportByTagHint : undefined}>
                   <Toggle
                     checked={byTag}
                     onChange={(on) => {
@@ -393,31 +393,45 @@ export function ExportSheet({ onClose }: { onClose: () => void }) {
                     {t.renameStart}
                     <input className="text number" type="number" min={0} value={start} onChange={(e) => setStart(Number(e.target.value) || 0)} />
                   </label>
+                  <p className="note">
+                    {t.renameHint}
+                    {byTag && t.renameHintTag}
+                  </p>
                 </div>
               )}
-              {mode === "frame" && (
-                <>
-                  <Row label={t.frameStyle}>
-                    <Segmented
-                      value={options.style}
-                      options={(["bar", "border", "glass"] as FrameStyle[]).map((v) => ({
-                        value: v,
-                        label: v === "bar" ? t.styleBar : v === "border" ? t.styleBorder : t.styleGlass,
-                      }))}
-                      onChange={(style) => set({ style })}
-                    />
-                  </Row>
-                  {options.style !== "glass" && (
-                    <Row label={t.dark}>
-                      <Toggle checked={options.dark} onChange={(dark) => set({ dark })} />
-                    </Row>
-                  )}
-                </>
-              )}
             </div>
+            {mode === "frame" && (
+              <div className="group">
+                <Row label={t.frameStyle}>
+                  <Segmented
+                    value={options.style}
+                    options={(["bar", "border", "glass"] as FrameStyle[]).map((v) => ({
+                      value: v,
+                      label: v === "bar" ? t.styleBar : v === "border" ? t.styleBorder : t.styleGlass,
+                    }))}
+                    onChange={(style) => set({ style })}
+                  />
+                </Row>
+                {options.style !== "glass" && (
+                  <Row label={t.dark}>
+                    <Toggle checked={options.dark} onChange={(dark) => set({ dark })} />
+                  </Row>
+                )}
+                <div className="row chips">
+                  {fields.map(([key, label]) => (
+                    <button key={key} className={options[key] ? "on" : ""} aria-pressed={!!options[key]} onClick={() => set({ [key]: !options[key] })}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <div className="row">
+                  <input className="text" placeholder={t.caption} value={options.caption} onChange={(e) => set({ caption: e.target.value })} aria-label={t.caption} />
+                </div>
+              </div>
+            )}
             {(mode === "frame" || kind !== "raw") && (
               <div className="group">
-                <Row label={t.outputSize} hint={mode === "copy" && saved.size ? t.sizeRenders : undefined}>
+                <Row label={t.outputSize}>
                   <select value={saved.size} onChange={(e) => keep({ size: Number(e.target.value) })}>
                     {SIZES.map((n) => (
                       <option key={n} value={n}>
@@ -426,16 +440,16 @@ export function ExportSheet({ onClose }: { onClose: () => void }) {
                     ))}
                   </select>
                 </Row>
-                <Row label={t.quality} hint={t.qualityHint}>
+                <Row label={t.quality}>
                   <span className="slider-value">
-                    <input className="size-slider" type="range" min={50} max={100} step={1} value={saved.quality} onChange={(e) => keep({ quality: Number(e.target.value) })} aria-label={t.quality} />
+                    <input className="slider" type="range" min={50} max={100} step={1} value={saved.quality} onChange={(e) => keep({ quality: Number(e.target.value) })} aria-label={t.quality} />
                     <output>{saved.quality}</output>
                   </span>
                 </Row>
                 <Row label={t.stripMeta} hint={t.stripHint}>
                   <Toggle checked={saved.strip} onChange={(strip) => keep({ strip })} />
                 </Row>
-                <Row label={t.watermark} hint={saved.marked ? undefined : t.watermarkNone}>
+                <Row label={t.watermark}>
                   <Toggle
                     checked={saved.marked}
                     onChange={(on) => {
@@ -460,28 +474,9 @@ export function ExportSheet({ onClose }: { onClose: () => void }) {
                 />
               </div>
             )}
-            {mode === "frame" && (
-              <>
-                <div className="chips">
-                  {fields.map(([key, label]) => (
-                    <button key={key} className={options[key] ? "on" : ""} onClick={() => set({ [key]: !options[key] })}>
-                      {label}
-                    </button>
-                  ))}
-                </div>
-                <input className="text" placeholder={t.caption} value={options.caption} onChange={(e) => set({ caption: e.target.value })} />
-              </>
-            )}
-            {renaming && (
-              <p className="note">
-                {t.renameHint}
-                {byTag && t.renameHintTag}
-              </p>
-            )}
             {untaggedLeft > 0 && <p className="note">{t.exportUntaggedLeft(untaggedLeft)}</p>}
             {byTag && shots.length > 0 && !folders.length && <p className="note bad">{t.exportNoTagged}</p>}
-            {styled > 0 && kind !== "raw" && <p className="note">{t.lookOnExport}</p>}
-            {mode === "copy" && kind !== "raw" && saved.marked && <p className="note">{t.markRenders}</p>}
+            {mode === "copy" && kind !== "raw" && (styled > 0 || saved.size > 0 || saved.marked) && <p className="note">{t.rendersNote}</p>}
             {!items.length && <p className="note">{t.nothingToExport}</p>}
             {items.length > 0 && !shots.length && <p className="note bad">{t.nothingOfKind}</p>}
           </div>
@@ -490,15 +485,11 @@ export function ExportSheet({ onClose }: { onClose: () => void }) {
               {preview && <img src={preview} alt="" draggable={false} className={placing ? "placing" : ""} onPointerDown={placeAt} onPointerMove={placeAt} />}
               {items.length > 1 && (
                 <div className="preview-nav">
-                  <button onClick={() => setSampleAt((i) => (Math.min(i, items.length - 1) + items.length - 1) % items.length)} aria-label={t.previewPrev}>
-                    ‹
-                  </button>
+                  <IconButton icon="back" size={16} label={t.previewPrev} onClick={() => setSampleAt((i) => (Math.min(i, items.length - 1) + items.length - 1) % items.length)} />
                   <span>
                     {Math.min(sampleAt, items.length - 1) + 1} / {items.length}
                   </span>
-                  <button onClick={() => setSampleAt((i) => (Math.min(i, items.length - 1) + 1) % items.length)} aria-label={t.previewNext}>
-                    ›
-                  </button>
+                  <IconButton icon="forward" size={16} label={t.previewNext} onClick={() => setSampleAt((i) => (Math.min(i, items.length - 1) + 1) % items.length)} />
                 </div>
               )}
             </div>

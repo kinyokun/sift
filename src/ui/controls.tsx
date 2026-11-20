@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "./Icon";
 
-/** What a control says on hover: with the shortcuts that do the same (bindings such as `Shift+V`), the
- * tooltip that shows them as key caps (`Tips`); without, the system's. */
+/** What a control says on hover, in the app's own tooltip (`Tips`): its name and, as key caps, the
+ * shortcuts that do the same (bindings such as `Shift+V`). */
 export function tipProps(label: string, keys?: string[]): Record<string, string> {
   const bound = keys?.filter(Boolean) ?? [];
-  return bound.length ? { "data-tip": label, "data-keys": bound.join("|") } : { title: label };
+  return bound.length ? { "data-tip": label, "data-keys": bound.join("|") } : { "data-tip": label };
 }
 
 export function Segmented<T extends string>(props: {
@@ -94,7 +94,7 @@ export function IconButton(props: {
   );
 }
 
-export type MenuItem = { label: string; onSelect: () => void; checked?: boolean; icon?: string } | "divider";
+export type MenuItem = { label: string; onSelect: () => void; checked?: boolean; icon?: string; danger?: boolean } | "divider";
 
 /** A button that opens a small popover menu. */
 export function Menu(props: { button: ReactNode; label: string; items: MenuItem[]; align?: "left" | "right"; up?: boolean; className?: string; keys?: string[] }) {
@@ -131,6 +131,7 @@ export function Menu(props: { button: ReactNode; label: string; items: MenuItem[
               <button
                 key={i}
                 role="menuitem"
+                className={item.danger ? "danger" : undefined}
                 onClick={() => {
                   setOpen(false);
                   item.onSelect();
@@ -147,8 +148,8 @@ export function Menu(props: { button: ReactNode; label: string; items: MenuItem[
   );
 }
 
-/** Without `onClose` the sheet stays until whatever it shows has finished. */
-export function Sheet(props: { title: string; onClose?: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean }) {
+/** Without `onClose` the sheet stays until whatever it shows has finished. `tabs` stay put above what scrolls. */
+export function Sheet(props: { title: string; onClose?: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean; tabs?: ReactNode }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -161,7 +162,7 @@ export function Sheet(props: { title: string; onClose?: () => void; children: Re
   }, [props.onClose]);
   return (
     <div className="sheet-backdrop" onPointerDown={(e) => e.target === e.currentTarget && props.onClose?.()}>
-      <section className={`sheet solid ${props.wide ? "wide" : ""}`} role="dialog" aria-modal="true" aria-label={props.title}>
+      <section className={`sheet solid ${props.wide ? "wide" : ""} ${props.tabs ? "tabbed" : ""}`} role="dialog" aria-modal="true" aria-label={props.title}>
         <header>
           <h2>{props.title}</h2>
           {props.onClose && (
@@ -170,6 +171,7 @@ export function Sheet(props: { title: string; onClose?: () => void; children: Re
             </button>
           )}
         </header>
+        {props.tabs && <div className="sheet-tabs">{props.tabs}</div>}
         <div className="sheet-body">{props.children}</div>
         {props.footer && <footer>{props.footer}</footer>}
       </section>

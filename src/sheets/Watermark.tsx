@@ -2,7 +2,8 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useRef, useState } from "react";
 import { api, type FrameStyle, type KeptMark, type MarkPlace, type Watermark } from "../lib/api";
 import { useT } from "../lib/i18n";
-import { Row, Segmented, Toggle } from "../ui/controls";
+import { Icon } from "../ui/Icon";
+import { Row, Segmented, Toggle, tipProps } from "../ui/controls";
 
 /** A watermark kept among the export settings; `backdrop` says its picture has a plain background that can go. */
 export type MarkPreset = Watermark & { id: string; backdrop?: boolean };
@@ -135,7 +136,7 @@ function Slider(props: { label: string; value: number; min: number; max: number;
   return (
     <Row label={props.label}>
       <span className="slider-value">
-        <input className="size-slider" type="range" min={props.min} max={props.max} step={props.step} value={props.value} onChange={(e) => props.onChange(Number(e.target.value))} aria-label={props.label} />
+        <input className="slider" type="range" min={props.min} max={props.max} step={props.step} value={props.value} onChange={(e) => props.onChange(Number(e.target.value))} aria-label={props.label} />
         <output>{props.shown}</output>
       </span>
     </Row>
@@ -188,16 +189,16 @@ export function MarkPanel(props: {
     <>
       <div className="row mark-presets">
         {props.marks.map((m) => (
-          <button key={m.id} className={m.id === mark.id ? "on" : ""} aria-pressed={m.id === mark.id} onClick={() => props.onChoose(m.id)} title={m.kind === "text" ? m.text : t.watermarkPicture}>
+          <button key={m.id} className={m.id === mark.id ? "on" : ""} aria-pressed={m.id === mark.id} onClick={() => props.onChoose(m.id)}>
             {m.kind === "picture" ? props.pictures[m.picture] ? <img src={props.pictures[m.picture]!} alt="" /> : t.watermarkPicture : m.text.split("\n")[0].trim() || t.watermarkText}
           </button>
         ))}
-        <button className="add" onClick={props.onAdd} title={t.watermarkAdd} aria-label={t.watermarkAdd}>
-          +
+        <button className="add" onClick={props.onAdd} {...tipProps(t.watermarkAdd)} aria-label={t.watermarkAdd}>
+          <Icon name="plus" size={14} />
         </button>
         {props.marks.length > 1 && (
-          <button className="link remove" onClick={props.onRemove}>
-            {t.watermarkRemove}
+          <button className="remove" onClick={props.onRemove} {...tipProps(t.watermarkRemove)} aria-label={t.watermarkRemove}>
+            <Icon name="trash" size={15} />
           </button>
         )}
       </div>
@@ -227,10 +228,9 @@ export function MarkPanel(props: {
               </button>
             ))}
           </div>
-          <small>{t.watermarkFieldsHint}</small>
         </div>
       ) : (
-        <Row label={picture ? t.watermarkChange : t.watermarkPick} hint={t.watermarkPictureHint} onClick={props.onPick}>
+        <Row label={picture ? t.watermarkChange : t.watermarkPick} onClick={props.onPick}>
           <span className="mark-pick">{picture && <img src={picture} alt="" />}</span>
         </Row>
       )}
@@ -255,7 +255,7 @@ export function MarkPanel(props: {
       <Row label={t.watermarkColor}>
         <span className="mark-colours">
           <Segmented value={mark.tint} options={colours} onChange={(tint) => onChange({ tint })} />
-          <label className={`swatch ${mark.tint.startsWith("#") && !["#ffffff", "#000000"].includes(mark.tint) ? "on" : ""}`} title={t.colorCustom}>
+          <label className={`swatch ${mark.tint.startsWith("#") && !["#ffffff", "#000000"].includes(mark.tint) ? "on" : ""}`} {...tipProps(t.colorCustom)}>
             <input type="color" value={mark.tint.startsWith("#") ? mark.tint : "#ff3b30"} onChange={(e) => onChange({ tint: e.target.value })} aria-label={t.colorCustom} />
           </label>
         </span>
@@ -271,8 +271,8 @@ export function MarkPanel(props: {
         />
       </Row>
       {!mark.tile && (
-        <Row label={t.watermarkPlace} hint={t.watermarkPlaceHint}>
-          <div className="mark-places" role="radiogroup" aria-label={t.watermarkPlace}>
+        <Row label={t.watermarkPlace}>
+          <div className="mark-places" role="radiogroup" aria-label={t.watermarkPlace} {...tipProps(t.watermarkPlaceHint)}>
             {PLACES.map((p) => {
               const on = !mark.at && mark.place === p;
               return <button key={p} role="radio" aria-checked={on} className={on ? "on" : ""} onClick={() => onChange({ place: p, at: null })} />;
@@ -288,7 +288,7 @@ export function MarkPanel(props: {
       ) : (
         !mark.at && <Slider label={t.watermarkMargin} value={mark.margin} min={0} max={0.1} step={0.005} shown={percent(mark.margin / 0.1)} onChange={(margin) => onChange({ margin })} />
       )}
-      <Row label={t.watermarkShadow} hint={t.watermarkShadowHint}>
+      <Row label={t.watermarkShadow}>
         <Toggle checked={mark.shadow} onChange={(shadow) => onChange({ shadow })} />
       </Row>
     </>

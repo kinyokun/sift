@@ -161,7 +161,7 @@ function RatioField(props: { label: string; name: string; hint: string; focus: b
       autoComplete="off"
       aria-label={props.name}
       aria-invalid={bad}
-      title={props.hint}
+      {...tipProps(props.hint)}
       onFocus={(e) => e.currentTarget.select()}
       onChange={(e) => {
         setText(e.target.value);
@@ -913,9 +913,6 @@ export function Viewer() {
     { label: t.guideNames[0], checked: !cropRatio, onSelect: () => chooseCrop(null) },
     ...(savedCrop ? [{ label: t.cropReset, onSelect: resetCrop } as MenuItem] : []),
     "divider",
-    { label: t.actions.rotateLeft, onSelect: () => rotate(-1) },
-    { label: t.actions.rotateRight, onSelect: () => rotate(1) },
-    "divider",
     ...[...CROP_RATIOS.slice(0, -1), ...settings.cropRatios.filter((r) => !CROP_RATIOS.includes(r)), "free"].map((r) => ({
       label: r === "original" ? t.cropOriginal : r === "free" ? t.cropFree : r,
       checked: cropRatio === r,
@@ -1105,9 +1102,10 @@ export function Viewer() {
                   <IconButton icon="swap" label={t.cropSwap} size={16} disabled={cropRatio === "free"} onClick={swapCrop} />
                 </div>
               )}
-              <label className="straighten" title={t.straightenHint}>
+              <label className="straighten" {...tipProps(t.straightenHint)}>
                 <span>{t.straighten}</span>
                 <input
+                  className="slider"
                   type="range"
                   min={-45}
                   max={45}
@@ -1122,13 +1120,20 @@ export function Viewer() {
                 <output>{(crop.angle ?? 0).toFixed(1)}°</output>
               </label>
               {currentTilt !== null && (
-                <button {...tipProps(t.straightenLevelHint(currentTilt.toFixed(1)))} onClick={() => straighten(Math.max(-45, Math.min(45, Math.round(currentTilt * 10) / 10)))}>
+                <button className="button" {...tipProps(t.straightenLevelHint(currentTilt.toFixed(1)))} onClick={() => straighten(Math.max(-45, Math.min(45, Math.round(currentTilt * 10) / 10)))}>
                   {t.straightenLevel}
                 </button>
               )}
-              <button onClick={() => chooseCrop(null)}>{t.cancel}</button>
-              {savedCrop && <button onClick={resetCrop}>{t.cropReset}</button>}
-              <button className="primary" onClick={confirmCrop}>
+              <i className="bar-sep" />
+              {savedCrop && (
+                <button className="button" onClick={resetCrop}>
+                  {t.cropReset}
+                </button>
+              )}
+              <button className="button" onClick={() => chooseCrop(null)}>
+                {t.cancel}
+              </button>
+              <button className="button primary" onClick={confirmCrop}>
                 {t.cropConfirm}
               </button>
             </div>
@@ -1144,18 +1149,19 @@ export function Viewer() {
           <div className="dock-group">
             <IconButton icon="focus" label={t.focusPoints} active={showAf && !!currentMeta?.af} onClick={toggleAf} keys={[keys.af]} />
             <IconButton icon="eye" label={t.eyeZoom} active={eye} onClick={toggleEye} keys={[keys.eye]} />
-            <Menu label={t.looks} up className={currentLook ? "on" : ""} items={lookItems} button={<Icon name="look" />} keys={[keys.lookPrev, keys.lookNext]} />
-            <Menu label={t.guides} up className={guides ? "on" : ""} items={guideItems} button={<Icon name="guides" />} keys={[keys.guides]} />
-            <Menu label={t.crop} up className={cropRatio || savedCrop ? "on" : ""} items={cropItems} button={<Icon name="crop" />} keys={[keys.crop]} />
-            <IconButton icon="rotate" label={t.actions.rotateRight} onClick={() => rotate(1)} keys={[keys.rotateRight]} />
-            {!mobile && <IconButton icon="openIn" label={t.actions.editor} onClick={() => void editIn([current])} keys={[keys.editor]} />}
             <IconButton icon="clip" label={t.clipping} active={settings.clipping} onClick={toggleClipping} keys={[keys.clipping]} />
             <IconButton icon="level" label={t.level} active={settings.level && currentTilt !== null} onClick={toggleLevel} keys={[keys.level]} />
+            <Menu label={t.guides} up className={guides ? "on" : ""} items={guideItems} button={<Icon name="guides" />} keys={[keys.guides]} />
+          </div>
+          <div className="dock-group">
+            <Menu label={t.looks} up className={currentLook ? "on" : ""} items={lookItems} button={<Icon name="look" />} keys={[keys.lookPrev, keys.lookNext]} />
+            <Menu label={t.crop} up className={cropRatio || savedCrop ? "on" : ""} items={cropItems} button={<Icon name="crop" />} keys={[keys.crop]} />
+            <IconButton icon="rotate" label={t.actions.rotateRight} onClick={() => rotate(1)} keys={[keys.rotateRight]} />
+          </div>
+          <div className="dock-group">
             <IconButton icon="compare" label={t.compare} active={compare} onClick={toggleCompare} keys={[keys.compare]} />
             {compare && <IconButton icon="link" label={t.link} active={link} onClick={() => setLink(!link)} keys={[keys.link]} />}
-          </div>
-          {compare && (
-            <div className="dock-group">
+            {compare && (
               <div className="segmented pane-count" role="group" aria-label={t.actions.panes}>
                 {[2, 3, 4].map((n) => (
                   <button key={n} className={indices.length === n ? "on" : ""} aria-pressed={indices.length === n} {...tipProps(t.comparePanes(n), [keys.panes])} onClick={() => setPaneCount(n)}>
@@ -1163,8 +1169,8 @@ export function Viewer() {
                   </button>
                 ))}
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
 
@@ -1188,7 +1194,7 @@ export function Viewer() {
       )}
 
       <header className="viewer-bar" ref={topBar} data-tauri-drag-region>
-        <IconButton icon="back" label={t.back} onClick={() => useStore.getState().closeViewer()} className="on-dark" keys={mobile ? undefined : ["Escape"]} />
+        <IconButton icon="back" label={t.back} onClick={() => useStore.getState().closeViewer()} keys={mobile ? undefined : ["Escape"]} />
         <div className="viewer-title" data-tauri-drag-region>
           <strong>{current.name}</strong>
           <span>
@@ -1212,9 +1218,10 @@ export function Viewer() {
               {zoom.percent}%
             </button>
           )}
-          {info?.save_to_photos && <IconButton icon="save" label={t.saveToPhotos} onClick={() => useStore.getState().saveToPhotos([current])} className="on-dark" />}
-          <IconButton icon="trash" label={t.delete} disabled={!!crop || !!live} onClick={() => useStore.getState().deletePhotos([current.id])} className="on-dark" keys={[keys.delete]} />
-          <IconButton icon="info" label={t.info} active={showInfo} onClick={toggleInfo} className="on-dark" keys={[keys.info]} />
+          {info?.save_to_photos && <IconButton icon="save" label={t.saveToPhotos} onClick={() => useStore.getState().saveToPhotos([current])} />}
+          {!mobile && <IconButton icon="openIn" label={t.actions.editor} onClick={() => void editIn([current])} keys={[keys.editor]} />}
+          <IconButton icon="trash" label={t.delete} disabled={!!crop || !!live} onClick={() => useStore.getState().deletePhotos([current.id])} keys={[keys.delete]} />
+          <IconButton icon="info" label={t.info} active={showInfo} onClick={toggleInfo} keys={[keys.info]} />
         </div>
       </header>
     </div>

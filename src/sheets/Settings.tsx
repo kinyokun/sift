@@ -1,5 +1,5 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { chooseEditor, editorName } from "../lib/editor";
 import { importLooks } from "../lib/looks";
@@ -7,7 +7,7 @@ import { useT } from "../lib/i18n";
 import { ACTIONS, DEFAULT_KEYS, comboOf, keyCaps, type Action } from "../lib/shortcuts";
 import { useStore, wheelModeOf, type Settings, type WheelMode } from "../lib/store";
 import { Row, Segmented, Sheet, Toggle } from "../ui/controls";
-import { Icon } from "../ui/Icon";
+import { GROUPS, type Group } from "./Keys";
 import { UpdateSettings } from "./Update";
 
 const REPO = "https://github.com/kinyokun/sift";
@@ -38,11 +38,14 @@ function Binding({ value }: { value: string }) {
   );
 }
 
+type Tab = "general" | "keys" | "looks" | "about";
+
 export function SettingsSheet({ onClose }: { onClose: () => void }) {
   const t = useT();
   const settings = useStore((s) => s.settings);
   const info = useStore((s) => s.info);
   const setSettings = useStore((s) => s.setSettings);
+  const [tab, setTab] = useState<Tab>("general");
   const [capturing, setCapturing] = useState<Action | null>(null);
   const [cacheBytes, setCacheBytes] = useState(info?.cache_bytes ?? 0);
   const mobile = !!info?.mobile;
@@ -76,202 +79,204 @@ export function SettingsSheet({ onClose }: { onClose: () => void }) {
   }, [capturing, settings.keys]);
 
   const wheel = wheelModeOf(settings, info?.platform);
+  const reload = () => useStore.getState().reload();
+  const tabs: { value: Tab; label: string }[] = [
+    { value: "general", label: t.general },
+    ...(mobile ? [] : [{ value: "keys" as const, label: t.shortcuts }]),
+    { value: "looks", label: t.looks },
+    { value: "about", label: t.about },
+  ];
 
   return (
-    <Sheet title={t.settings} onClose={capturing ? () => setCapturing(null) : onClose}>
-      <div className="form">
-        <h4>{t.general}</h4>
-        <div className="group">
-          <Row label={t.language}>
-            <Segmented
-              value={settings.lang}
-              options={[
-                { value: "auto", label: t.langAuto },
-                { value: "zh", label: "中文" },
-                { value: "en", label: "English" },
-              ]}
-              onChange={(lang) => setSettings({ lang })}
-            />
-          </Row>
-          <Row label={t.pairRaw}>
-            <Toggle
-              checked={settings.pair}
-              onChange={(pair) => {
-                setSettings({ pair });
-                useStore.getState().reload();
-              }}
-            />
-          </Row>
-          <Row label={t.preferRaw} hint={t.preferRawHint}>
-            <Toggle
-              checked={settings.preferRaw}
-              onChange={(preferRaw) => {
-                setSettings({ preferRaw });
-                useStore.getState().reload();
-              }}
-            />
-          </Row>
-          {!mobile && (
-            <Row label={t.subfolders} hint={t.subfoldersHint}>
-              <Toggle
-                checked={settings.subfolders}
-                onChange={(subfolders) => {
-                  setSettings({ subfolders });
-                  useStore.getState().reload();
-                }}
+    <Sheet
+      title={t.settings}
+      onClose={capturing ? () => setCapturing(null) : onClose}
+      tabs={<Segmented value={tab} options={tabs} onChange={(next) => (setCapturing(null), setTab(next))} />}
+    >
+      {tab === "general" && (
+        <div className="form">
+          <div className="group">
+            <Row label={t.language}>
+              <Segmented
+                value={settings.lang}
+                options={[
+                  { value: "auto", label: t.langAuto },
+                  { value: "zh", label: "中文" },
+                  { value: "en", label: "English" },
+                ]}
+                onChange={(lang) => setSettings({ lang })}
               />
             </Row>
-          )}
-          <Row label={t.stackPhotos} hint={t.stackPhotosHint}>
-            <Toggle checked={settings.stacks} onChange={(stacks) => setSettings({ stacks })} />
-          </Row>
-          <Row label={t.autoAdvance}>
-            <Toggle checked={settings.autoAdvance} onChange={(autoAdvance) => setSettings({ autoAdvance })} />
-          </Row>
-          {!mobile && (
-            <Row label={t.infoPinned}>
-              <Toggle checked={settings.infoPinned} onChange={(infoPinned) => setSettings({ infoPinned })} />
+          </div>
+
+          <h4>{t.photosGroup}</h4>
+          <div className="group">
+            <Row label={t.pairRaw}>
+              <Toggle checked={settings.pair} onChange={(pair) => (setSettings({ pair }), reload())} />
             </Row>
+            <Row label={t.preferRaw} hint={t.preferRawHint}>
+              <Toggle checked={settings.preferRaw} onChange={(preferRaw) => (setSettings({ preferRaw }), reload())} />
+            </Row>
+            <Row label={t.autoDevelop} hint={t.autoDevelopHint}>
+              <Toggle checked={settings.autoDevelop} onChange={(autoDevelop) => setSettings({ autoDevelop })} />
+            </Row>
+          </div>
+
+          <h4>{t.viewing}</h4>
+          <div className="group">
+            <Row label={t.autoAdvance}>
+              <Toggle checked={settings.autoAdvance} onChange={(autoAdvance) => setSettings({ autoAdvance })} />
+            </Row>
+            {!mobile && (
+              <>
+                <Row label={t.mouseWheel} hint={t.wheelHints[wheel]}>
+                  <Segmented value={wheel} options={WHEEL_MODES.map((value) => ({ value, label: t.wheelModes[value] }))} onChange={(wheel) => setSettings({ wheel })} />
+                </Row>
+                <Row label={t.mouseDouble}>
+                  <Segmented
+                    value={settings.doubleClick}
+                    options={DOUBLE_CLICKS.map((value) => ({ value, label: t.doubleClicks[value] }))}
+                    onChange={(doubleClick) => setSettings({ doubleClick })}
+                  />
+                </Row>
+              </>
+            )}
+          </div>
+
+          {!mobile && (
+            <>
+              <h4>{t.editing}</h4>
+              <div className="group">
+                <Row label={t.editorApp} hint={settings.editor ? editorName(settings.editor) : t.notChosen} onClick={() => void chooseEditor()}>
+                  {settings.editor ? (
+                    <button
+                      className="link"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSettings({ editor: null });
+                      }}
+                    >
+                      {t.remove}
+                    </button>
+                  ) : (
+                    <span className="link">{t.choose}</span>
+                  )}
+                </Row>
+                <Row label={t.editorRaw} hint={t.editorRawHint}>
+                  <Toggle checked={settings.editorRaw} onChange={(editorRaw) => setSettings({ editorRaw })} />
+                </Row>
+              </div>
+            </>
           )}
-          <Row label={t.autoDevelop} hint={t.autoDevelopHint}>
-            <Toggle checked={settings.autoDevelop} onChange={(autoDevelop) => setSettings({ autoDevelop })} />
-          </Row>
         </div>
+      )}
 
-        {!mobile && (
-          <>
-            <h4>{t.editing}</h4>
-            <div className="group">
-              <Row label={t.editorApp} hint={settings.editor ? editorName(settings.editor) : t.notChosen} onClick={() => void chooseEditor()}>
-                {settings.editor ? (
-                  <button
-                    className="link"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSettings({ editor: null });
-                    }}
-                  >
-                    {t.remove}
-                  </button>
-                ) : (
-                  <span className="link">{t.choose}</span>
-                )}
-              </Row>
-              <Row label={t.editorRaw} hint={t.editorRawHint}>
-                <Toggle checked={settings.editorRaw} onChange={(editorRaw) => setSettings({ editorRaw })} />
-              </Row>
-            </div>
-            {(info?.platform === "macos" || info?.platform === "windows") && <p className="note">{t.dragOutNote(info.platform === "macos")}</p>}
-          </>
-        )}
-
-        {!mobile && (
-          <>
-            <h4>{t.mouse}</h4>
-            <div className="group">
-              <Row label={t.wheelMode} hint={t.wheelHints[wheel]}>
-                <Segmented value={wheel} options={WHEEL_MODES.map((value) => ({ value, label: t.wheelModes[value] }))} onChange={(wheel) => setSettings({ wheel })} />
-              </Row>
-              <Row label={t.doubleClick}>
-                <Segmented
-                  value={settings.doubleClick}
-                  options={DOUBLE_CLICKS.map((value) => ({ value, label: t.doubleClicks[value] }))}
-                  onChange={(doubleClick) => setSettings({ doubleClick })}
-                />
-              </Row>
-            </div>
-          </>
-        )}
-
-        {!mobile && (
-          <>
-            <h4>
-              {t.shortcuts}
+      {tab === "keys" && (
+        <div className="form">
+          <div className="group">
+            <Row label={t.shortcutList} onClick={() => useStore.getState().setSheet("keys")}>
+              <Binding value={settings.keys.help} />
+            </Row>
+            <Row label={<span className="dim">{t.shortcutsHint}</span>}>
               <button className="link" onClick={() => setSettings({ keys: { ...DEFAULT_KEYS } })}>
                 {t.resetShortcuts}
               </button>
-            </h4>
-            <div className="group keys">
-              {ACTIONS.map((a) => (
-                <Row key={a} label={t.actions[a]} onClick={() => setCapturing(a)}>
-                  {capturing === a ? <span className="capturing">{t.pressKey}</span> : <Binding value={settings.keys[a]} />}
-                </Row>
-              ))}
-            </div>
-          </>
-        )}
+            </Row>
+          </div>
+          {(Object.keys(GROUPS) as Group[]).map((g) => (
+            <Fragment key={g}>
+              <h4>{t.keyGroups[g]}</h4>
+              <div className="group keys">
+                {GROUPS[g].map((a) => (
+                  <Row key={a} label={t.actions[a]} onClick={() => setCapturing(a)}>
+                    {capturing === a ? <span className="capturing">{t.pressKey}</span> : <Binding value={settings.keys[a]} />}
+                  </Row>
+                ))}
+              </div>
+            </Fragment>
+          ))}
+        </div>
+      )}
 
-        <h4>
-          {t.lookManage}
-          <button className="link" onClick={importLooks}>
-            {t.lookImport}
-          </button>
-        </h4>
-        <div className="group">
-          {library.map((l) => (
-            <Row key={l.id} label={l.name} hint={l.id}>
-              <button className="link" onClick={async () => useStore.getState().setLibrary(await api.removeLook(l.id))}>
-                {t.remove}
+      {tab === "looks" && (
+        <div className="form">
+          <h4>
+            {t.lookManage}
+            <button className="link" onClick={importLooks}>
+              {t.lookImport}
+            </button>
+          </h4>
+          <div className="group">
+            {library.map((l) => (
+              <Row key={l.id} label={l.name} hint={l.id}>
+                <button className="link" onClick={async () => useStore.getState().setLibrary(await api.removeLook(l.id))}>
+                  {t.remove}
+                </button>
+              </Row>
+            ))}
+            {!library.length && <Row label={<span className="dim">{t.lookEmpty}</span>} />}
+          </div>
+
+          {info?.nikon_supported ? (
+            <>
+              <h4>{t.sdkTitle}</h4>
+              <div className="group">
+                <Row label={t.sdkName} hint={info.nikon_sdk ? t.sdkOn : t.sdkOff}>
+                  {info.nikon_sdk && (
+                    <button className="link" onClick={() => openLink(NIKON_SDK_TERMS)}>
+                      {t.sdkTerms}
+                    </button>
+                  )}
+                </Row>
+              </div>
+              <p className="note">{info.nikon_sdk ? t.sdkNote : t.sdkMissingNote}</p>
+            </>
+          ) : (
+            library.some((l) => l.nikon) && <p className="note">{t.lookNp3Note}</p>
+          )}
+        </div>
+      )}
+
+      {tab === "about" && (
+        <div className="form">
+          {info?.updater ? (
+            <UpdateSettings />
+          ) : (
+            <div className="group">
+              <Row label="Sift">
+                <span className="dim">
+                  {t.version} {info?.version}
+                </span>
+              </Row>
+            </div>
+          )}
+          <div className="group">
+            <Row label={t.cache} hint={`${(cacheBytes / 1048576).toFixed(0)} MB`}>
+              <button
+                className="link"
+                onClick={async () => {
+                  await api.clearCache();
+                  setCacheBytes(0);
+                }}
+              >
+                {t.clearCache}
               </button>
             </Row>
-          ))}
-          {!library.length && <Row label={<span className="dim">{t.lookEmpty}</span>} />}
+          </div>
+          <div className="group">
+            <Row label={t.sourceCode} hint="GPL-3.0">
+              <button className="link" onClick={() => openLink(REPO)}>
+                GitHub
+              </button>
+            </Row>
+            <Row label={t.licenses}>
+              <button className="link" onClick={() => openLink(`${REPO}/blob/main/THIRD_PARTY_NOTICES.md`)}>
+                {t.view}
+              </button>
+            </Row>
+          </div>
         </div>
-        {library.some((l) => l.nikon) && <p className="note">{t.lookNp3Note}</p>}
-
-        {info?.nikon_supported && (
-          <>
-            <h4>{t.sdkTitle}</h4>
-            <div className="group">
-              <Row label={t.sdkName} hint={info.nikon_sdk ? t.sdkOn : t.sdkOff} />
-              {info.nikon_sdk && (
-                <Row label={t.sdkTerms}>
-                  <button className="link" onClick={() => openLink(NIKON_SDK_TERMS)}>
-                    {t.view}
-                  </button>
-                </Row>
-              )}
-            </div>
-            <p className="note">{info.nikon_sdk ? t.sdkNote : t.sdkMissingNote}</p>
-          </>
-        )}
-
-        <h4>{t.cache}</h4>
-        <div className="group">
-          <Row label={`${(cacheBytes / 1048576).toFixed(0)} MB`}>
-            <button
-              className="link"
-              onClick={async () => {
-                await api.clearCache();
-                setCacheBytes(0);
-              }}
-            >
-              {t.clearCache}
-            </button>
-          </Row>
-        </div>
-
-        {info?.updater && <UpdateSettings />}
-
-        <h4>{t.about}</h4>
-        <div className="group">
-          <Row label="Sift">
-            <span className="dim">
-              {t.version} {info?.version}
-            </span>
-          </Row>
-          <Row label={t.sourceCode} hint="GPL-3.0">
-            <button className="link" onClick={() => openLink(REPO)}>
-              GitHub
-            </button>
-          </Row>
-          <Row label={t.licenses}>
-            <button className="link" onClick={() => openLink(`${REPO}/blob/main/THIRD_PARTY_NOTICES.md`)}>
-              {t.view}
-            </button>
-          </Row>
-        </div>
-      </div>
+      )}
     </Sheet>
   );
 }
@@ -289,7 +294,7 @@ export function HelpSheet({ onClose }: { onClose: () => void }) {
     [mobile ? t.help1TitleTouch : t.help1Title, mobile ? t.help1BodyTouch : t.help1Body, null],
     [t.help2Title, mobile ? t.help2BodyTouch : t.help2Body, <><Binding value={keys.af} /><Binding value={keys.eye} /><Binding value={keys.zoom} /></>],
     [t.help3Title, t.help3Body, <><Binding value={keys.rate1} />–<Binding value={keys.rate5} /><Binding value={keys.pick} /><Binding value={keys.reject} /></>],
-    [t.help4Title, t.help4Body, null],
+    [t.help4Title, mobile ? t.help4BodyTouch : t.help4Body, null],
   ];
   return (
     <Sheet
@@ -318,11 +323,11 @@ export function HelpSheet({ onClose }: { onClose: () => void }) {
           ))}
         </ol>
         {!mobile && (
-          <button className="help-map" onClick={() => useStore.getState().setSheet("keys")}>
-            <Icon name="keyboard" size={22} />
-            <span>{t.shortcutList}</span>
-            <Binding value={keys.help} />
-          </button>
+          <div className="group">
+            <Row label={t.shortcutList} onClick={() => useStore.getState().setSheet("keys")}>
+              <Binding value={keys.help} />
+            </Row>
+          </div>
         )}
       </div>
     </Sheet>

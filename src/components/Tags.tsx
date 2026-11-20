@@ -104,7 +104,7 @@ export function TagMenu(props: { targets: Item[]; label: string; up?: boolean; k
             if (editing)
               return (
                 <div className="tag-edit" key={tag.id}>
-                  <button className="tag-color" title={t.tagColor} aria-label={t.tagColor} onClick={() => act.recolorTag(tag.id)}>
+                  <button className="tag-color" {...tipProps(t.tagColor)} aria-label={t.tagColor} onClick={() => act.recolorTag(tag.id)}>
                     <TagDot color={tag.color} />
                   </button>
                   <input
@@ -119,7 +119,7 @@ export function TagMenu(props: { targets: Item[]; label: string; up?: boolean; k
                   />
                   <button
                     className={`tag-remove ${doomed === tag.id ? "sure" : ""}`}
-                    title={t.tagRemove}
+                    {...tipProps(t.tagRemove)}
                     aria-label={t.tagRemove}
                     onClick={() => (doomed === tag.id ? act.removeTag(tag.id) : setDoomed(tag.id))}
                   >
@@ -148,7 +148,7 @@ export function TagMenu(props: { targets: Item[]; label: string; up?: boolean; k
             }}
           >
             <input ref={input} className="text" value={name} maxLength={40} spellCheck={false} placeholder={t.tagNew} aria-label={t.tagNew} onChange={(e) => setName(e.target.value)} />
-            <button type="submit" disabled={!name.trim()} title={t.tagAdd} aria-label={t.tagAdd}>
+            <button type="submit" disabled={!name.trim()} {...tipProps(t.tagAdd)} aria-label={t.tagAdd}>
               <Icon name="plus" size={16} />
             </button>
           </form>

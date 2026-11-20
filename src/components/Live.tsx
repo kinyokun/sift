@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { imageUrl, type Item } from "../lib/api";
 import { useT } from "../lib/i18n";
-import { Segmented } from "../ui/controls";
+import { Segmented, tipProps } from "../ui/controls";
 import { Icon } from "../ui/Icon";
 
 /** Rendition the preview plays; the same one the grid shows at its largest, so it is often cached. */
@@ -151,10 +151,10 @@ export function LiveEditor({ frames, draft, step, playing, ready, saving, heif, 
 
   return (
     <div className="live-editor glass" role="group" aria-label={t.livePhoto}>
-      <button className="live-play" disabled={loading} title={playing ? t.livePause : t.livePlay} aria-label={playing ? t.livePause : t.livePlay} onClick={onPlay}>
+      <button className="live-play" disabled={loading} {...tipProps(playing ? t.livePause : t.livePlay)} aria-label={playing ? t.livePause : t.livePlay} onClick={onPlay}>
         {loading ? <span className="spinner" /> : <Icon name={playing ? "pause" : "play"} size={16} fill />}
       </button>
-      <div className="live-track" ref={track} onClick={pick} title={t.liveTrackHint}>
+      <div className="live-track" ref={track} onClick={pick} {...tipProps(t.liveTrackHint)}>
         <div className="live-slivers">
           {frames.map((f, i) => (
             <i key={f.id} className={i < draft.start || i > draft.end ? "out" : ""} style={{ backgroundImage: `url("${imageUrl("thumb", f.id, f.mtime, SLIVER_EDGE)}")` }} />
@@ -169,7 +169,7 @@ export function LiveEditor({ frames, draft, step, playing, ready, saving, heif, 
         </div>
       </div>
       <span className="live-length">{t.liveLength(count, (count * step).toFixed(1))}</span>
-      <div className="live-format" title={t.liveFormatHint}>
+      <div className="live-format" {...tipProps(t.liveFormatHint)}>
         <Segmented
           value={heif ? "heif" : "jpg"}
           options={[
@@ -179,10 +179,10 @@ export function LiveEditor({ frames, draft, step, playing, ready, saving, heif, 
           onChange={(v) => onHeif(v === "heif")}
         />
       </div>
-      <button className="stack-strip-action" onClick={onCancel} disabled={saving}>
+      <button className="button" onClick={onCancel} disabled={saving}>
         {t.cancel}
       </button>
-      <button className="stack-strip-action primary" onClick={onSave} disabled={saving}>
+      <button className="button primary" onClick={onSave} disabled={saving}>
         {saving && <span className="spinner" />}
         {t.liveSave}
       </button>
@@ -230,7 +230,7 @@ export function LiveMovie({ item, area }: { item: Item; area: Area }) {
       {playing && src && (
         <video className="live-layer" style={{ top: area.top, height: `calc(100% - ${area.top + area.bottom}px)` }} src={src} autoPlay muted playsInline onEnded={() => setPlaying(false)} onError={() => (setPlaying(false), setFailed(true))} />
       )}
-      <button className={`live-mark glass ${playing ? "on" : ""}`} style={{ top: area.top + 10 }} disabled={!src || failed} title={failed ? t.liveCannotPlay : t.livePlay} onClick={() => setPlaying((v) => !v)}>
+      <button className={`live-mark glass ${playing ? "on" : ""}`} style={{ top: area.top + 10 }} disabled={!src || failed} {...tipProps(failed ? t.liveCannotPlay : t.livePlay)} onClick={() => setPlaying((v) => !v)}>
         <Icon name="live" size={14} />
         {t.liveBadge}
       </button>
