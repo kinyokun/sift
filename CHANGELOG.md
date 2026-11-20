@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-11-20
+
 ### 新增
 
 - 增量更新：只下载两个版本之间变了的部分，不再每次都下完整安装包。以 0.6.1 → 0.6.2 为例，macOS 约 7 MB（完整包 203 MB），Windows 约 3.5 MB（完整包 90 MB）。隔了好几个版本时，按顺序连着打几个补丁，挑总下载量最小的走法，全程自动，只提示一次、重启一次。补丁加起来不比完整安装包小，或者哪一步出了错，就自动改下完整安装包。每个补丁都经过签名校验，新版本的每个文件在替换前都核对过，中途出错不会动到已安装的版本
@@ -253,7 +255,8 @@
 - 导出（复制 / 重命名 / 找回 RAW / 参数相框）、局域网传输、自定义快捷键
 - 中文 / 英文界面
 
-[Unreleased]: https://github.com/kinyokun/sift/compare/v0.6.2...HEAD
+[Unreleased]: https://github.com/kinyokun/sift/compare/v0.6.3...HEAD
+[0.6.3]: https://github.com/kinyokun/sift/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/kinyokun/sift/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/kinyokun/sift/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/kinyokun/sift/compare/v0.5.0...v0.6.0
