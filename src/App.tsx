@@ -1,5 +1,5 @@
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { useEffect } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { Library } from "./components/Library";
 import { Viewer } from "./components/Viewer";
 import { Welcome } from "./components/Welcome";
@@ -14,11 +14,30 @@ import { HelpSheet, SettingsSheet } from "./sheets/Settings";
 import { ChangelogSheet, UpdateSheet } from "./sheets/Update";
 import { Tips } from "./ui/Tip";
 
+/** What sits along the bottom of the screen, which a toast is raised above. */
+const BOTTOM_BARS = ".dock, .stack-strip-holder, .crop-bar, .selection-bar";
+
 /** Toasts are raised with short codes so the store stays free of UI text. */
 function Toast() {
   const t = useT();
   const toast = useStore((s) => s.toast);
   const bin = t.trashName(useStore((s) => s.info?.platform === "macos"));
+  const ref = useRef<HTMLDivElement>(null);
+  // A dock or selection bar that wraps onto two rows (on a phone), or the frames of a burst above the
+  // dock, would otherwise cover the toast.
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.bottom = "";
+    const tops = [...document.querySelectorAll(BOTTOM_BARS)]
+      .filter((bar) => getComputedStyle(bar.closest(".dock") ?? bar).opacity !== "0")
+      .map((bar) => bar.getBoundingClientRect())
+      .filter((r) => r.height > 0)
+      .map((r) => r.top);
+    if (!tops.length) return;
+    const above = window.innerHeight - Math.min(...tops) + 12;
+    if (above > parseFloat(getComputedStyle(el).bottom)) el.style.bottom = `${above}px`;
+  }, [toast?.id]);
   if (!toast) return null;
   const [code, detail] = toast.text.split(/:(.*)/s);
   const known: Record<string, string> = {
@@ -53,7 +72,7 @@ function Toast() {
     subfoldersShown: t.subfoldersShown(Number(detail) || 0),
   };
   return (
-    <div className="toast solid" role="status" key={toast.id}>
+    <div ref={ref} className="toast solid" role="status" key={toast.id}>
       {known[code] ?? toast.text}
     </div>
   );
