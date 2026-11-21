@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { imageUrl, type Item } from "../lib/api";
 import { useT } from "../lib/i18n";
+import { quarter, turnedSize } from "../lib/turn";
 import { Segmented, tipProps } from "../ui/controls";
 import { Icon } from "../ui/Icon";
 
@@ -17,8 +18,8 @@ export type LiveDraft = { start: number; end: number; cover: number };
 
 type Area = { top: number; bottom: number };
 
-/** Plays the frames of a draft Live Photo over the photo, at the pace the movie will have. */
-export function LivePreview({ frames, step, playing, area, onReady }: { frames: Item[]; step: number; playing: boolean; area: Area; onReady: (loaded: number) => void }) {
+/** Plays the frames of a draft Live Photo over the photo, at the pace the movie will have, turned by `turn` quarter turns as the movie will be. */
+export function LivePreview({ frames, step, turn, playing, area, onReady }: { frames: Item[]; step: number; turn: number; playing: boolean; area: Area; onReady: (loaded: number) => void }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const cache = useRef(new Map<string, HTMLImageElement>());
   const key = frames.map((f) => f.id).join("\n");
@@ -69,16 +70,21 @@ export function LivePreview({ frames, step, playing, area, onReady }: { frames: 
       el.width = Math.round(w * ratio);
       el.height = Math.round(h * ratio);
       const ctx = el.getContext("2d")!;
-      const scale = Math.min(el.width / img.naturalWidth, el.height / img.naturalHeight);
+      const q = quarter(turn);
+      const fits = turnedSize({ w: img.naturalWidth, h: img.naturalHeight }, q);
+      const scale = Math.min(el.width / fits.w, el.height / fits.h);
       const [dw, dh] = [img.naturalWidth * scale, img.naturalHeight * scale];
       ctx.fillStyle = "#000";
       ctx.fillRect(0, 0, el.width, el.height);
       ctx.imageSmoothingQuality = "high";
-      ctx.drawImage(img, (el.width - dw) / 2, (el.height - dh) / 2, dw, dh);
+      ctx.setTransform(1, 0, 0, 1, el.width / 2, el.height / 2);
+      ctx.rotate((q * Math.PI) / 2);
+      ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
     };
     raf = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(raf);
-  }, [playing, key, step]);
+  }, [playing, key, step, turn]);
 
   return <canvas ref={canvas} className="live-layer" style={{ top: area.top, height: `calc(100% - ${area.top + area.bottom}px)`, display: playing ? undefined : "none" }} />;
 }
@@ -88,6 +94,8 @@ type EditorProps = {
   draft: LiveDraft;
   /** Seconds each frame is shown for. */
   step: number;
+  /** Quarter turns the movie is given. */
+  turn: number;
   playing: boolean;
   /** Frames of the range decoded so far. */
   ready: number;
@@ -104,7 +112,7 @@ type EditorProps = {
 };
 
 /** Timeline of a burst for making a Live Photo: drag the ends to choose the frames, click one to make it the still. */
-export function LiveEditor({ frames, draft, step, playing, ready, saving, heif, onHeif, onChange, onPeek, onPlay, onCancel, onSave }: EditorProps) {
+export function LiveEditor({ frames, draft, step, turn, playing, ready, saving, heif, onHeif, onChange, onPeek, onPlay, onCancel, onSave }: EditorProps) {
   const t = useT();
   const track = useRef<HTMLDivElement>(null);
   const last = frames.length - 1;
@@ -148,6 +156,7 @@ export function LiveEditor({ frames, draft, step, playing, ready, saving, heif, 
   };
 
   const pct = (n: number) => `${(n / frames.length) * 100}%`;
+  const q = quarter(turn);
 
   return (
     <div className="live-editor glass" role="group" aria-label={t.livePhoto}>
@@ -157,7 +166,13 @@ export function LiveEditor({ frames, draft, step, playing, ready, saving, heif, 
       <div className="live-track" ref={track} onClick={pick} {...tipProps(t.liveTrackHint)}>
         <div className="live-slivers">
           {frames.map((f, i) => (
-            <i key={f.id} className={i < draft.start || i > draft.end ? "out" : ""} style={{ backgroundImage: `url("${imageUrl("thumb", f.id, f.mtime, SLIVER_EDGE)}")` }} />
+            <i
+              key={f.id}
+              className={`${i < draft.start || i > draft.end ? "out" : ""} ${q ? "turned" : ""} ${q % 2 ? "quarter" : ""}`}
+              style={q ? ({ "--turn": `${q * 90}deg` } as React.CSSProperties) : undefined}
+            >
+              <img src={imageUrl("thumb", f.id, f.mtime, SLIVER_EDGE)} alt="" decoding="async" draggable={false} />
+            </i>
           ))}
         </div>
         <div className="live-range" style={{ left: pct(draft.start), width: pct(count) }}>

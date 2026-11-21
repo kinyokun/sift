@@ -242,7 +242,8 @@ export const api = {
   /** Seconds each of `frames` is shown for when they play as a Live Photo. */
   livePhotoPace: (frames: string[]) => invoke<number>("live_photo_pace", { frames }),
   /** Writes `frames` as a Live Photo next to them (a still and a MOV of the same name), `key` being the still, a HEIC with `heif` and a JPEG without; resolves to the still's path. */
-  saveLivePhoto: (frames: string[], key: number, heif: boolean) => invoke<string>("save_live_photo", { frames, key, heif }),
+  /** `turn`: the quarter turns the photos were given, put on every frame. */
+  saveLivePhoto: (frames: string[], key: number, turn: number, heif: boolean) => invoke<string>("save_live_photo", { frames, key, turn, heif }),
   setRating: (paths: string[], rating: number) => invoke<"embedded" | "sidecar">("set_rating", { paths, rating }),
   /** Deletes shots, each given as its files: into the trash, or with `forGood` at once. `failed` are the shots,
    * by their place in the list, that are still there, and `reason` is why the first of them is. */

@@ -113,7 +113,7 @@ fn main() {
     }
     if args.first().map(String::as_str) == Some("--live") {
         // probe --live <dir> <jpg|heic> <key> frames...
-        // A Live Photo of the frames, encoded by the system (macOS, Windows).
+        // A Live Photo of the frames, encoded by the system (macOS, Windows); TURN=<quarter turns> turns them.
         use sift_core::live::Still;
         let dir = PathBuf::from(&args[1]);
         std::fs::create_dir_all(&dir).unwrap();
@@ -124,7 +124,8 @@ fn main() {
         let stem = format!("{}_live", frames[key.min(frames.len() - 1)].file_stem().unwrap().to_string_lossy());
         let t = Instant::now();
         let cancel = std::sync::atomic::AtomicBool::new(false);
-        match sift_core::live::export(&frames, &taken, key, format, &dir, &stem, &cancel, |_| {}) {
+        let turn = std::env::var("TURN").ok().and_then(|t| t.parse().ok()).unwrap_or(0);
+        match sift_core::live::export(&frames, &taken, key, turn, format, &dir, &stem, &cancel, |_| {}) {
             Ok((still, movie)) => println!("{} + {} in {:.2}s", still.display(), movie.display(), t.elapsed().as_secs_f64()),
             Err(e) => println!("ERROR {e}"),
         }

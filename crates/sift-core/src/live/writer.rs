@@ -54,18 +54,19 @@ fn bgra(img: &RgbImage) -> Vec<u8> {
 
 /// Writes `frames` (one displayable file per shot, in shooting order) as
 /// `<stem>.JPG` (or `.HEIC`, as `still` says) and `<stem>.MOV` in `dest`.
-/// `key` is the frame that becomes the still. Returns the paths of the still
-/// and the movie; nothing is left behind on failure, and existing files of
-/// those names are never replaced.
+/// `key` is the frame that becomes the still; every frame is turned clockwise
+/// by `turn` quarter turns more than its file says. Returns the paths of the
+/// still and the movie; nothing is left behind on failure, and existing files
+/// of those names are never replaced.
 #[allow(clippy::too_many_arguments)]
-pub fn export(frames: &[PathBuf], taken: &[Option<i64>], key: usize, format: Still, dest: &Path, stem: &str, cancel: &AtomicBool, mut on_frame: impl FnMut(usize)) -> Result<(PathBuf, PathBuf)> {
+pub fn export(frames: &[PathBuf], taken: &[Option<i64>], key: usize, turn: u8, format: Still, dest: &Path, stem: &str, cancel: &AtomicBool, mut on_frame: impl FnMut(usize)) -> Result<(PathBuf, PathBuf)> {
     enough(frames)?;
     let key = key.min(frames.len() - 1);
     staged(dest, stem, format, |still_path, movie_path| {
         let id = CString::new(identifier(&frames[key])).map_err(|_| Error::Malformed)?;
         let (times, duration) = timeline(taken);
         let mut message = Message::new();
-        let first = frame(&frames[0], None)?;
+        let first = frame(&frames[0], None, turn)?;
         let size = first.dimensions();
         let mut pixels = bgra(&first);
         // SAFETY: the strings outlive the calls, `pixels` holds width x height x 4
@@ -82,7 +83,7 @@ pub fn export(frames: &[PathBuf], taken: &[Option<i64>], key: usize, format: Sti
                 }
                 on_frame(i);
                 if i > 0 {
-                    pixels = match frame(path, Some(size)) {
+                    pixels = match frame(path, Some(size), turn) {
                         Ok(img) => bgra(&img),
                         Err(e) => {
                             sift_live_abort(handle);
@@ -101,8 +102,8 @@ pub fn export(frames: &[PathBuf], taken: &[Option<i64>], key: usize, format: Sti
                 return Err(message.error());
             }
             // A HEIF goes to the system as it is, which reads it with everything it
-            // records; of other files, the JPEG that is shown.
-            let picture = if formats::is_heif(&frames[key]) { std::fs::read(&frames[key])? } else { picture(&frames[key])? };
+            // records, unless it is to be turned; of other files, the JPEG that is shown.
+            let picture = if formats::is_heif(&frames[key]) && turn.is_multiple_of(4) { std::fs::read(&frames[key])? } else { picture(&frames[key], turn)? };
             let heic = (format == Still::Heic) as c_int;
             if sift_live_still(picture.as_ptr(), picture.len() as c_long, heic, c_path(still_path)?.as_ptr(), id.as_ptr(), message.ptr(), 512) == 0 {
                 return Err(message.error());

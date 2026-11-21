@@ -91,14 +91,36 @@ pub fn identifier(seed: &Path) -> String {
 
 /// The picture a still is made of: the frame as a webview shows it, which of
 /// a RAW file is the JPEG it embeds, or its development when it embeds none
-/// (Canon's HEIF mode embeds HEVC ones). That one says how it is turned and
-/// no more, so it gets what the RAW file records about the shot.
-fn picture(frame: &Path) -> Result<Vec<u8>> {
+/// (Canon's HEIF mode embeds HEVC ones), turned clockwise by `turn` more
+/// quarter turns. The one of a RAW file says how it is turned and no more,
+/// so it gets what the RAW file records about the shot.
+fn picture(frame: &Path, turn: u8) -> Result<Vec<u8>> {
     let shown = match crate::preview::full(frame) {
         Err(Error::NoPreview) if crate::formats::is_raw(frame) => crate::render::matched(frame, 95)?,
         other => other?,
     };
+    let shown = turned(shown, turn)?;
     Ok(if crate::formats::is_raw(frame) && shown.starts_with(&[0xFF, 0xD8]) { still::described(shown, frame) } else { shown })
+}
+
+/// `picture` (a JPEG, or another picture a webview shows) turned clockwise
+/// by `turn` more quarter turns: a JPEG by its orientation alone where it
+/// can be, so that nothing else about it changes; anything else is encoded
+/// again as a JPEG.
+fn turned(picture: Vec<u8>, turn: u8) -> Result<Vec<u8>> {
+    use crate::{edit, preview};
+    if turn.is_multiple_of(4) {
+        return Ok(picture);
+    }
+    let upright = if picture.starts_with(&[0xFF, 0xD8]) {
+        if let Some(out) = edit::reoriented(&picture, edit::turned_orientation(edit::orientation_of(&picture), turn)) {
+            return Ok(out);
+        }
+        preview::decode_upright(&picture)?
+    } else {
+        image::load_from_memory(&picture)?.to_rgb8()
+    };
+    preview::encode_jpeg(&edit::turn(upright, turn), 95)
 }
 
 /// Whether a burst of this many frames can become a Live Photo.
@@ -113,9 +135,10 @@ fn enough(frames: &[PathBuf]) -> Result<()> {
     Ok(())
 }
 
-/// The frame as the movie shows it: upright and `width` x `height`.
+/// The frame as the movie shows it: upright, turned clockwise by `turn` more
+/// quarter turns, and `width` x `height`.
 #[cfg(any(target_vendor = "apple", windows))]
-fn frame(path: &Path, size: Option<(u32, u32)>) -> Result<image::RgbImage> {
+fn frame(path: &Path, size: Option<(u32, u32)>, turn: u8) -> Result<image::RgbImage> {
     use image::imageops;
     let img = match crate::preview::pixels(path, MOVIE_EDGE) {
         Err(Error::NoPreview) if crate::formats::is_raw(path) => {
@@ -123,6 +146,7 @@ fn frame(path: &Path, size: Option<(u32, u32)>) -> Result<image::RgbImage> {
         }
         other => other?,
     };
+    let img = crate::edit::turn(img, turn);
     // The encoder wants even sides; every frame takes the size of the first.
     let (w, h) = size.unwrap_or((img.width() & !1, img.height() & !1));
     if w < 2 || h < 2 {
@@ -305,6 +329,24 @@ mod tests {
         assert_eq!(a.as_bytes()[14], b'4');
         assert!(a.chars().all(|c| c == '-' || c.is_ascii_digit() || c.is_ascii_uppercase()));
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn a_turned_still_keeps_its_picture_where_it_can() {
+        use crate::{edit, preview};
+        let img = image::RgbImage::from_fn(16, 8, |x, y| image::Rgb([(x * 16) as u8, (y * 32) as u8, 90]));
+        let jpeg = preview::encode_jpeg(&img, 95).unwrap();
+        // A JPEG is turned by its orientation alone: the picture is not encoded again.
+        let once = turned(jpeg.clone(), 1).unwrap();
+        assert_eq!(edit::orientation_of(&once), 6);
+        assert_eq!(preview::decode_upright(&once).unwrap(), edit::turn(preview::decode_upright(&jpeg).unwrap(), 1));
+        // Turned on from there, the turns add up; four are none.
+        assert_eq!(edit::orientation_of(&turned(once, 2).unwrap()), 8);
+        assert_eq!(turned(jpeg.clone(), 4).unwrap(), jpeg);
+        // Anything else becomes a JPEG of the turned picture.
+        let mut png = Vec::new();
+        img.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+        assert_eq!(preview::decode_upright(&turned(png, 3).unwrap()).unwrap().dimensions(), (8, 16));
     }
 
     fn boxed(kind: &[u8; 4], body: &[u8]) -> Vec<u8> {

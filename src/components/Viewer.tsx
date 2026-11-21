@@ -519,6 +519,8 @@ export function Viewer() {
   const copies = stack?.copies;
   const liveSource = useMemo(() => stackFrames.filter((f) => !copies?.[f.id]), [stackFrames, copies]);
   const liveFrames = live ? liveSource.slice(live.start, live.end + 1) : [];
+  // The movie is turned as its still is.
+  const liveTurn = live && liveSource[live.cover] ? turnOf(quarters, liveSource[live.cover]) : 0;
   const startLive = () => {
     if (!current) return;
     const origin = copies?.[current.id] ?? current.id;
@@ -559,7 +561,7 @@ export function Viewer() {
     setSaving(true);
     setPlaying(false);
     try {
-      const saved = await api.saveLivePhoto(liveFrames.map((f) => f.id), live.cover - live.start, settings.liveHeif);
+      const saved = await api.saveLivePhoto(liveFrames.map((f) => f.id), live.cover - live.start, liveTurn, settings.liveHeif);
       endLive();
       useStore.getState().notify(`${info?.platform === "macos" ? "livePhotoSaved" : "livePhotoSavedElsewhere"}:${fileName(saved)}`);
       useStore.getState().refresh();
@@ -1042,7 +1044,7 @@ export function Viewer() {
           )}
         </div>
 
-        {live && <LivePreview frames={liveFrames} step={liveStep} playing={playing} area={insets} onReady={setLiveReady} />}
+        {live && <LivePreview frames={liveFrames} step={liveStep} turn={liveTurn} playing={playing} area={insets} onReady={setLiveReady} />}
         {!live && !compare && !crop && !immersive && leftItem.live && <LiveMovie item={leftItem} area={insets} />}
 
         {pill && <div className={`status-pill glass ${!status ? "quiet" : ""}`}>{pill}</div>}
@@ -1066,6 +1068,7 @@ export function Viewer() {
                   frames={liveSource}
                   draft={live}
                   step={liveStep}
+                  turn={liveTurn}
                   playing={playing}
                   ready={liveReady}
                   saving={saving}

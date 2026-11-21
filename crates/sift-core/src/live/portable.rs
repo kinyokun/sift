@@ -8,10 +8,11 @@ use super::{heic, mov, staged, still, Still};
 use crate::{preview, Error, Result};
 use std::path::{Path, PathBuf};
 
-/// The picture of the still as a JPEG: the frame's own file when it is one,
-/// so that nothing it records is lost, and the JPEG that is shown otherwise.
-fn cover(frame: &Path) -> Result<Vec<u8>> {
-    let shown = super::picture(frame)?;
+/// The picture of the still as a JPEG, turned clockwise by `turn` more
+/// quarter turns: the frame's own file when it is one, so that nothing it
+/// records is lost, and the JPEG that is shown otherwise.
+fn cover(frame: &Path, turn: u8) -> Result<Vec<u8>> {
+    let shown = super::picture(frame, turn)?;
     if shown.starts_with(&[0xFF, 0xD8]) {
         return Ok(shown);
     }
@@ -43,33 +44,34 @@ pub fn from_movie(movie: &Path, cover: &Path, identifier: &str, moment: f64, for
     }
     staged(dest, stem, format, |still_path, movie_path| {
         mov::remux(movie, movie_path, identifier, moment, None)?;
-        Ok(std::fs::write(still_path, pictured(&self::cover(cover)?, identifier, format)?)?)
+        Ok(std::fs::write(still_path, pictured(&self::cover(cover, 0)?, identifier, format)?)?)
     })
 }
 
 /// Writes `frames` (one displayable file per shot, in shooting order) as
 /// `<stem>.JPG` (or `.HEIC`, as `format` says) and `<stem>.MOV` in `dest`.
-/// `key` is the frame that becomes the still. Returns the paths of the still
-/// and the movie; nothing is left behind on failure, and existing files of
-/// those names are never replaced. A JPEG still is the frame's own JPEG with
-/// the identifier added, not a new encoding.
+/// `key` is the frame that becomes the still; every frame is turned clockwise
+/// by `turn` quarter turns more than its file says. Returns the paths of the
+/// still and the movie; nothing is left behind on failure, and existing files
+/// of those names are never replaced. A JPEG still is the frame's own JPEG
+/// with the identifier added (and another orientation), not a new encoding.
 #[cfg(windows)]
 #[allow(clippy::too_many_arguments)]
-pub fn export(frames: &[PathBuf], taken: &[Option<i64>], key: usize, format: Still, dest: &Path, stem: &str, cancel: &std::sync::atomic::AtomicBool, mut on_frame: impl FnMut(usize)) -> Result<(PathBuf, PathBuf)> {
+pub fn export(frames: &[PathBuf], taken: &[Option<i64>], key: usize, turn: u8, format: Still, dest: &Path, stem: &str, cancel: &std::sync::atomic::AtomicBool, mut on_frame: impl FnMut(usize)) -> Result<(PathBuf, PathBuf)> {
     use super::{enough, frame, identifier, mf, timeline};
     use std::sync::atomic::Ordering;
     enough(frames)?;
     let key = key.min(frames.len() - 1);
     staged(dest, stem, format, |still_path, movie_path| {
         let id = identifier(&frames[key]);
-        let cover = cover(&frames[key])?;
+        let cover = cover(&frames[key], turn)?;
         let (times, duration) = timeline(taken);
         let step = duration / frames.len() as f64;
         let mut encode = || {
             // Media Foundation writes to a local file of its own; the destination
             // may be a network share or a path it does not take.
             let encoded = Scratch(std::env::temp_dir().join(format!("sift-live-{}-{id}.mp4", std::process::id())));
-            let first = frame(&frames[0], None)?;
+            let first = frame(&frames[0], None, turn)?;
             let size = first.dimensions();
             let mut encoder = mf::Encoder::new(&encoded.0, size, step)?;
             let mut first = Some(first);
@@ -80,7 +82,7 @@ pub fn export(frames: &[PathBuf], taken: &[Option<i64>], key: usize, format: Sti
                 on_frame(i);
                 let pixels = match first.take() {
                     Some(pixels) => pixels,
-                    None => frame(path, Some(size))?,
+                    None => frame(path, Some(size), turn)?,
                 };
                 encoder.write(&nv12(&pixels), times[i])?;
             }
@@ -104,7 +106,7 @@ pub fn export(frames: &[PathBuf], taken: &[Option<i64>], key: usize, format: Sti
 /// Without an encoder for the movie there is no Live Photo to write.
 #[cfg(not(any(target_vendor = "apple", windows)))]
 #[allow(clippy::too_many_arguments)]
-pub fn export(_: &[PathBuf], _: &[Option<i64>], _: usize, _: Still, _: &Path, _: &str, _: &std::sync::atomic::AtomicBool, _: impl FnMut(usize)) -> Result<(PathBuf, PathBuf)> {
+pub fn export(_: &[PathBuf], _: &[Option<i64>], _: usize, _: u8, _: Still, _: &Path, _: &str, _: &std::sync::atomic::AtomicBool, _: impl FnMut(usize)) -> Result<(PathBuf, PathBuf)> {
     Err(Error::Unsupported("Live Photos cannot be made on this system"))
 }
 
@@ -250,7 +252,7 @@ mod tests {
         for (name, size, count, gap, format) in [("WIDE", (1920, 1280), 12u32, 50i64, Still::Jpeg), ("TALL", (1280, 1920), 12, 8, Still::Heic)] {
             let frames = burst(name, size, count);
             let taken: Vec<Option<i64>> = (0..count as i64).map(|i| Some(i * gap)).collect();
-            let (still, movie) = export(&frames, &taken, 5, format, &dir, &format!("{name}_live"), &going, |_| {}).unwrap();
+            let (still, movie) = export(&frames, &taken, 5, 0, format, &dir, &format!("{name}_live"), &going, |_| {}).unwrap();
             assert_eq!(still.extension().unwrap().to_str(), Some(format.ext()));
             assert_eq!(movie_of(&still, &movie), Some(movie.clone()));
             // What the encoder wrote, the decoder here reads back.
@@ -270,7 +272,7 @@ mod tests {
         let taken: Vec<Option<i64>> = (0..5).map(|i| Some(i * 100)).collect();
 
         let mut seen = Vec::new();
-        let (still, movie) = export(&frames, &taken, 2, Still::Jpeg, &dir, "DSC_0002_live", &going, |i| seen.push(i)).unwrap();
+        let (still, movie) = export(&frames, &taken, 2, 0, Still::Jpeg, &dir, "DSC_0002_live", &going, |i| seen.push(i)).unwrap();
         assert_eq!(seen, [0, 1, 2, 3, 4]);
         assert_eq!((still.clone(), movie.clone()), (dir.join("DSC_0002_live.JPG"), dir.join("DSC_0002_live.MOV")));
         assert_eq!(movie_of(&still, &movie), Some(movie.clone()));
@@ -283,9 +285,9 @@ mod tests {
 
         // No pair over another, and stopping leaves nothing.
         let listed = || std::fs::read_dir(&dir).unwrap().count();
-        assert!(export(&frames, &taken, 2, Still::Jpeg, &dir, "DSC_0002_live", &going, |_| {}).is_err());
+        assert!(export(&frames, &taken, 2, 0, Still::Jpeg, &dir, "DSC_0002_live", &going, |_| {}).is_err());
         going.store(true, std::sync::atomic::Ordering::Relaxed);
-        assert!(matches!(export(&frames, &taken, 2, Still::Jpeg, &dir, "other", &going, |_| {}), Err(Error::Cancelled)));
+        assert!(matches!(export(&frames, &taken, 2, 0, Still::Jpeg, &dir, "other", &going, |_| {}), Err(Error::Cancelled)));
         assert_eq!(listed(), 7);
         std::fs::remove_dir_all(&dir).unwrap();
     }

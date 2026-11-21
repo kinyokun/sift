@@ -341,8 +341,9 @@ pub async fn live_photo_pace(app: AppHandle, frames: Vec<String>) -> CmdResult<f
 /// Writes a burst as a Live Photo (a still and a movie of the same name that
 /// belong together) next to its frames. `frames` are the displayed files in
 /// shooting order and `key` is the one that becomes the still, a HEIC with
-/// `heif` and a JPEG without. Returns the path of the still.
-pub fn live_photo(state: &AppState, frames: &[String], key: usize, heif: bool, on_frame: impl FnMut(usize)) -> CmdResult<String> {
+/// `heif` and a JPEG without; `turn` is the quarter turns the photos were
+/// given while culling. Returns the path of the still.
+pub fn live_photo(state: &AppState, frames: &[String], key: usize, turn: u8, heif: bool, on_frame: impl FnMut(usize)) -> CmdResult<String> {
     use sift_core::live::Still;
     let files = frames.iter().map(|p| state.check(p)).collect::<Result<Vec<_>, _>>()?;
     let key = key.min(files.len().saturating_sub(1));
@@ -359,16 +360,16 @@ pub fn live_photo(state: &AppState, frames: &[String], key: usize, heif: bool, o
     let taken = taken_at(state, frames);
     state.cancel.store(false, AtomicOrdering::Relaxed);
     let format = if heif { Still::Heic } else { Still::Jpeg };
-    let (still, _) = sift_core::live::export(&files, &taken, key, format, dest, &stem, &state.cancel, on_frame).map_err(err)?;
+    let (still, _) = sift_core::live::export(&files, &taken, key, turn, format, dest, &stem, &state.cancel, on_frame).map_err(err)?;
     Ok(still.to_string_lossy().into_owned())
 }
 
 #[tauri::command]
-pub async fn save_live_photo(app: AppHandle, frames: Vec<String>, key: usize, heif: bool) -> CmdResult<String> {
+pub async fn save_live_photo(app: AppHandle, frames: Vec<String>, key: usize, turn: Option<u8>, heif: bool) -> CmdResult<String> {
     blocking(move || {
         let total = frames.len();
         let mut emit = progress(&app);
-        live_photo(&app.state::<AppState>(), &frames, key, heif, |done| emit(Progress { done, total, name: String::new() }))
+        live_photo(&app.state::<AppState>(), &frames, key, turn.unwrap_or(0), heif, |done| emit(Progress { done, total, name: String::new() }))
     })
     .await
 }

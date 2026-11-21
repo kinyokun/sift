@@ -2409,10 +2409,17 @@ kbd {
 }
 
 .live-slivers i {
+  position: relative;
   flex: 1;
   min-width: 0;
-  background-size: cover;
-  background-position: center;
+  overflow: hidden;
+}
+
+.live-slivers img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .live-slivers i.out {
