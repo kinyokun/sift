@@ -67,6 +67,7 @@ fn targets(shots: &[Vec<PathBuf>]) -> Vec<Vec<PathBuf>> {
         .collect()
 }
 
+#[cfg(any(target_os = "macos", windows))]
 fn exists(path: &Path) -> bool {
     path.symlink_metadata().is_ok()
 }
