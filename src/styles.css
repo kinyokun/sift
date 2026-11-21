@@ -571,6 +571,7 @@ kbd {
   box-shadow: var(--shadow);
   z-index: 40;
   animation: pop 0.12s ease-out;
+  max-width: calc(100vw - 16px);
   max-height: min(70vh, 560px);
   overflow-y: auto;
   font-size: 13px;
@@ -581,12 +582,12 @@ kbd {
   right: auto;
 }
 
+/* Centred on its button by `useInsideWindow`. */
 .menu.up {
   top: auto;
   bottom: calc(100% + 12px);
   right: auto;
   left: 50%;
-  margin-left: -100px;
 }
 
 .menu button {
@@ -611,6 +612,12 @@ kbd {
 
 .menu button.danger:hover {
   background: var(--red);
+}
+
+.menu-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .menu-check {
@@ -3191,10 +3198,6 @@ textarea.text {
 
 .tag-menu {
   width: 252px;
-}
-
-.tag-menu.up {
-  margin-left: -126px;
 }
 
 .tag-menu > button:disabled {

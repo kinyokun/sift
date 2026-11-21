@@ -1,15 +1,13 @@
-import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type Ref } from "react";
+import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
 import type { Item, Tag } from "../lib/api";
 import { useT } from "../lib/i18n";
 import { TAG_ACTIONS, keyCaps } from "../lib/shortcuts";
 import { TAG_COLORS, tagsOf, useStore } from "../lib/store";
-import { tipProps } from "../ui/controls";
+import { tipProps, useInsideWindow } from "../ui/controls";
 import { Icon } from "../ui/Icon";
 
 /** How many remembered names are offered at once. */
 const MAX_SUGGESTIONS = 6;
-/** The least room kept between the menu and the edge of the window, in pixels. */
-const EDGE = 8;
 
 export function TagDot({ color }: { color: number }) {
   return <i className="tag-dot" style={{ background: TAG_COLORS[color % TAG_COLORS.length] }} />;
@@ -42,17 +40,7 @@ export function TagMenu(props: { targets: Item[]; label: string; up?: boolean; k
   const input = useRef<HTMLInputElement>(null);
   useImperativeHandle(props.ref, () => ({ open: () => setOpen(true) }), []);
 
-  // The menu is wider than the ones beside it: near a screen edge it is moved back inside.
-  useLayoutEffect(() => {
-    const el = menu.current;
-    if (!open || !el) return;
-    el.style.translate = "";
-    const r = el.getBoundingClientRect();
-    // The rectangle is still growing with the opening animation; its centre is not.
-    const left = (r.left + r.right - el.offsetWidth) / 2;
-    const out = Math.max(0, left + el.offsetWidth - (window.innerWidth - EDGE)) || Math.min(0, left - EDGE);
-    if (out) el.style.translate = `${-out}px 0`;
-  }, [open]);
+  useInsideWindow(menu, open);
 
   useEffect(() => {
     if (!open) return;

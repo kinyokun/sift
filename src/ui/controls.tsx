@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { Icon } from "./Icon";
 
 /** What a control says on hover, in the app's own tooltip (`Tips`): its name and, as key caps, the
@@ -196,12 +196,33 @@ export function IconButton(props: {
   );
 }
 
+/** The least room kept between a menu and the edge of the window, in pixels. */
+const EDGE = 8;
+
+/** Keeps an open menu inside the window: one that opens upwards is centred on its button whatever its
+ * width, and any menu that would cross an edge of the window is moved back inside. */
+export function useInsideWindow(menu: RefObject<HTMLElement | null>, open: boolean) {
+  useLayoutEffect(() => {
+    const el = menu.current;
+    if (!open || !el) return;
+    el.style.translate = "";
+    if (el.classList.contains("up")) el.style.marginLeft = `${-el.offsetWidth / 2}px`;
+    const r = el.getBoundingClientRect();
+    // The rectangle is still growing with the opening animation; its centre is not.
+    const left = (r.left + r.right - el.offsetWidth) / 2;
+    const out = Math.max(0, left + el.offsetWidth - (window.innerWidth - EDGE)) || Math.min(0, left - EDGE);
+    if (out) el.style.translate = `${-out}px 0`;
+  }, [menu, open]);
+}
+
 export type MenuItem = { label: string; onSelect: () => void; checked?: boolean; icon?: string; danger?: boolean } | "divider";
 
 /** A button that opens a small popover menu. */
 export function Menu(props: { button: ReactNode; label: string; items: MenuItem[]; align?: "left" | "right"; up?: boolean; className?: string; keys?: string[] }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
+  useInsideWindow(menu, open);
   useEffect(() => {
     if (!open) return;
     const close = (e: Event) => {
@@ -225,7 +246,7 @@ export function Menu(props: { button: ReactNode; label: string; items: MenuItem[
         {props.button}
       </button>
       {open && (
-        <div className={`menu solid ${props.align === "left" ? "left" : "right"} ${props.up ? "up" : ""}`} role="menu">
+        <div ref={menu} className={`menu solid ${props.align === "left" ? "left" : "right"} ${props.up ? "up" : ""}`} role="menu">
           {props.items.map((item, i) =>
             item === "divider" ? (
               <hr key={i} />
@@ -240,7 +261,7 @@ export function Menu(props: { button: ReactNode; label: string; items: MenuItem[
                 }}
               >
                 <span className="menu-check">{item.checked ? <Icon name="check" size={15} /> : item.icon ? <Icon name={item.icon} size={16} /> : null}</span>
-                {item.label}
+                <span className="menu-label">{item.label}</span>
               </button>
             ),
           )}
