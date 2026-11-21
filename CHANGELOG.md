@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.6.6] - 2026-11-21
+
 ### 新增
 
 - 佳能 R8 等相机拍的 CRAW 文件（预览图是 HEIF 而不是 JPG）全面可用：以前只有缩略图能显示，尺寸显示成 0×0，眼部检测、导出、拖到别的程序、做实况照片都会失败。现在凡是需要画面的地方都直接冲洗 RAW，尺寸按 EXIF 记录的显示
@@ -289,7 +291,8 @@
 - 导出（复制 / 重命名 / 找回 RAW / 参数相框）、局域网传输、自定义快捷键
 - 中文 / 英文界面
 
-[Unreleased]: https://github.com/kinyokun/sift/compare/v0.6.5...HEAD
+[Unreleased]: https://github.com/kinyokun/sift/compare/v0.6.6...HEAD
+[0.6.6]: https://github.com/kinyokun/sift/compare/v0.6.5...v0.6.6
 [0.6.5]: https://github.com/kinyokun/sift/compare/v0.6.4...v0.6.5
 [0.6.4]: https://github.com/kinyokun/sift/compare/v0.6.3...v0.6.4
 [0.6.3]: https://github.com/kinyokun/sift/compare/v0.6.2...v0.6.3
