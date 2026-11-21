@@ -90,10 +90,14 @@ pub fn identifier(seed: &Path) -> String {
 }
 
 /// The picture a still is made of: the frame as a webview shows it, which of
-/// a RAW file is the JPEG it embeds. That one says how it is turned and no
-/// more, so it gets what the RAW file records about the shot.
+/// a RAW file is the JPEG it embeds, or its development when it embeds none
+/// (Canon's HEIF mode embeds HEVC ones). That one says how it is turned and
+/// no more, so it gets what the RAW file records about the shot.
 fn picture(frame: &Path) -> Result<Vec<u8>> {
-    let shown = crate::preview::full(frame)?;
+    let shown = match crate::preview::full(frame) {
+        Err(Error::NoPreview) if crate::formats::is_raw(frame) => crate::render::matched(frame, 95)?,
+        other => other?,
+    };
     Ok(if crate::formats::is_raw(frame) && shown.starts_with(&[0xFF, 0xD8]) { still::described(shown, frame) } else { shown })
 }
 
@@ -113,7 +117,12 @@ fn enough(frames: &[PathBuf]) -> Result<()> {
 #[cfg(any(target_vendor = "apple", windows))]
 fn frame(path: &Path, size: Option<(u32, u32)>) -> Result<image::RgbImage> {
     use image::imageops;
-    let img = crate::preview::pixels(path, MOVIE_EDGE)?;
+    let img = match crate::preview::pixels(path, MOVIE_EDGE) {
+        Err(Error::NoPreview) if crate::formats::is_raw(path) => {
+            crate::preview::fit(crate::preview::decode_upright_at(&crate::render::matched(path, 95)?, MOVIE_EDGE)?, MOVIE_EDGE)
+        }
+        other => other?,
+    };
     // The encoder wants even sides; every frame takes the size of the first.
     let (w, h) = size.unwrap_or((img.width() & !1, img.height() & !1));
     if w < 2 || h < 2 {

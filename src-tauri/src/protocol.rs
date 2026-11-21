@@ -24,16 +24,19 @@ pub fn developed(state: &AppState, path: &Path) -> sift_core::Result<Vec<u8>> {
     cached(&cache_file(&state.cache_dir, "dev4", path, 0), || render::matched(path, DEVELOP_QUALITY).map_err(render::explain))
 }
 
-/// A scaled rendition of `path`. RAW files whose previews are not JPEG (Canon
-/// writes HEVC ones in HDR PQ mode) are developed once and scaled from that.
-fn scaled(state: &AppState, path: &Path, edge: u32, quality: u8) -> sift_core::Result<Vec<u8>> {
-    match preview::scaled(path, edge, quality) {
-        Err(Error::NoPreview) if formats::is_raw(path) => {
-            let img = preview::decode_upright_at(&developed(state, path)?, edge)?;
-            preview::encode_jpeg(&preview::fit(img, edge), quality)
-        }
+/// Upright pixels of `path` with a long edge of at most `edge`, as
+/// [`preview::pixels`]. RAW files whose previews are not JPEG (Canon writes
+/// HEVC ones in HDR PQ mode) are developed once and scaled from that.
+pub fn pixels(state: &AppState, path: &Path, edge: u32) -> sift_core::Result<image::RgbImage> {
+    match preview::pixels(path, edge) {
+        Err(Error::NoPreview) if formats::is_raw(path) => Ok(preview::fit(preview::decode_upright_at(&developed(state, path)?, edge)?, edge)),
         other => other,
     }
+}
+
+/// A scaled rendition of `path`, as [`pixels`].
+fn scaled(state: &AppState, path: &Path, edge: u32, quality: u8) -> sift_core::Result<Vec<u8>> {
+    preview::encode_jpeg(&pixels(state, path, edge)?, quality)
 }
 
 /// The RAW rendered without the in-camera look, cached on disk.
@@ -100,7 +103,7 @@ const CLIP_EDGE: u32 = 1280;
 /// histogram and the clipping warning.
 pub fn analysis_pixels(state: &AppState, path: &Path, look: Option<&str>, edge: u32, size: u32) -> sift_core::Result<image::RgbImage> {
     match look {
-        None => preview::pixels(path, size),
+        None => pixels(state, path, size),
         // The viewer shows the cached "orig" rendition here, not a look render.
         Some(NO_LOOK) if formats::is_raw(path) && state.nikon_for(path).is_none() => preview::decode_upright_at(&original(state, path)?, size),
         Some(look) => preview::decode_upright_at(&look_jpeg(state, path, look, edge.min(MAX_LOOK_EDGE))?, size),

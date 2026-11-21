@@ -56,8 +56,9 @@ pub async fn drag_out(window: tauri::WebviewWindow, paths: Vec<String>, icon: St
         let state = window.state::<AppState>();
         let files = paths.iter().map(|p| state.check(p)).collect::<Result<Vec<PathBuf>, _>>()?;
         let icon = state.check(&icon)?;
+        let app = window.app_handle().clone();
         let picture = tauri::async_runtime::spawn_blocking(move || {
-            let img = sift_core::preview::pixels(&icon, DRAG_ICON_EDGE).ok()?;
+            let img = crate::protocol::pixels(&app.state::<AppState>(), &icon, DRAG_ICON_EDGE).ok()?;
             let img = sift_core::edit::shrink(sift_core::edit::turn(img, turn), DRAG_ICON_EDGE);
             sift_core::preview::encode_jpeg(&img, 85).ok()
         })

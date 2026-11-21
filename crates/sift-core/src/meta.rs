@@ -26,7 +26,8 @@ pub struct Meta {
     /// The file keeps its Picture Control where `nikon::record_look` can write
     /// another one, tone curve included.
     pub look_recordable: bool,
-    /// Pixel size of the largest embedded preview, before rotation.
+    /// Pixel size of the largest embedded preview, before rotation; of the
+    /// development when a RAW embeds no JPEG.
     pub preview_width: u32,
     pub preview_height: u32,
     /// True when a RAW only embeds a small preview and needs a full decode to check focus.
@@ -162,6 +163,13 @@ pub fn read(path: &Path) -> Result<Meta> {
             exif.height = Some(h);
         }
     }
+    let low_res = raw && pw.max(ph) <= LOW_RES_EDGE;
+    // A RAW with no JPEG to show (Canon's HEIF mode embeds HEVC ones) is shown developed, at the size it records.
+    if raw && pw == 0 {
+        if let (Some(w), Some(h)) = (exif.width, exif.height) {
+            (pw, ph) = (w, h);
+        }
+    }
     Ok(Meta {
         format: p.format,
         raw,
@@ -174,7 +182,7 @@ pub fn read(path: &Path) -> Result<Meta> {
         level,
         preview_width: pw,
         preview_height: ph,
-        low_res: raw && pw.max(ph) <= LOW_RES_EDGE,
+        low_res,
         hdr: hdr::of(&src, &p),
     })
 }

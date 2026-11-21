@@ -46,10 +46,11 @@ fn every_sample_has_metadata_and_a_full_size_preview() {
 fn thumbnails_decode_upright() {
     for f in samples() {
         let m = meta::read(&f).unwrap();
-        if m.preview_width == 0 {
-            continue;
-        }
-        let img = preview::pixels(&f, 320).unwrap_or_else(|e| panic!("{}: {e}", name(&f)));
+        let img = match preview::pixels(&f, 320) {
+            // Canon files shot with HDR PQ embed HEVC previews instead of JPEG.
+            Err(sift_core::Error::NoPreview) if m.low_res => continue,
+            img => img.unwrap_or_else(|e| panic!("{}: {e}", name(&f))),
+        };
         assert_eq!(img.width().max(img.height()), 320, "{}", name(&f));
         let landscape = (m.preview_width >= m.preview_height) != (m.orientation >= 5);
         assert_eq!(img.width() >= img.height(), landscape, "{}: orientation {}", name(&f), m.orientation);

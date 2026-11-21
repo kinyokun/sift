@@ -451,7 +451,7 @@ pub fn eyes_of(state: &AppState, path: String, af: &[AfBox]) -> CmdResult<Option
         return Ok(*hit);
     }
     let detector = state.detector().ok_or("face model failed to load")?;
-    let img = preview::pixels(&file, EYE_SEARCH_EDGE).map_err(err)?;
+    let img = protocol::pixels(state, &file, EYE_SEARCH_EDGE).map_err(err)?;
     let faces = detector.detect(&img).map_err(err)?;
     let focus: Vec<(f32, f32)> = af.iter().filter(|b| b.focused).map(|b| (b.x + b.w / 2.0, b.y + b.h / 2.0)).collect();
     let inside = |b: [f32; 4], p: &(f32, f32)| p.0 >= b[0] && p.0 <= b[0] + b[2] && p.1 >= b[1] && p.1 <= b[1] + b[3];
@@ -1145,7 +1145,7 @@ const PREVIEW_EDGE: u32 = 1200;
 /// and, given frame options, framed.
 pub fn export_preview(state: &AppState, path: &str, options: Option<&FrameOptions>, output: &Output, turn: u8, crop: Option<&Crop>) -> CmdResult<Vec<u8>> {
     let file = state.check(path)?;
-    let img = shaped(preview::pixels(&file, PREVIEW_EDGE).map_err(err)?, turn % 4, crop.and_then(crop_parts));
+    let img = shaped(protocol::pixels(state, &file, PREVIEW_EDGE).map_err(err)?, turn % 4, crop.and_then(crop_parts));
     let shown = Output { size: PREVIEW_EDGE, ..output.clone() };
     let mut img = finished(img, &shown, mark_of(state, output)?.as_ref(), &file);
     if let Some(options) = options {
