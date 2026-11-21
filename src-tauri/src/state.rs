@@ -3,7 +3,7 @@ use sift_core::face::Detector;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::UNIX_EPOCH;
 
@@ -148,22 +148,40 @@ pub fn cache_file(cache_dir: &Path, kind: &str, path: &Path, edge: u32) -> PathB
     cache_dir.join(kind).join(format!("{:02x}", h & 0xff)).join(format!("{h:016x}.jpg"))
 }
 
-/// Returns the cached bytes, or produces, stores and returns them.
+/// Returns the cached bytes, or produces, stores and returns them. Everything
+/// cached is a JPEG; one cut short (the app stopped while it was written, or
+/// the disk lost it) is made again.
 pub fn cached(file: &Path, make: impl FnOnce() -> sift_core::Result<Vec<u8>>) -> sift_core::Result<Vec<u8>> {
     if let Ok(data) = fs::read(file) {
-        if !data.is_empty() {
+        if whole_jpeg(&data) {
             return Ok(data);
         }
     }
     let data = make()?;
+    put_whole(file, &data);
+    Ok(data)
+}
+
+/// A JPEG from its start to its end marker; previews taken from RAW files may
+/// be padded with zeros after it.
+fn whole_jpeg(data: &[u8]) -> bool {
+    let end = data.iter().rposition(|&b| b != 0).map_or(0, |i| i + 1);
+    data.starts_with(&[0xFF, 0xD8]) && data[..end].ends_with(&[0xFF, 0xD9])
+}
+
+/// Writes `data` to `file` whole or not at all. Each write goes through a
+/// temporary file of its own: the grid and the thumbnails made ahead can make
+/// the same entry at once, and a shared one would mix their bytes.
+pub fn put_whole(file: &Path, data: &[u8]) {
+    static WRITES: AtomicU64 = AtomicU64::new(0);
     if let Some(dir) = file.parent() {
         let _ = fs::create_dir_all(dir);
     }
-    let tmp = file.with_extension(format!("tmp{}", std::process::id()));
-    if fs::write(&tmp, &data).is_ok() && fs::rename(&tmp, file).is_err() {
+    let n = WRITES.fetch_add(1, Ordering::Relaxed);
+    let tmp = file.with_extension(format!("tmp{}-{n}", std::process::id()));
+    if fs::write(&tmp, data).is_err() || fs::rename(&tmp, file).is_err() {
         let _ = fs::remove_file(&tmp);
     }
-    Ok(data)
 }
 
 pub fn dir_size(dir: &Path) -> u64 {
@@ -176,4 +194,51 @@ pub fn dir_size(dir: &Path) -> u64 {
             })
             .sum()
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn jpeg(len: usize) -> Vec<u8> {
+        let mut data = vec![0xFF, 0xD8];
+        data.resize(len - 2, 0x55);
+        data.extend([0xFF, 0xD9]);
+        data
+    }
+
+    #[test]
+    fn a_jpeg_cut_short_is_made_again() {
+        let dir = std::env::temp_dir().join(format!("sift-cached-{}", std::process::id()));
+        let file = dir.join("a.jpg");
+        let whole = jpeg(1000);
+        put_whole(&file, &whole[..600]);
+        assert_eq!(cached(&file, || Ok(whole.clone())).unwrap(), whole);
+        assert_eq!(fs::read(&file).unwrap(), whole);
+        // What is whole is taken as it is, padding after the end marker too.
+        let padded = [whole.clone(), vec![0; 64]].concat();
+        put_whole(&file, &padded);
+        assert_eq!(cached(&file, || panic!("made again")).unwrap(), padded);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn entries_made_at_once_are_not_mixed() {
+        let dir = std::env::temp_dir().join(format!("sift-cached-mixed-{}", std::process::id()));
+        let file = dir.join("b.jpg");
+        let (long, short) = (jpeg(4 << 20), jpeg(1 << 10));
+        for _ in 0..20 {
+            let _ = fs::remove_file(&file);
+            std::thread::scope(|s| {
+                for k in 0..8 {
+                    let (file, data) = (&file, if k % 2 == 0 { &long } else { &short });
+                    s.spawn(move || put_whole(file, data));
+                }
+            });
+            let got = fs::read(&file).unwrap();
+            assert!(got == long || got == short, "{} bytes, neither entry", got.len());
+        }
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 1, "temporary files left behind");
+        let _ = fs::remove_dir_all(&dir);
+    }
 }

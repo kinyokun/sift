@@ -216,13 +216,7 @@ pub fn briefs_of(state: &AppState, paths: &[String], fresh: bool) -> Vec<meta::B
 
 fn store(file: &Path, folder: &HashMap<String, Entry>) {
     let Ok(data) = serde_json::to_vec(folder) else { return };
-    if let Some(dir) = file.parent() {
-        let _ = fs::create_dir_all(dir);
-    }
-    let tmp = file.with_extension(format!("tmp{}", std::process::id()));
-    if fs::write(&tmp, data).is_ok() && fs::rename(&tmp, file).is_err() {
-        let _ = fs::remove_file(&tmp);
-    }
+    crate::state::put_whole(file, &data);
 }
 
 #[cfg(test)]
