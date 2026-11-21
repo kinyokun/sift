@@ -977,9 +977,10 @@ for (const [name, size] of [["level", desktop], ["level-phone", phone]]) {
     await field.fill("65:24");
     await field.press("Enter");
     await page.waitForTimeout(300);
+    // The rectangle's own size: its box on screen also takes in half the stroke on every side.
     const aspect = async () => {
-      const b = await page.locator(".overlay .crop-frame").boundingBox();
-      return (b.width / b.height).toFixed(3);
+      const f = page.locator(".overlay .crop-frame");
+      return (Number(await f.getAttribute("width")) / Number(await f.getAttribute("height"))).toFixed(3);
     };
     console.log(`[${name}] typed 65:24: field ${await field.inputValue()}, crop aspect ${await aspect()} (want ${(65 / 24).toFixed(3)})`);
     await shot("ratio-typed");
