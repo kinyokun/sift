@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.6.7] - 2026-11-22
+
 ### 修复
 
 - 按 E 放大到眼睛时立刻打星，可能提示“星级写入失败”：找眼睛时 Sift 正在读这张照片，而在 Windows 上，照片在 SD 卡、移动硬盘（exFAT、FAT32）或网络共享上时，正被打开的文件不能被替换，给还没有星级信息的 JPG 打星正好要替换文件。现在读照片时先把数据读出来、关掉文件再解码，打星前也先关掉自己打开的文件；照片被别的程序（资源管理器、杀毒软件等）短暂占用时，会稍等一下再试，最多等 1.5 秒
@@ -298,7 +300,8 @@
 - 导出（复制 / 重命名 / 找回 RAW / 参数相框）、局域网传输、自定义快捷键
 - 中文 / 英文界面
 
-[Unreleased]: https://github.com/kinyokun/sift/compare/v0.6.6...HEAD
+[Unreleased]: https://github.com/kinyokun/sift/compare/v0.6.7...HEAD
+[0.6.7]: https://github.com/kinyokun/sift/compare/v0.6.6...v0.6.7
 [0.6.6]: https://github.com/kinyokun/sift/compare/v0.6.5...v0.6.6
 [0.6.5]: https://github.com/kinyokun/sift/compare/v0.6.4...v0.6.5
 [0.6.4]: https://github.com/kinyokun/sift/compare/v0.6.3...v0.6.4
