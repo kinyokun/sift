@@ -228,8 +228,9 @@ export function Menu(props: { button: ReactNode; label: string; items: MenuItem[
     const close = (e: Event) => {
       if (e instanceof KeyboardEvent) {
         if (e.key !== "Escape") return;
-        // Escape closes only the menu, not the screen underneath.
+        // Escape closes only the menu, not the screen underneath, nor full screen.
         e.stopPropagation();
+        e.preventDefault();
         setOpen(false);
       } else if (!ref.current?.contains(e.target as Node)) setOpen(false);
     };
@@ -278,7 +279,9 @@ export function Sheet(props: { title: string; onClose?: () => void; children: Re
       // A field that puts back what was typed on Escape gets it first.
       if (e.key === "Escape" && !(e.target as Element | null)?.closest?.("[data-own-escape]")) {
         e.stopPropagation();
-        props.onClose?.();
+        if (!props.onClose) return;
+        e.preventDefault();
+        props.onClose();
       }
     };
     window.addEventListener("keydown", onKey, true);

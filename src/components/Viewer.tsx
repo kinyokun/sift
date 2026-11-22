@@ -779,6 +779,8 @@ export function Viewer() {
         return confirmCrop();
       }
       if (e.key === "Escape") {
+        // An Escape the page leaves alone goes back to macOS, which takes a full-screen window out of full screen.
+        e.preventDefault();
         if (crop) chooseCrop(null);
         else if (live) endLive();
         else if (immersive) setImmersive(false);

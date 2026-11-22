@@ -39,6 +39,24 @@ fn transfer_stop(state: State<AppState>) {
     }
 }
 
+/// Gives the keyboard back to the page whenever the window may have taken it.
+/// Leaving full screen makes tao hand it to its own view, which wry has taken
+/// out of the window, so no key reaches the page until a click (tao 0.37 still
+/// does). Tao queues that on the main queue before it reports the resize; this
+/// goes in the queue behind it, as run straight away it loses now and then.
+#[cfg(target_os = "macos")]
+fn keep_keys_on_webview(window: &tauri::WebviewWindow) {
+    let webview: tauri::Webview = window.as_ref().clone();
+    window.on_window_event(move |event| {
+        if matches!(event, tauri::WindowEvent::Focused(true) | tauri::WindowEvent::Resized(_)) {
+            let webview = webview.clone();
+            dispatch2::DispatchQueue::main().exec_async(move || {
+                let _ = webview.set_focus();
+            });
+        }
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default()
@@ -55,6 +73,10 @@ pub fn run() {
             std::fs::create_dir_all(&data)?;
             app.manage(AppState::new(cache, data));
             menu::restore(app.handle());
+            #[cfg(target_os = "macos")]
+            if let Some(window) = app.get_webview_window("main") {
+                keep_keys_on_webview(&window);
+            }
             #[cfg(desktop)]
             update::startup(app.handle());
             #[cfg(all(desktop, debug_assertions))]

@@ -49,8 +49,9 @@ export function TagMenu(props: { targets: Item[]; label: string; up?: boolean; k
     const close = (e: Event) => {
       if (e instanceof KeyboardEvent) {
         if (e.key !== "Escape") return;
-        // Escape closes only the menu, not the screen underneath.
+        // Escape closes only the menu, not the screen underneath, nor full screen.
         e.stopPropagation();
+        e.preventDefault();
         setOpen(false);
       } else if (!anchor.current?.contains(e.target as Node)) setOpen(false);
     };
