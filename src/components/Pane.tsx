@@ -337,6 +337,17 @@ export const Pane = forwardRef<PaneHandle, Props>(function Pane(props, ref) {
 
   /** The wheel turning pages: when it last moved, which way, and how far since the last page. */
   const turning = useRef({ last: -Infinity, direction: 0, travel: 0 });
+  // The listeners below are replaced whenever the viewer renders, which a zoom makes it do in the
+  // middle of a gesture, so what a gesture has gathered so far lives here.
+  const wheelGesture = useRef({
+    // One two-finger scroll, from the first event to the end of its momentum.
+    scroll: { dx: 0, turned: false, startedFit: true, quiet: 0 },
+    // A pinch reported as WebKit gesture events, scaled from the zoom it started at.
+    pinch: { on: false, base: 1, fromFit: false },
+    // Zooming out of a photo that fits, after a rest, leaves it: see `onZoomOut`.
+    out: { turned: 0, last: 0, rested: true },
+  });
+  useEffect(() => () => clearTimeout(wheelGesture.current.scroll.quiet), []);
 
   // Wheel and trackpad gestures need non-passive listeners.
   useEffect(() => {
@@ -346,11 +357,7 @@ export const Pane = forwardRef<PaneHandle, Props>(function Pane(props, ref) {
       const r = el.getBoundingClientRect();
       return [e.clientX - r.left, e.clientY - r.top];
     };
-    // One two-finger scroll, from the first event to the end of its momentum.
-    const scroll = { dx: 0, turned: false, startedFit: true, quiet: 0 };
-    let pinching = false;
-    // Zooming out of a photo that fits, after a rest, leaves it: see `onZoomOut`.
-    const out = { turned: 0, last: 0, rested: true };
+    const { scroll, pinch, out } = wheelGesture.current;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       stopGlide();
@@ -359,7 +366,7 @@ export const Pane = forwardRef<PaneHandle, Props>(function Pane(props, ref) {
       if (e.ctrlKey || e.metaKey) {
         if (e.timeStamp - out.last > ZOOM_REST_MS) out.rested = true;
         out.last = e.timeStamp;
-        if (!pinching && fit && e.deltaY > 0 && onZoomOut.current) {
+        if (!pinch.on && fit && e.deltaY > 0 && onZoomOut.current) {
           if (!out.rested) return;
           out.turned += Math.min(30, e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 120 : 1));
           if (out.turned > ZOOM_PAST) {
@@ -372,7 +379,7 @@ export const Pane = forwardRef<PaneHandle, Props>(function Pane(props, ref) {
         out.turned = 0;
         out.rested = false;
         // A trackpad pinch arrives here in Chromium, and as gesture events in WebKit; never as both.
-        if (!pinching) zoomAt(x, y, v.scale * Math.exp(-e.deltaY * 0.012));
+        if (!pinch.on) zoomAt(x, y, v.scale * Math.exp(-e.deltaY * 0.012));
         return;
       }
       if (props.wheel === "zoom") return zoomAt(x, y, v.scale * Math.exp(-e.deltaY * 0.0022));
@@ -409,35 +416,30 @@ export const Pane = forwardRef<PaneHandle, Props>(function Pane(props, ref) {
       }
     };
     // Safari/WKWebView report trackpad pinches as gesture events.
-    let base = 1;
-    let fromFit = false;
     const onGestureStart = (e: Event) => {
       e.preventDefault();
       stopGlide();
-      pinching = true;
-      base = live.current.view.scale;
-      fromFit = live.current.fitMode;
+      Object.assign(pinch, { on: true, base: live.current.view.scale, fromFit: live.current.fitMode });
     };
     const onGestureChange = (e: Event) => {
       e.preventDefault();
       const g = e as unknown as { scale: number; clientX: number; clientY: number };
-      if (fromFit && g.scale < 0.75 && onZoomOut.current) {
-        fromFit = false;
+      if (pinch.fromFit && g.scale < 0.75 && onZoomOut.current) {
+        pinch.fromFit = false;
         return onZoomOut.current();
       }
       const [x, y] = local(g);
-      zoomAt(x, y, base * g.scale);
+      zoomAt(x, y, pinch.base * g.scale);
     };
     const onGestureEnd = (e: Event) => {
       e.preventDefault();
-      pinching = false;
+      pinch.on = false;
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     el.addEventListener("gesturestart", onGestureStart);
     el.addEventListener("gesturechange", onGestureChange);
     el.addEventListener("gestureend", onGestureEnd);
     return () => {
-      clearTimeout(scroll.quiet);
       el.removeEventListener("wheel", onWheel);
       el.removeEventListener("gesturestart", onGestureStart);
       el.removeEventListener("gesturechange", onGestureChange);
