@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
 use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 const SONY_RATING: u16 = 0x2002;
 /// A JPEG marker segment holds at most 65533 payload bytes.
@@ -143,9 +144,9 @@ fn write_sidecar(path: &Path, rating: u8, create: bool) -> Result<bool> {
     Ok(true)
 }
 
-fn write_jpeg(path: &Path, src: &Src, info: &jpeg::JpegInfo, rating: u8) -> Result<()> {
-    if let Some((pos, len)) = info.xmp {
-        let old = src.read(pos, len).ok_or(Error::Malformed)?;
+/// `xmp` is the file's XMP packet, where it is and what it says, read before the file was closed.
+fn write_jpeg(path: &Path, info: &jpeg::JpegInfo, xmp: Option<(u64, usize, Vec<u8>)>, rating: u8) -> Result<()> {
+    if let Some((pos, len, old)) = xmp {
         match xmp::set_rating(&old, rating) {
             Some(Patch::Same(v)) => return Ok(overwrite(path, pos, &v)?),
             Some(Patch::Resized(v)) if v.len() + jpeg::XMP_HEADER.len() <= MAX_APP1_BODY => {
@@ -175,13 +176,35 @@ fn write_jpeg(path: &Path, src: &Src, info: &jpeg::JpegInfo, rating: u8) -> Resu
     Ok(())
 }
 
+/// How long to wait, one after the other, for a photo that something has open
+/// for a moment (decoding it, Explorer, a virus scanner) before giving up.
+const BUSY_WAITS: [u64; 5] = [50, 100, 200, 400, 800];
+
+/// The file is open elsewhere in a way that keeps it from being written or replaced.
+fn busy(e: &Error) -> bool {
+    let Error::Io(e) = e else { return false };
+    if cfg!(windows) {
+        // Access denied (what replacing an open file gives), sharing and lock violations.
+        matches!(e.raw_os_error(), Some(5 | 32 | 33))
+    } else {
+        e.kind() == std::io::ErrorKind::ResourceBusy
+    }
+}
+
 /// Writes a 0..=5 rating for `path`, keeping the file's modification time.
 pub fn write(path: &Path, rating: u8) -> Result<Stored> {
     if rating > 5 {
         return Err(Error::Unsupported("rating must be 0-5"));
     }
     let mtime = fs::metadata(path).map(|m| filetime::FileTime::from_last_modification_time(&m))?;
-    let stored = write_inner(path, rating);
+    let mut stored = write_inner(path, rating);
+    for wait in BUSY_WAITS {
+        if !stored.as_ref().is_err_and(busy) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(wait));
+        stored = write_inner(path, rating);
+    }
     let _ = filetime::set_file_mtime(path, mtime);
     if stored.is_ok() {
         // The rating is in the photo by now; a sidecar of Nikon's that cannot
@@ -195,8 +218,16 @@ fn write_inner(path: &Path, rating: u8) -> Result<Stored> {
     let src = Src::open(path)?;
     let p = container::parse(&src);
     if p.format == Format::Jpeg {
-        let info = p.jpeg.as_ref().ok_or(Error::Malformed)?;
-        write_jpeg(path, &src, info, rating)?;
+        let info = p.jpeg.clone().ok_or(Error::Malformed)?;
+        let xmp = match info.xmp {
+            Some((pos, len)) => Some((pos, len, src.read(pos, len).ok_or(Error::Malformed)?)),
+            None => None,
+        };
+        // Where Windows cannot rename over an open file (FAT, exFAT, network
+        // shares), our own handle would keep the file from being replaced.
+        drop(p);
+        drop(src);
+        write_jpeg(path, &info, xmp, rating)?;
         // Keep an existing sidecar in step so the two never disagree.
         write_sidecar(path, rating, false)?;
         return Ok(Stored::Embedded);
@@ -217,4 +248,52 @@ fn write_inner(path: &Path, rating: u8) -> Result<Stored> {
     }
     let sidecar = write_sidecar(path, rating, !embedded)?;
     Ok(if embedded || !sidecar { Stored::Embedded } else { Stored::Sidecar })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn jpeg_in(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("sift-{name}-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("photo.jpg");
+        let img = image::RgbImage::from_pixel(64, 48, image::Rgb([120, 90, 60]));
+        fs::write(&path, crate::preview::encode_jpeg(&img, 90).unwrap()).unwrap();
+        path
+    }
+
+    fn rating_of(path: &Path) -> u8 {
+        let src = Src::open(path).unwrap();
+        read(&src, &container::parse(&src), path)
+    }
+
+    #[test]
+    fn a_jpeg_being_read_takes_a_rating() {
+        let path = jpeg_in("rating-read");
+        let reader = fs::File::open(&path).unwrap();
+        // No XMP yet: the file is written anew.
+        assert_eq!(write(&path, 3).unwrap(), Stored::Embedded);
+        drop(reader);
+        assert_eq!(rating_of(&path), 3);
+        let _ = fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_jpeg_held_for_a_moment_takes_a_rating_once_let_go() {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_SHARE_READ: u32 = 1;
+        let path = jpeg_in("rating-held");
+        // Open as a program that lets nobody replace the file would have it.
+        let held = OpenOptions::new().read(true).share_mode(FILE_SHARE_READ).open(&path).unwrap();
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            drop(held);
+        });
+        assert_eq!(write(&path, 4).unwrap(), Stored::Embedded);
+        release.join().unwrap();
+        assert_eq!(rating_of(&path), 4);
+        let _ = fs::remove_dir_all(path.parent().unwrap());
+    }
 }

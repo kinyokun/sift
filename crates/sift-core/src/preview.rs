@@ -191,21 +191,39 @@ pub fn fit(img: RgbImage, edge: u32) -> RgbImage {
 /// smallest embedded preview that is large enough. Camera JPEGs carry
 /// screen-size previews too (MPF), so a thumbnail never needs the full image.
 pub fn pixels(path: &Path, edge: u32) -> Result<RgbImage> {
-    let src = Src::open(path)?;
-    let p = container::parse(&src);
-    let crop = p.recorded_crop();
-    // Cut down to the recorded picture, a preview has a shorter long edge than it had.
-    let need = crop.map_or(edge, |c| (edge as f64 / c.kept()).ceil().min(u32::MAX as f64) as u32);
-    let (img, orientation) = match p.preview_for(need) {
-        // The JPEG a camera puts in a HEIF is a small one: good for the sizes it covers only.
-        Some(j) if p.format == Format::Heif && j.width.max(j.height) < edge => return crate::heif::decode(path, edge),
-        None if p.format == Format::Heif => return crate::heif::decode(path, edge),
-        Some(j) => {
-            let data = src.read(j.offset, j.len as usize).ok_or(Error::Malformed)?;
-            (recorded(decode_embedded(&data, need, exif::adobe_rgb(&p))?, crop), exif::orientation(&p))
+    enum Found {
+        Heif,
+        Jpeg { data: Vec<u8>, need: u32, crop: Option<RecordedCrop>, adobe_rgb: bool, orientation: u8 },
+        Other,
+    }
+    // The file is closed before anything is decoded: Windows does not replace
+    // a file that is open (on FAT, exFAT and network shares not even one opened
+    // to allow it), and rating a JPEG may have to while its eyes are looked for.
+    let found = {
+        let src = Src::open(path)?;
+        let p = container::parse(&src);
+        let crop = p.recorded_crop();
+        // Cut down to the recorded picture, a preview has a shorter long edge than it had.
+        let need = crop.map_or(edge, |c| (edge as f64 / c.kept()).ceil().min(u32::MAX as f64) as u32);
+        match p.preview_for(need) {
+            // The JPEG a camera puts in a HEIF is a small one: good for the sizes it covers only.
+            Some(j) if p.format == Format::Heif && j.width.max(j.height) < edge => Found::Heif,
+            None if p.format == Format::Heif => Found::Heif,
+            Some(j) => Found::Jpeg {
+                data: src.read(j.offset, j.len as usize).ok_or(Error::Malformed)?,
+                need,
+                crop,
+                adobe_rgb: exif::adobe_rgb(&p),
+                orientation: exif::orientation(&p),
+            },
+            None if !formats::is_raw(path) => Found::Other,
+            None => return Err(Error::NoPreview),
         }
-        None if !formats::is_raw(path) => (open(path)?, 1),
-        None => return Err(Error::NoPreview),
+    };
+    let (img, orientation) = match found {
+        Found::Heif => return crate::heif::decode(path, edge),
+        Found::Jpeg { data, need, crop, adobe_rgb, orientation } => (recorded(decode_embedded(&data, need, adobe_rgb)?, crop), orientation),
+        Found::Other => (open(path)?, 1),
     };
     Ok(orient(fit(img, edge), orientation))
 }
