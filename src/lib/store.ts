@@ -487,6 +487,9 @@ let nextWatch = 0;
 let watching = false;
 /** Refreshes run one after the other: the second finds what the first has already picked up. */
 let refreshing: Promise<void> = Promise.resolve();
+/** Stars are written one after the other, in the order they were given, so the files keep the last.
+ * A write can take a moment: it waits for a file that is open elsewhere. */
+let ratingWrites: Promise<unknown> = Promise.resolve();
 /** A file changed this recently may not be whole yet. A share's clock can run ahead, hence both ways. */
 const unsettled = (items: Item[]) => items.some((it) => Math.abs(Date.now() - it.mtime) < UNSETTLED_MS);
 
@@ -1007,21 +1010,32 @@ export const useStore = create<State>((set, get) => {
       save();
     },
 
-    rate: async (ids, rating) => {
+    rate: async (ids, stars) => {
       const { items, ratings } = get();
       const previous = { ...ratings };
       const next = { ...ratings };
-      ids.forEach((id) => (next[id] = rating));
+      ids.forEach((id) => (next[id] = stars));
       set({ ratings: next });
-      try {
+      const write = ratingWrites.then(async () => {
         let sidecar = false;
         for (const id of ids) {
           const item = items.find((it) => it.id === id);
-          if (item && (await api.setRating(item.paths, rating)) === "sidecar") sidecar = true;
+          if (item && (await api.setRating(item.paths, stars)) === "sidecar") sidecar = true;
         }
-        if (sidecar && rating > 0) get().notify("sidecar");
+        return sidecar;
+      });
+      ratingWrites = write.catch(() => {});
+      try {
+        if ((await write) && stars > 0) get().notify("sidecar");
       } catch (e) {
-        set({ ratings: previous });
+        // Stars given since then stay.
+        const now = { ...get().ratings };
+        for (const id of ids) {
+          if (now[id] !== stars) continue;
+          if (previous[id] === undefined) delete now[id];
+          else now[id] = previous[id];
+        }
+        set({ ratings: now });
         get().notify(`ratingFailed:${e}`);
       }
     },
