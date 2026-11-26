@@ -20,7 +20,7 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 jpeg-decoder = "0.3"
 filetime = "0.2"
 ab_glyph = { version = "0.2", features = ["variable-fonts"] }
-tract-onnx = { version = "=0.23.9", optional = true }
+tract-onnx = { version = "=0.23.10", optional = true }
 rawler = { version = "0.8", optional = true }
 heic-decoder = { version = "=0.1.1", optional = true }
 
@@ -43,7 +43,7 @@ still265 = "=0.6.1"
 # The system's trash (`remove.rs`). Phones have none, and on Linux, where
 # nothing is shipped, photos are only ever deleted for good.
 [target.'cfg(any(target_os = "macos", windows))'.dependencies]
-trash = { version = "=5.3.0", default-features = false, features = ["coinit_apartmentthreaded"] }
+trash = { version = "=5.4.0", default-features = false, features = ["coinit_apartmentthreaded"] }
 
 # Media Foundation, the system's H.264 encoder (`live/mf.rs`).
 [target.'cfg(windows)'.dependencies]
